@@ -434,3 +434,19 @@ Completion criteria:
 - 平台域不再反向硬依赖公告域
 - v1 运行拓扑表述不再互相冲突
 - `M901` 与模块 README 已明确“公告手动提取优先于 CVE 实现”
+
+### Phase 0 执行结果（2026-04-10）
+
+- `timeout 60s bash scripts/verify_phase0_spec_consistency.sh`：通过
+- `AETHERFLOW_PHASE0_PG_CONTAINER=aetherflow-phase0-pg-alt AETHERFLOW_PHASE0_PG_PORT=55433 timeout 60s bash scripts/verify_sql_init_order.sh`：通过
+
+说明：
+
+- 开发用 `infra-postgres-1` 常驻占用 `55432`，最终 SQL 顺序验证改用独立容器
+  和 `55433` 端口，避免与开发库冲突。
+- 验证结果表明 `platform_core -> cve -> announcement -> indexes` 的初始化顺序
+  可以在干净 PostgreSQL 上执行成功。
+
+结论：
+
+- Phase 0 的 schema 分层、运行拓扑和实现顺序口径已按计划收口。

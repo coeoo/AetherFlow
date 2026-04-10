@@ -821,3 +821,19 @@ Completion criteria:
 - `worker` 和 `scheduler` entrypoint 可被调用
 - 前端路由壳可渲染 `/`、`/cve`、`/cve/runs/:runId`、`/announcements`、`/announcements?tab=monitoring`、`/announcements/sources`、`/announcements/runs/:runId`、`/deliveries`、`/system/tasks`、`/system/health`
 - 仓库级 `make phase1-verify` 可在 60 秒门限内完成
+
+### Phase 1 执行结果（2026-04-10）
+
+- `timeout 60s make phase1-verify`：通过
+- `timeout 60s bash -lc './.venv/bin/python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 18080 >/tmp/aetherflow_uvicorn.log 2>&1 & ... ; curl -sS http://127.0.0.1:18080/api/v1/platform/health'`：返回 `{"status":"ok"}`
+
+结果摘要：
+
+- 后端测试：`8 passed`
+- 前端测试：`14 passed`
+- 前端构建：Vite build 通过
+
+结论：
+
+- Phase 1 的工程骨架、统一验证入口和最小运行入口已按计划落地。
+- 当前通过的是“平台工程骨架验收”，不是 CVE 或安全公告业务链路已经完成。
