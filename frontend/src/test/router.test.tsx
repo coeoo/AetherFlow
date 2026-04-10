@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 
 import { routes } from "../app/router";
@@ -52,4 +53,17 @@ test("reuses the monitoring placeholder content for /announcements?tab=monitorin
 
   expect(await screen.findByText("批次列表")).toBeInTheDocument();
   expect(screen.getByText("当前工作台正在复用监控批次占位模块，后续可平滑拆分为独立监控页。")).toBeInTheDocument();
+});
+
+test("exposes a real #delivery anchor in announcement run detail", async () => {
+  renderPath("/announcements/runs/run-002");
+
+  expect(await screen.findByRole("heading", { name: "安全公告情报包详情" })).toBeInTheDocument();
+  expect(document.getElementById("delivery")).not.toBeNull();
+});
+
+test("loads the Manrope font from the application entry", () => {
+  const mainEntry = readFileSync(`${process.cwd()}/src/main.tsx`, "utf-8");
+
+  expect(mainEntry).toContain("@fontsource/manrope");
 });

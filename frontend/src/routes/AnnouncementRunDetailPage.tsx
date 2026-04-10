@@ -27,6 +27,7 @@ export function AnnouncementRunDetailPage() {
           body: "页面将保持“摘要先行”，优先展示风险级别、置信度和受影响对象，而不是原始材料全文。",
         },
         {
+          id: "delivery",
           title: "投递区块",
           body: "当前占位已为 #delivery 区域预留结构位置，后续接入推荐发送、目标摘要和最近记录。",
         },

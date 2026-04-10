@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { AppShell } from "./AppShell";
 
 type PlaceholderSection = {
+  id?: string;
   title: string;
   body: string;
 };
@@ -34,7 +35,7 @@ export function PlaceholderPage({
         </article>
 
         {sections.map((section) => (
-          <article key={section.title} className="summary-card">
+          <article key={section.title} id={section.id} className="summary-card">
             <h2>{section.title}</h2>
             <p className="card-copy">{section.body}</p>
           </article>
