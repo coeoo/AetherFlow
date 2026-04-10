@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS artifacts (
 CREATE TABLE IF NOT EXISTS source_fetch_records (
     fetch_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     scene_name VARCHAR(32) NOT NULL,
-    source_id UUID REFERENCES announcement_sources(source_id) ON DELETE SET NULL,
+    -- 平台域只保留公告源 ID 的弱引用，避免 platform_core 初始化反向依赖公告域。
+    source_id UUID,
     source_type VARCHAR(64) NOT NULL,
     source_ref VARCHAR(256),
     status VARCHAR(32) NOT NULL,
