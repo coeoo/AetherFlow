@@ -1,7 +1,7 @@
 import { Link, useSearchParams } from "react-router-dom";
 
 import { PlaceholderPage } from "../components/layout/PlaceholderPage";
-import { announcementMonitoringPlaceholder } from "./AnnouncementMonitorPage";
+import { announcementMonitoringPlaceholder } from "../features/announcements/monitoring-placeholder";
 
 export function AnnouncementWorkbenchPage() {
   const [searchParams] = useSearchParams();
