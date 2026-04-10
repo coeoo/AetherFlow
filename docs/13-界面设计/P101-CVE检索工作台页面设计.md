@@ -31,13 +31,13 @@
 
 ## 🧱 页面布局
 
-```text
-Topbar
-  -> Page Hero
-  -> Input Panel
-  -> Run Status Panel
-  -> Verdict Summary Panel
-  -> Recent Progress Panel
+```mermaid
+flowchart TD
+    A["Topbar 导航"] --> B["🎯 Page Hero\n输入 CVE，直接看补丁结论"]
+    B --> C["⌨️ Input Panel\nCVE 编号输入 + 开始检索"]
+    C --> D["📡 Run Status\n状态胶囊 / 当前阶段 / 耗时"]
+    D --> E["📊 Verdict Summary\n是否找到补丁 / 证据 / 查看详情"]
+    E --> F["📃 Recent Progress\n最近 1~3 条进展"]
 ```
 
 ### 区块1：Page Hero
@@ -82,6 +82,19 @@ Topbar
 ---
 
 ## 🎭 状态稿
+
+```mermaid
+stateDiagram-v2
+    [*] --> 默认态
+    默认态 --> 校验失败 : 输入非法格式
+    默认态 --> 创建中 : 提交检索
+    校验失败 --> 默认态 : 修正输入
+    创建中 --> 运行中 : 任务已创建
+    运行中 --> 成功终态 : 检索完成
+    运行中 --> 失败终态 : 检索失败
+    成功终态 --> 默认态 : 新检索
+    失败终态 --> 默认态 : 重新提交
+```
 
 ### 默认态
 

@@ -37,14 +37,24 @@
 ## 🔄 业务流程
 
 ### 主流程
-```text
-CVE ID
-  -> resolve_seeds
-  -> plan_frontier
-  -> fetch_page
-  -> analyze_page
-  -> download_patches
-  -> finalize_run
+
+```mermaid
+flowchart TD
+    A["输入 CVE ID"] --> B["resolve_seeds\n多源查询 NVD/OSV/CVE.org"]
+    B --> C{"有 seed references？"}
+    C -->|否| D["终止\nstop_reason = no_seed_references"]
+    C -->|是| E["plan_frontier\n规划下一跳页面"]
+    E --> F["fetch_page\nHTTP / Playwright 抓取"]
+    F --> G{"抓取成功？"}
+    G -->|否| H["记录 trace\n根据策略继续或终止"]
+    G -->|是| I["analyze_page\n规则匹配 patch/diff/commit"]
+    I --> J{"命中 patch 候选？"}
+    J -->|是| K["download_patches\n下载并生成 Artifact"]
+    J -->|否| L{"LLM 兜底？"}
+    L -->|是| M["LLM 从候选中选择\n不编造新 URL"]
+    L -->|否| E
+    M --> K
+    K --> N["finalize_run\n生成 fix_family + stop_reason"]
 ```
 
 ---

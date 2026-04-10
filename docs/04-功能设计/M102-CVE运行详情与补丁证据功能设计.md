@@ -51,13 +51,19 @@
 ## 🔄 业务流程
 
 ### 主流程
-```text
-进入 run 详情
-  -> 读取 run 完整数据
-  -> 展示结论卡片
-  -> 展示 fix family / patch 列表
-  -> 展示 trace 时间线
-  -> 按需加载 diff 内容
+
+```mermaid
+flowchart TD
+    A["进入 /cve/runs/run_id"] --> B["加载 run 完整数据"]
+    B --> C{"run 存在？"}
+    C -->|否| D["展示空态\n允许返回"]
+    C -->|是| E["展示结论卡片\nstop_reason / 主判据"]
+    E --> F["展示 Fix Family\n主家族标识"]
+    F --> G["展示 Patch 列表\n下载状态"]
+    G --> H["展示 Trace 时间线\n页面探索过程"]
+    H --> I{"用户点击查看 diff？"}
+    I -->|是| J["按需加载 diff 内容"]
+    I -->|否| K["保持当前视图"]
 ```
 
 ---

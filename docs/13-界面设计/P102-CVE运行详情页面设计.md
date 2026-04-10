@@ -34,14 +34,14 @@
 
 ## 🧱 页面布局
 
-```text
-Topbar
-  -> Verdict Hero
-  -> Primary Patch Summary
-  -> Fix Family List
-  -> Patch List
-  -> Trace Timeline
-  -> Diff Viewer
+```mermaid
+flowchart TD
+    A["Topbar 导航"] --> B["🏆 Verdict Hero\n主结论 / 可信原因 / 下一步"]
+    B --> C["📦 Primary Patch Summary\n推荐补丁 / 下载状态"]
+    C --> D["📑 Fix Family List\n家族归并 / 主 family 标识"]
+    D --> E["📋 Patch List\n候选补丁 / 来源 / 类型"]
+    E --> F["⏱️ Trace Timeline\n页面探索过程"]
+    F --> G["📄 Diff Viewer\n按需加载大文本"]
 ```
 
 ### 区块1：Verdict Hero
@@ -92,6 +92,18 @@ Topbar
 ---
 
 ## 🎭 状态稿
+
+```mermaid
+stateDiagram-v2
+    [*] --> 加载态
+    加载态 --> 成功态 : 数据完整
+    加载态 --> 空结果态 : 未找到补丁
+    加载态 --> 失败态 : run 不存在
+    成功态 --> diff加载中 : 点击查看 diff
+    diff加载中 --> diff就绪 : 内容返回
+    diff加载中 --> diff失败 : 加载异常
+    成功态 --> 部分成功态 : patch 有元数据无内容
+```
 
 ### 加载态
 

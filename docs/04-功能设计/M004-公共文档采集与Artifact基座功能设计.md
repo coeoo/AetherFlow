@@ -53,12 +53,21 @@
 ## 🔄 业务流程
 
 ### 主流程
-```text
-输入 URL/文本/附件
-  -> 抓取或归一化
-  -> 生成 Artifact
-  -> 写入 artifacts 与 source_fetch_records
-  -> 返回 Artifact 引用
+
+```mermaid
+flowchart TD
+    A["场景提交\nURL / 正文 / 附件"] --> B{"输入类型？"}
+    B -->|URL| C["HTTP / Playwright 抓取"]
+    B -->|正文| D["文本归一化"]
+    B -->|附件| E["文件保存"]
+    C --> F{"抓取成功？"}
+    F -->|是| G["提取正文 & 元数据"]
+    F -->|否| H["写入 source_fetch_records\nstatus=failed"]
+    G --> I["生成 Artifact\n写入 artifacts 表"]
+    D --> I
+    E --> I
+    I --> J["写入 source_fetch_records\nstatus=succeeded"]
+    J --> K["返回 artifact_id\n给场景引用"]
 ```
 
 ---
