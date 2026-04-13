@@ -1,3 +1,4 @@
+from app.models.cve import CVERun, CVEPatchArtifact
 from app.models.platform import (
     Artifact,
     DeliveryRecord,
@@ -9,6 +10,8 @@ from app.models.platform import (
 
 __all__ = [
     "Artifact",
+    "CVERun",
+    "CVEPatchArtifact",
     "DeliveryRecord",
     "DeliveryTarget",
     "SourceFetchRecord",

@@ -51,6 +51,8 @@ def test_alembic_upgrade_head(test_database_url: str) -> None:
         "delivery_records",
         "artifacts",
         "source_fetch_records",
+        "cve_runs",
+        "cve_patch_artifacts",
     }.issubset(table_names)
 
 
