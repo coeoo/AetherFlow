@@ -10,24 +10,24 @@
 **模块编号**：M103  
 **优先级**：P0  
 **负责人**：AI + 开发团队  
-**状态**：设计中
+**状态**：第一轮已落地，待继续演进
 
 ---
 
 ## 🎯 功能目标
 
 ### 业务目标
-定义 CVE 场景的真实后端主链：多源查询、frontier 规划、页面抓取、规则匹配、patch 下载与 stop reason 生成。
+定义 CVE 场景的真实后端主链：seed 解析、frontier 规划、页面抓取、规则匹配、patch 下载与 stop reason 生成。
 
 ### 用户价值
-- 用户看到的补丁结果不是“黑盒猜出来的”，而是沿多源和可信页面推导出来的。
+- 用户看到的补丁结果不是“黑盒猜出来的”，而是沿当前可信数据源和页面规则推导出来的。
 
 ---
 
 ## 👥 使用场景
 
 ### 场景1：标准 CVE 补丁查询
-**场景描述**：针对常规 CVE，在多个数据源中查找参考并沿页面继续探索。
+**场景描述**：针对常规 CVE，从当前支持的数据源获取参考并沿页面继续探索。
 
 ### 场景2：复杂 vendor 页面链路
 **场景描述**：需要经过 Debian tracker、GitHub/GitLab commit、Bugzilla 附件等路径才能拿到 patch。
@@ -40,21 +40,18 @@
 
 ```mermaid
 flowchart TD
-    A["输入 CVE ID"] --> B["resolve_seeds\n多源查询 NVD/OSV/CVE.org"]
+    A["输入 CVE ID"] --> B["resolve_seeds\n当前为 NVD references"]
     B --> C{"有 seed references？"}
     C -->|否| D["终止\nstop_reason = no_seed_references"]
     C -->|是| E["plan_frontier\n规划下一跳页面"]
     E --> F["fetch_page\nHTTP / Playwright 抓取"]
     F --> G{"抓取成功？"}
-    G -->|否| H["记录 trace\n根据策略继续或终止"]
+    G -->|否| H["记录失败信息\n当前直接终止"]
     G -->|是| I["analyze_page\n规则匹配 patch/diff/commit"]
-    I --> J{"命中 patch 候选？"}
+    I --> J{"命中显式 patch 候选？"}
     J -->|是| K["download_patches\n下载并生成 Artifact"]
-    J -->|否| L{"LLM 兜底？"}
-    L -->|是| M["LLM 从候选中选择\n不编造新 URL"]
-    L -->|否| E
-    M --> K
-    K --> N["finalize_run\n生成 fix_family + stop_reason"]
+    J -->|否| E
+    K --> N["finalize_run\n生成 stop_reason 与 summary"]
 ```
 
 ---
@@ -63,11 +60,14 @@ flowchart TD
 
 | 功能点 | 功能描述 | 优先级 | 状态 |
 |--------|---------|--------|------|
-| 多源查询 | 聚合 NVD/OSV/CVE.org/GitHub Advisory | P0 | ⚪ 未开始 |
-| Frontier 规划 | 基于 references 和历史访问结果生成下一跳 | P0 | ⚪ 未开始 |
-| 规则匹配 | 命中 patch/diff/debdiff/commit/attachment | P0 | ⚪ 未开始 |
-| 受限 LLM 兜底 | 在规则不足时从候选中做有限选择 | P1 | ⚪ 未开始 |
-| 下载与收敛 | 下载 patch 并生成最终结果 | P0 | ⚪ 未开始 |
+| Seed 解析 | 当前从 NVD `references` 提取 seed | P0 | ✅ 已完成 |
+| Frontier 规划 | 当前最小一跳规划，不含去重/深度治理 | P0 | ✅ 已完成 |
+| 规则匹配 | 当前命中 `.patch` / `.diff` / `patch=` / GitHub commit | P0 | ✅ 已完成 |
+| 内容下载与校验 | 下载 patch 并校验不是 HTML 页面 | P0 | ✅ 已完成 |
+| 平台状态对齐 | run 与 job/attempt 终态对齐 | P0 | ✅ 已完成 |
+| 多源聚合 | 扩展到 OSV/CVE.org/GitHub Advisory | P1 | ⚪ 未开始 |
+| Trace 落表与 frontier 治理 | 接入 `source_fetch_records`、做去重/限流 | P1 | ⚪ 下一步 |
+| 受限 LLM 兜底 | 在规则不足时从候选中做有限选择 | P2 | ⚪ 未开始 |
 
 ---
 
@@ -82,10 +82,15 @@ flowchart TD
 
 ### 涉及的数据表
 - `cve_runs`
-- `cve_fix_families`
 - `cve_patch_artifacts`
 - `artifacts`
 - `source_fetch_records`
+
+说明：
+
+- 当前第一轮真实实现已使用 `cve_runs`、`cve_patch_artifacts`、`artifacts`
+- `source_fetch_records` 已存在平台表，但当前尚未接入 CVE 主链
+- `cve_fix_families` 不属于本轮已实现范围
 
 ### 核心数据字段
 
@@ -97,6 +102,11 @@ flowchart TD
 | selection_reason | string | 是 | 为什么选择该页 |
 | matched_rule_ids | array | 否 | 命中的规则 |
 | stop_reason | string | 否 | 当前步停止原因 |
+
+说明：
+
+- 上述结构仍是下一阶段 trace 落表的目标形态
+- 当前 API 只返回 `run` 最小摘要，不返回完整 trace
 
 ---
 
@@ -117,16 +127,22 @@ flowchart TD
 ## ✅ 业务规则
 
 ### 规则1：规则优先于 LLM
-**规则描述**：能用显式规则命中 patch 时，不走 LLM。
+**规则描述**：能用显式规则命中 patch 时，不走 LLM；当前第一轮尚未接入 LLM。
 
 ### 规则2：LLM 只能做候选选择，不能编造新 URL
-**规则描述**：LLM 输入为有限候选和页面片段，输出必须是候选子集。
+**规则描述**：作为后续扩展保留；当前第一轮未实现。
 
 ### 规则3：停止原因必须明确
 **规则描述**：无论成功还是失败，都必须留下 `stop_reason`。
 
 ### 规则4：agent 模式下命中的 patch 全部下载
 **规则描述**：一旦进入候选列表，不再对已命中的 patch 做数量截断。
+
+### 规则5：普通 HTML 页面不能伪装成 patch 成功
+**规则描述**：下载器必须校验响应内容不是 HTML 页面，且正文看起来像真实 patch/diff。
+
+### 规则6：平台任务状态必须与场景 run 终态对齐
+**规则描述**：`cve_run = failed` 时，`task_job` / `task_attempt` 也必须收口为失败。
 
 ---
 
@@ -147,8 +163,19 @@ flowchart TD
 **错误提示**：在详情页体现为该步抓取失败
 
 **处理方案**：
-- 写入 trace
-- 根据策略继续或终止
+- 当前第一轮直接终止
+- `stop_reason = fetch_failed`
+- 错误信息进入 `summary.error`
+
+### 异常3：阶段执行异常
+**触发条件**：`resolve_seeds`、`analyze_page`、`download_patches` 等阶段抛出异常
+
+**错误提示**：在运行摘要中能看到明确 `stop_reason` 与 `summary.error`
+
+**处理方案**：
+- `cve_run` 必须收口为 `failed/finalize_run`
+- 不能停留在 `running`
+- Worker 必须同步把平台 `task_job` / `task_attempt` 标记为失败
 
 ---
 
@@ -165,12 +192,13 @@ flowchart TD
 ## 📝 开发要点
 
 ### 技术难点
-1. 多源聚合和页面探索之间要共享一套可解释状态。
-2. 需要在规则优先和探索深度之间找到稳定平衡。
+1. 需要在“显式规则命中率”和“误把普通页面当 patch”的风险之间做收紧。
+2. 后续多源与 frontier 演进前，必须先补齐 trace 与去重能力。
 
 ### 性能要求
 - 单次 run 必须有整体超时和页面抓取超时
 - 同一 run 内要限制 frontier 深度和动态抓取次数
+- API 不应为每个请求重复创建新的数据库 Engine / 连接池
 
 ### 注意事项
 - 不把主链塞回旧 pipeline/stages 目录
@@ -181,13 +209,18 @@ flowchart TD
 ## 🧪 测试要点
 
 ### 功能测试
-- [ ] 多源查询可返回初始 references
-- [ ] 规则可命中 patch URL
-- [ ] 下载后能生成 patch Artifact
+- [x] 当前 NVD seed 查询可返回初始 references
+- [x] 规则可命中显式 patch URL 与 GitHub commit URL
+- [x] 下载后能生成 patch Artifact
+- [x] 普通 HTML commit 页面会被拒绝
+- [x] 运行失败时平台任务状态与场景 run 状态对齐
 
 ### 边界测试
-- [ ] LLM 失败时不导致主链崩溃
-- [ ] 无 reference 时 stop reason 正确
+- [x] 无 reference 时 stop reason 正确
+- [x] `resolve_seeds` / `analyze_page` 异常时 run 不会卡在 running
+- [ ] Trace 落表与 frontier 去重（下一步）
+- [ ] 多源 seed 聚合（后续）
+- [ ] LLM 兜底（后续）
 
 ---
 
@@ -196,9 +229,10 @@ flowchart TD
 | 阶段 | 任务 | 预计工时 | 负责人 | 状态 |
 |------|------|---------|--------|------|
 | 设计 | 完成主链规则设计 | 0.5天 | AI | ✅ |
-| 开发 | 数据源适配与 run 状态机 | 2天 | - | ⚪ |
-| 开发 | 规则匹配与 patch 下载 | 2天 | - | ⚪ |
-| 测试 | 真实样例与异常路径 | 1.5天 | - | ⚪ |
+| 开发 | 第一轮 NVD seed + run 状态机 | 2天 | AI | ✅ |
+| 开发 | 第一轮规则匹配与 patch 下载校验 | 2天 | AI | ✅ |
+| 测试 | 异常路径与状态对齐补强 | 1.5天 | AI | ✅ |
+| 下一步 | Trace 落表与 frontier 去重 | 1天 | - | ⚪ |
 
 ---
 
@@ -212,12 +246,17 @@ flowchart TD
 
 ## 🔄 变更记录
 
+### v1.1 - 2026-04-13
+- 根据第一轮真实实现更新功能边界
+- 明确当前仅支持 NVD seed、显式 patch 规则和 GitHub commit 转 patch
+- 补充状态对齐、HTML 伪阳性防护和数据库连接复用约束
+
 ### v1.0 - 2026-04-09
-- 初始化 CVE 多源与页面探索设计
+- 初始化 CVE 数据源与页面探索设计
 
 ---
 
-**文档版本**：v1.0  
+**文档版本**：v1.1  
 **创建日期**：2026-04-09  
-**最后更新**：2026-04-09  
+**最后更新**：2026-04-13  
 **维护人**：AI + 开发团队

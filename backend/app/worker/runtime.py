@@ -9,6 +9,22 @@ from app.platform.task_runtime import claim_next_job
 from app.platform.task_runtime import finish_attempt_failure, finish_attempt_success
 
 
+def _finish_cve_attempt_from_run(session: Session, *, attempt, run: CVERun) -> None:
+    if run.status == "succeeded":
+        finish_attempt_success(session, attempt=attempt)
+        return
+
+    if run.status == "failed":
+        finish_attempt_failure(
+            session,
+            attempt=attempt,
+            error_message=f"场景运行失败: {run.stop_reason or 'unknown'}",
+        )
+        return
+
+    raise RuntimeError(f"CVE run 未收口: status={run.status}, phase={run.phase}")
+
+
 def process_once(session_factory: sessionmaker[Session], *, worker_name: str) -> bool:
     with session_factory() as session:
         attempt = claim_next_job(session, scene_name="cve", worker_name=worker_name)
@@ -22,7 +38,10 @@ def process_once(session_factory: sessionmaker[Session], *, worker_name: str) ->
                     select(CVERun.run_id).where(CVERun.job_id == job.job_id)
                 ).scalar_one()
                 execute_cve_run(session, run_id=run_id)
-                finish_attempt_success(session, attempt=attempt)
+                run = session.get(CVERun, run_id)
+                if run is None:
+                    raise RuntimeError(f"CVE run 不存在: {run_id}")
+                _finish_cve_attempt_from_run(session, attempt=attempt, run=run)
                 session.commit()
                 return True
 

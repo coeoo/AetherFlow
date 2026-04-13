@@ -5,11 +5,17 @@ from typing import Any
 
 
 _PATCH_CANDIDATE_PATTERNS = [
-    (re.compile(r"https?://[^\s\"'<>]+?\.patch\b", re.IGNORECASE), "patch"),
-    (re.compile(r"https?://[^\s\"'<>]+?\.diff\b", re.IGNORECASE), "diff"),
-    (re.compile(r"https?://[^\s\"'<>]+?patch=[^\s\"'<>]+", re.IGNORECASE), "patch"),
+    (re.compile(r"https?://[^\s\"'<>]+?\.diff\b[^\s\"'<>]*", re.IGNORECASE), "diff"),
+    (re.compile(r"https?://[^\s\"'<>]+?\.patch\b[^\s\"'<>]*", re.IGNORECASE), "patch"),
     (
-        re.compile(r"https?://[^\s\"'<>]+?(attachment|commit)[^\s\"'<>]*", re.IGNORECASE),
+        re.compile(r"https?://[^\s\"'<>]+?\?[^\s\"'<>]*patch=[^\s\"'<>]+", re.IGNORECASE),
+        "patch",
+    ),
+    (
+        re.compile(
+            r"https://github\.com/[^\s\"'<>]+/[^\s\"'<>]+/commit/[0-9a-f]{6,40}\b",
+            re.IGNORECASE,
+        ),
         "patch",
     ),
 ]

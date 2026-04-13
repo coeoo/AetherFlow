@@ -11,6 +11,15 @@ from app.cve.seed_resolver import resolve_seed_references
 from app.models import CVERun
 
 
+_EXCEPTION_STOP_REASONS = {
+    "resolve_seeds": "resolve_seeds_failed",
+    "plan_frontier": "plan_frontier_failed",
+    "fetch_page": "fetch_failed",
+    "analyze_page": "analyze_page_failed",
+    "download_patches": "download_patches_failed",
+}
+
+
 def plan_frontier(seed_references: list[str]) -> list[str]:
     return list(seed_references)
 
@@ -34,80 +43,83 @@ def _finalize_success(run: CVERun, *, stop_reason: str, summary: dict[str, objec
     run.summary_json = summary
 
 
+def _build_failure_summary(*, error: str | None = None) -> dict[str, object]:
+    summary: dict[str, object] = {
+        "patch_found": False,
+        "patch_count": 0,
+    }
+    if error:
+        summary["error"] = error
+    return summary
+
+
 def execute_cve_run(session: Session, *, run_id: UUID) -> None:
     run = session.get(CVERun, run_id)
     if run is None:
         raise ValueError(f"CVE run 不存在: {run_id}")
-
-    _update_phase(run, "resolve_seeds")
-    session.flush()
-    seed_references = resolve_seed_references(run.cve_id)
-    if not seed_references:
-        _finalize_failure(
-            run,
-            stop_reason="no_seed_references",
-            summary={"patch_found": False, "patch_count": 0},
-        )
-        session.flush()
-        return
-
-    _update_phase(run, "plan_frontier")
-    session.flush()
-    frontier = plan_frontier(seed_references)
-
-    _update_phase(run, "fetch_page")
-    session.flush()
-    snapshots = []
     try:
-        for url in frontier:
-            snapshots.append(fetch_page(url))
+        _update_phase(run, "resolve_seeds")
+        session.flush()
+        seed_references = resolve_seed_references(run.cve_id)
+        if not seed_references:
+            _finalize_failure(
+                run,
+                stop_reason="no_seed_references",
+                summary=_build_failure_summary(),
+            )
+            return
+
+        _update_phase(run, "plan_frontier")
+        session.flush()
+        frontier = plan_frontier(seed_references)
+
+        _update_phase(run, "fetch_page")
+        session.flush()
+        snapshots = [fetch_page(url) for url in frontier]
+
+        _update_phase(run, "analyze_page")
+        session.flush()
+        patch_candidates: list[dict[str, str]] = []
+        for snapshot in snapshots:
+            patch_candidates.extend(analyze_page(snapshot))
+
+        if not patch_candidates:
+            _finalize_failure(
+                run,
+                stop_reason="no_patch_candidates",
+                summary=_build_failure_summary(),
+            )
+            return
+
+        _update_phase(run, "download_patches")
+        session.flush()
+        patches = [
+            download_patch_candidate(session, run=run, candidate=candidate)
+            for candidate in patch_candidates
+        ]
+        downloaded = [patch for patch in patches if patch.download_status == "downloaded"]
+        if not downloaded:
+            _finalize_failure(
+                run,
+                stop_reason="patch_download_failed",
+                summary=_build_failure_summary(),
+            )
+            return
+
+        _finalize_success(
+            run,
+            stop_reason="patches_downloaded",
+            summary={
+                "patch_found": True,
+                "patch_count": len(downloaded),
+                "primary_patch_url": downloaded[0].candidate_url,
+            },
+        )
     except Exception as exc:
         _finalize_failure(
             run,
-            stop_reason="fetch_failed",
-            summary={"patch_found": False, "patch_count": 0, "error": str(exc)},
+            stop_reason=_EXCEPTION_STOP_REASONS.get(run.phase, "run_failed"),
+            summary=_build_failure_summary(error=str(exc)),
         )
+    finally:
         session.flush()
-        return
-
-    _update_phase(run, "analyze_page")
-    session.flush()
-    patch_candidates: list[dict[str, str]] = []
-    for snapshot in snapshots:
-        patch_candidates.extend(analyze_page(snapshot))
-
-    if not patch_candidates:
-        _finalize_failure(
-            run,
-            stop_reason="no_patch_candidates",
-            summary={"patch_found": False, "patch_count": 0},
-        )
-        session.flush()
-        return
-
-    _update_phase(run, "download_patches")
-    session.flush()
-    patches = [
-        download_patch_candidate(session, run=run, candidate=candidate)
-        for candidate in patch_candidates
-    ]
-    downloaded = [patch for patch in patches if patch.download_status == "downloaded"]
-    if not downloaded:
-        _finalize_failure(
-            run,
-            stop_reason="patch_download_failed",
-            summary={"patch_found": False, "patch_count": 0},
-        )
-        session.flush()
-        return
-
-    _finalize_success(
-        run,
-        stop_reason="patches_downloaded",
-        summary={
-            "patch_found": True,
-            "patch_count": len(downloaded),
-            "primary_patch_url": downloaded[0].candidate_url,
-        },
-    )
-    session.flush()
