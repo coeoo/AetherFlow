@@ -2,7 +2,7 @@ import httpx
 
 from app.cve.patch_downloader import download_patch_candidate
 from app.cve.service import create_cve_run
-from app.models import Artifact
+from app.models import Artifact, SourceFetchRecord
 
 
 def test_download_patch_candidate_rejects_html_commit_page(
@@ -36,6 +36,25 @@ def test_download_patch_candidate_rejects_html_commit_page(
     assert patch.artifact_id is None
     assert patch.patch_meta_json["error"] == "下载内容不是有效的 patch/diff"
     assert patch.patch_meta_json["content_type"] == "text/html; charset=utf-8"
+
+    records = db_session.query(SourceFetchRecord).all()
+    assert len(records) == 1
+    record = records[0]
+    assert record.scene_name == "cve"
+    assert record.source_id == run.run_id
+    assert record.source_type == "cve_patch_download"
+    assert record.source_ref == "https://github.com/example/repo/commit/abc123"
+    assert record.status == "failed"
+    assert record.request_snapshot_json["candidate_url"] == (
+        "https://github.com/example/repo/commit/abc123"
+    )
+    assert (
+        record.request_snapshot_json["download_url"]
+        == "https://github.com/example/repo/commit/abc123.patch"
+    )
+    assert record.request_snapshot_json["patch_type"] == "patch"
+    assert record.response_meta_json["content_type"] == "text/html; charset=utf-8"
+    assert "下载内容不是有效的 patch/diff" in record.error_message
 
 
 def test_download_patch_candidate_converts_github_commit_url_and_persists_artifact(
@@ -79,3 +98,19 @@ def test_download_patch_candidate_converts_github_commit_url_and_persists_artifa
     assert artifact.source_url == "https://github.com/example/repo/commit/abc123"
     assert artifact.metadata_json["download_url"] == requested_urls[0]
     assert artifact.metadata_json["run_id"] == str(run.run_id)
+
+    records = db_session.query(SourceFetchRecord).all()
+    assert len(records) == 1
+    record = records[0]
+    assert record.scene_name == "cve"
+    assert record.source_id == run.run_id
+    assert record.source_type == "cve_patch_download"
+    assert record.source_ref == "https://github.com/example/repo/commit/abc123"
+    assert record.status == "succeeded"
+    assert record.request_snapshot_json["candidate_url"] == (
+        "https://github.com/example/repo/commit/abc123"
+    )
+    assert record.request_snapshot_json["download_url"] == requested_urls[0]
+    assert record.request_snapshot_json["patch_type"] == "patch"
+    assert record.response_meta_json["status_code"] == 200
+    assert record.response_meta_json["content_type"] == "text/x-patch"

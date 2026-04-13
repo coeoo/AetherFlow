@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 
+import { AppProviders } from "../app/providers";
 import { routes } from "../app/router";
 
 function renderPath(path: string) {
@@ -13,12 +14,14 @@ function renderPath(path: string) {
   });
 
   render(
-    <RouterProvider
-      router={router}
-      future={{
-        v7_startTransition: true,
-      }}
-    />,
+    <AppProviders>
+      <RouterProvider
+        router={router}
+        future={{
+          v7_startTransition: true,
+        }}
+      />
+    </AppProviders>,
   );
 }
 

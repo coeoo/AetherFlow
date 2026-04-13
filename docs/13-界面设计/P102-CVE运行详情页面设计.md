@@ -6,7 +6,7 @@
 
 ## 🎯 页面目标
 
-`/cve/runs/{run_id}` 是 CVE 场景的证据页，负责把一次 graph run 的结论、证据链、fix family、patch 与 diff 组织为可复核页面。
+`/cve/runs/{run_id}` 是 CVE 场景的证据页，负责把一次 run 的结论、证据链、patch 与 diff 组织为可复核页面。
 
 它必须优先回答：
 
@@ -21,7 +21,6 @@
 ### 入口
 
 - `P101` 点击 `查看详情`
-- 首页最近任务跳转
 - 直接访问 `/cve/runs/{run_id}`
 
 ### 出口
@@ -36,12 +35,10 @@
 
 ```mermaid
 flowchart TD
-    A["Topbar 导航"] --> B["🏆 Verdict Hero\n主结论 / 可信原因 / 下一步"]
-    B --> C["📦 Primary Patch Summary\n推荐补丁 / 下载状态"]
-    C --> D["📑 Fix Family List\n家族归并 / 主 family 标识"]
-    D --> E["📋 Patch List\n候选补丁 / 来源 / 类型"]
-    E --> F["⏱️ Trace Timeline\n页面探索过程"]
-    F --> G["📄 Diff Viewer\n按需加载大文本"]
+    A["Topbar 导航"] --> B["🏆 Verdict Hero\n主结论 / stop reason / 下一步"]
+    B --> C["📄 Diff Viewer\n单栏按需加载大文本"]
+    C --> D["📋 Patch List\n候选补丁 / 下载状态 / 重复记录数"]
+    D --> E["⏱️ Trace Timeline\n页面探索过程"]
 ```
 
 ### 区块1：Verdict Hero
@@ -49,45 +46,33 @@ flowchart TD
 - 状态胶囊
 - CVE 编号
 - 主结论标题
-- 可信原因
+- stop reason
 - 下一步建议
-- 主动作：查看主补丁、查看证据页面、查看主补丁 diff
 
-### 区块2：主补丁摘要
+### 区块2：Diff Viewer
 
-- 推荐补丁
-- 下载状态
-- 证据入口
-- 影响产品
+- 单栏展示 diff
+- 新增/删除行分色
+- 只有用户点击查看时才加载
 
-### 区块3：Fix Family
+### 区块3：Patch 列表
 
-- 展示 family 列表与主 family 标识
-- 每个 family 显示归并原因、候选数、主要证据
+- 展示候选补丁、下载状态、类型和是否可查看内容
+- 若同一 URL 被重复发现或重复落表，则显示 `共 N 条记录`
 
-### 区块4：Patch 列表
-
-- 展示候选补丁、来源、下载状态、大小、类型
-- 可展开 patch 元信息
-
-### 区块5：Trace 时间线
+### 区块4：Trace 时间线
 
 - 以可读时间线展示页面探索过程
-- 每步包含来源、命中原因、下一跳关系
-
-### 区块6：Diff Viewer
-
-- 独立大文本阅读区
-- 只有用户点击查看时才加载
+- 每步包含来源、状态、URL 与错误信息
 
 ---
 
 ## 🖱️ 关键交互
 
 - 页面首屏默认显示 Verdict Hero，不需要滚动就能读到主结论。
-- `查看主补丁 diff` 是页内展开动作，不跳新页面。
-- Trace 支持逐步展开，但默认只展示摘要标题和命中原因。
-- Patch 列表与 Trace 时间线视觉上必须分层，避免信息混杂。
+- `查看 Diff` 是页内动作，不跳新页面。
+- Trace 默认展示步骤摘要，不展开原始 JSON。
+- Patch 列表与 Trace 时间线在右侧 rail 分层，Diff Viewer 占主列。
 
 ---
 
@@ -107,11 +92,11 @@ stateDiagram-v2
 
 ### 加载态
 
-- Hero、主补丁摘要、fix family、patch 区都显示骨架屏。
+- Hero、Patch、Trace、Diff Viewer 都显示骨架或占位。
 
 ### 成功态
 
-- 按主结论 -> 主补丁 -> 家族 -> patch -> trace 的顺序展示。
+- 按结论 -> Diff Viewer -> Patch -> Trace 的顺序展示。
 
 ### 空结果态
 
@@ -120,7 +105,7 @@ stateDiagram-v2
 ### 部分成功态
 
 - 有 patch 元数据但无 diff 内容：patch 区可见，diff 查看区提示不可用。
-- 有 trace 但 family 为空：仍可展示 trace 与中间证据。
+- 即使运行失败，也保留 trace 与中间证据。
 
 ### 失败态
 
@@ -138,9 +123,10 @@ stateDiagram-v2
 | `run_id` | string | 运行 ID |
 | `cve_id` | string | CVE 编号 |
 | `status` | string | 状态 |
+| `phase` | string | 当前阶段 |
 | `stop_reason` | string | 停止原因 |
 | `summary` | object | 运行摘要 |
-| `fix_families` | array | 补丁家族 |
+| `progress` | object | 阶段进度 |
 | `patches` | array | 补丁记录 |
 | `source_traces` | array | 页面探索证据 |
 
@@ -159,16 +145,15 @@ stateDiagram-v2
 
 | 页面区块 | API | 主要字段 |
 |----------|-----|----------|
-| Verdict Hero / 家族 / Trace | `GET /api/v1/cve/runs/{run_id}` | `summary`、`fix_families`、`source_traces` |
-| Patch 列表 | `GET /api/v1/cve/runs/{run_id}/patches` | patch 元数据与下载状态 |
+| Verdict Hero / Patch / Trace | `GET /api/v1/cve/runs/{run_id}` | `summary`、`progress`、`patches`、`source_traces` |
 | Diff Viewer | `GET /api/v1/cve/runs/{run_id}/patch-content?candidate_url=...` | diff 文本内容 |
 
 ---
 
 ## 🪞 参考资产与约束
 
-- 继承 `CVELookupCard.tsx` 中的 Verdict Hero 组织方式。
-- 继承 `PatchDiffViewer.tsx` 的大文本差异阅读模式。
+- 视觉方向沿用“以 A 为底，吸收 C 的视觉表达”。
+- 详情页信息重心是结论优先，不实现 fix family 视图。
 - 不把原始 trace JSON 作为默认展示方式。
 
 ---
@@ -178,9 +163,14 @@ stateDiagram-v2
 ### v1.0 - 2026-04-09
 - 新增 CVE 运行详情页面规格
 
+### v1.1 - 2026-04-13
+- 回填实际已落地的两栏详情布局：Hero、Diff Viewer、Patch List、Trace Timeline
+- 移除未落地的 fix family 和独立 `/patches` 接口设计
+- 增加 `duplicate_count`、失败态进度和单栏 diff 展示约束
+
 ---
 
-**文档版本**：v1.0  
+**文档版本**：v1.1
 **创建日期**：2026-04-09  
-**最后更新**：2026-04-09  
+**最后更新**：2026-04-13
 **维护人**：AI + 开发团队

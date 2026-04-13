@@ -1,0 +1,269 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models import Artifact, CVEPatchArtifact, CVERun, SourceFetchRecord
+
+_PHASES = [
+    "resolve_seeds",
+    "plan_frontier",
+    "fetch_page",
+    "analyze_page",
+    "download_patches",
+    "finalize_run",
+]
+
+_TRACE_LABELS = {
+    "cve_seed_resolve": "Seed 解析",
+    "cve_page_fetch": "页面抓取",
+    "cve_patch_download": "Patch 下载",
+}
+
+
+@dataclass(frozen=True)
+class _PatchEntry:
+    patch: CVEPatchArtifact
+    artifact: Artifact | None
+    content_available: bool
+    content_type: str | None
+    download_url: str | None
+    duplicate_count: int = 1
+
+
+def get_cve_run_detail(session: Session, *, run_id: UUID) -> dict[str, object] | None:
+    run = session.get(CVERun, run_id)
+    if run is None:
+        return None
+
+    traces = _load_source_traces(session, run_id=run_id)
+    patches = _load_patches(session, run_id=run_id)
+    return {
+        "run_id": str(run.run_id),
+        "cve_id": run.cve_id,
+        "status": run.status,
+        "phase": run.phase,
+        "stop_reason": run.stop_reason,
+        "summary": run.summary_json,
+        "progress": _build_progress(run),
+        "recent_progress": _build_recent_progress(traces),
+        "source_traces": traces,
+        "patches": patches,
+    }
+
+
+def get_patch_content(
+    session: Session, *, run_id: UUID, candidate_url: str
+) -> dict[str, str] | None:
+    entries = _select_patch_representatives(
+        _load_patch_entries(session, run_id=run_id, candidate_url=candidate_url)
+    )
+    if not entries:
+        return None
+
+    entry = entries[0]
+    if entry.artifact is None or not entry.content_available:
+        return None
+
+    return {
+        "candidate_url": candidate_url,
+        "content": Path(entry.artifact.storage_path).read_text(encoding="utf-8"),
+    }
+
+
+def _build_progress(run: CVERun) -> dict[str, object]:
+    if run.phase in _PHASES:
+        completed_steps = _PHASES.index(run.phase) + 1
+    else:
+        completed_steps = 0
+
+    if run.status == "succeeded":
+        completed_steps = len(_PHASES)
+    elif run.status == "failed":
+        completed_steps = _failed_completed_steps(run)
+
+    return {
+        "current_phase": run.phase,
+        "completed_steps": completed_steps,
+        "total_steps": len(_PHASES),
+        "terminal": run.status in {"succeeded", "failed"},
+    }
+
+
+def _build_recent_progress(
+    traces: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    recent: list[dict[str, object]] = []
+    for trace in traces[-3:]:
+        recent.append(
+            {
+                "step": trace["step"],
+                "label": trace["label"],
+                "status": trace["status"],
+                "detail": trace["url"] or trace["source_ref"],
+            }
+        )
+    return recent
+
+
+def _load_source_traces(session: Session, *, run_id: UUID) -> list[dict[str, object]]:
+    records = session.execute(
+        select(SourceFetchRecord)
+        .where(
+            SourceFetchRecord.scene_name == "cve",
+            SourceFetchRecord.source_id == run_id,
+        )
+        .order_by(SourceFetchRecord.created_at, SourceFetchRecord.fetch_id)
+    ).scalars()
+
+    return [_serialize_trace(record) for record in records]
+
+
+def _serialize_trace(record: SourceFetchRecord) -> dict[str, object]:
+    request_snapshot = dict(record.request_snapshot_json or {})
+    response_meta = dict(record.response_meta_json or {})
+    return {
+        "fetch_id": str(record.fetch_id),
+        "step": record.source_type,
+        "label": _TRACE_LABELS.get(record.source_type, record.source_type),
+        "status": record.status,
+        "source_ref": record.source_ref,
+        "url": _pick_trace_url(record),
+        "request_snapshot": request_snapshot,
+        "response_meta": response_meta,
+        "error_message": record.error_message,
+    }
+
+
+def _pick_trace_url(record: SourceFetchRecord) -> str | None:
+    response_meta = dict(record.response_meta_json or {})
+    request_snapshot = dict(record.request_snapshot_json or {})
+    return (
+        response_meta.get("final_url")
+        or response_meta.get("download_url")
+        or request_snapshot.get("url")
+        or request_snapshot.get("candidate_url")
+        or record.source_ref
+    )
+
+
+def _load_patches(session: Session, *, run_id: UUID) -> list[dict[str, object]]:
+    patches: list[dict[str, object]] = []
+    for entry in _select_patch_representatives(_load_patch_entries(session, run_id=run_id)):
+        patch = entry.patch
+        patches.append(
+            {
+                "candidate_url": patch.candidate_url,
+                "patch_type": patch.patch_type,
+                "download_status": patch.download_status,
+                "artifact_id": str(patch.artifact_id) if patch.artifact_id else None,
+                "duplicate_count": entry.duplicate_count,
+                "content_available": entry.content_available,
+                "content_type": entry.content_type,
+                "download_url": entry.download_url,
+            }
+        )
+    return patches
+
+
+_STOP_REASON_COMPLETED_STEPS = {
+    "no_seed_references": 1,
+    "no_patch_candidates": 4,
+    "patch_download_failed": 5,
+}
+
+
+def _failed_completed_steps(run: CVERun) -> int:
+    if run.stop_reason in _STOP_REASON_COMPLETED_STEPS:
+        return _STOP_REASON_COMPLETED_STEPS[run.stop_reason]
+    if run.phase in _PHASES:
+        return _PHASES.index(run.phase)
+    return 0
+
+
+def _artifact_content_available(artifact: Artifact | None) -> bool:
+    if artifact is None:
+        return False
+    return Path(artifact.storage_path).exists()
+
+
+def _load_patch_entries(
+    session: Session,
+    *,
+    run_id: UUID,
+    candidate_url: str | None = None,
+) -> list[_PatchEntry]:
+    statement = (
+        select(CVEPatchArtifact)
+        .where(CVEPatchArtifact.run_id == run_id)
+        .order_by(CVEPatchArtifact.created_at, CVEPatchArtifact.patch_id)
+    )
+    if candidate_url is not None:
+        statement = statement.where(CVEPatchArtifact.candidate_url == candidate_url)
+
+    patch_rows = session.execute(statement).scalars().all()
+    return [_build_patch_entry(session, patch) for patch in patch_rows]
+
+
+def _build_patch_entry(session: Session, patch: CVEPatchArtifact) -> _PatchEntry:
+    artifact = session.get(Artifact, patch.artifact_id) if patch.artifact_id else None
+    meta = dict(patch.patch_meta_json or {})
+    return _PatchEntry(
+        patch=patch,
+        artifact=artifact,
+        content_available=_artifact_content_available(artifact),
+        content_type=artifact.content_type if artifact is not None else meta.get("content_type"),
+        download_url=meta.get("download_url"),
+    )
+
+
+def _select_patch_representatives(entries: list[_PatchEntry]) -> list[_PatchEntry]:
+    representatives: dict[str, _PatchEntry] = {}
+    counts_by_candidate_url: dict[str, int] = {}
+    ordered_candidate_urls: list[str] = []
+
+    for entry in entries:
+        candidate_url = entry.patch.candidate_url
+        counts_by_candidate_url[candidate_url] = counts_by_candidate_url.get(candidate_url, 0) + 1
+        current = representatives.get(candidate_url)
+        if current is None:
+            ordered_candidate_urls.append(candidate_url)
+            representatives[candidate_url] = entry
+            continue
+
+        if _patch_entry_priority(entry) > _patch_entry_priority(current):
+            representatives[candidate_url] = entry
+
+    return [
+        _with_duplicate_count(
+            representatives[candidate_url],
+            duplicate_count=counts_by_candidate_url[candidate_url],
+        )
+        for candidate_url in ordered_candidate_urls
+    ]
+
+
+def _patch_entry_priority(entry: _PatchEntry) -> tuple[int, int, int, str, str]:
+    patch = entry.patch
+    return (
+        1 if entry.content_available else 0,
+        1 if patch.download_status == "downloaded" else 0,
+        1 if entry.artifact is not None else 0,
+        entry.content_type or "",
+        str(patch.patch_id),
+    )
+
+
+def _with_duplicate_count(entry: _PatchEntry, *, duplicate_count: int) -> _PatchEntry:
+    return _PatchEntry(
+        patch=entry.patch,
+        artifact=entry.artifact,
+        content_available=entry.content_available,
+        content_type=entry.content_type,
+        download_url=entry.download_url,
+        duplicate_count=duplicate_count,
+    )

@@ -6,11 +6,11 @@
 
 ## 🎯 页面目标
 
-`/cve` 是 CVE 场景的主输入页。页面必须让用户在不理解 graph 细节的前提下，完成：
+`/cve` 是 CVE 场景的主输入页。页面必须让用户在不理解执行细节的前提下，完成：
 
 1. 输入或粘贴一个 CVE 编号。
-2. 发起或复用一次运行。
-3. 在当前页直接看到运行状态与结论摘要。
+2. 发起一次运行。
+3. 在当前页直接看到运行状态、最近进展与结论摘要。
 4. 必要时跳转到详情页继续看证据。
 
 ---
@@ -35,9 +35,9 @@
 flowchart TD
     A["Topbar 导航"] --> B["🎯 Page Hero\n输入 CVE，直接看补丁结论"]
     B --> C["⌨️ Input Panel\nCVE 编号输入 + 开始检索"]
-    C --> D["📡 Run Status\n状态胶囊 / 当前阶段 / 耗时"]
-    D --> E["📊 Verdict Summary\n是否找到补丁 / 证据 / 查看详情"]
-    E --> F["📃 Recent Progress\n最近 1~3 条进展"]
+    C --> D["📡 Run Status\n状态胶囊 / 当前阶段"]
+    D --> E["📃 Recent Progress\n最近 1~3 条进展"]
+    E --> F["📊 Verdict Summary\n是否找到补丁 / 证据 / 查看详情"]
 ```
 
 ### 区块1：Page Hero
@@ -56,27 +56,26 @@ flowchart TD
 - 当前状态胶囊
 - 当前阶段
 - 最近进展摘要
-- 运行开始时间与耗时
 
-### 区块4：结论摘要区
-
-- 是否找到补丁
-- 最可信证据页面
-- 是否建议进入详情页
-- 主动作：`查看详情`
-
-### 区块5：最近进展区
+### 区块4：最近进展区
 
 - 只展示最近 1 到 3 条有效进展
 - 不直接展示完整 trace JSON
+
+### 区块5：结论摘要区
+
+- 是否找到补丁
+- 主证据 URL
+- 失败时展示 stop reason
+- 主动作：`查看详情`
 
 ---
 
 ## 🖱️ 关键交互
 
 - 输入非法格式时立即给出前端提示，不发请求。
-- `reuse_running=true` 时，同一 CVE 有非终态 run 则附着到已有运行。
-- 运行中页面持续轮询，但只刷新状态区与结论摘要区。
+- 每次提交都创建新的 run，不做 `reuse_running`。
+- 运行中页面持续轮询，刷新状态区、最近进展与结论摘要区。
 - 终态后保留当前结果，不自动清空输入框。
 
 ---
@@ -99,21 +98,21 @@ stateDiagram-v2
 ### 默认态
 
 - 只显示 Hero 与输入区。
-- 结果区显示引导文案：`输入一个 CVE 开始检索`。
+- 状态区和结论区显示引导文案：`输入一个 CVE 开始检索`。
 
 ### 校验失败态
 
 - 输入框下方出现格式提示。
 - 提交按钮不可用。
 
-### 创建中/附着中
+### 创建中
 
-- 主按钮变为 `检索中...`
+- 主按钮变为 `创建中...`
 - 运行状态区切换为加载态。
 
 ### 运行中
 
-- 页面展示当前阶段、最近进展、已运行时长。
+- 页面展示当前阶段与最近进展。
 - 结论区可显示“尚在检索中”的中间摘要。
 
 ### 成功终态
@@ -126,8 +125,8 @@ stateDiagram-v2
 ### 失败终态
 
 - 显示失败原因摘要
+- 失败进度保留真实失败阶段
 - 提供重新提交入口
-- 不把原始异常堆栈作为主视图
 
 ---
 
@@ -144,6 +143,7 @@ stateDiagram-v2
 | `stop_reason` | string | 终止原因 |
 | `summary` | object | 结论摘要 |
 | `progress` | object | 进度摘要 |
+| `recent_progress` | array | 最近 1 到 3 条进展 |
 
 ### `CVEWorkbenchPageState`
 
@@ -151,8 +151,7 @@ stateDiagram-v2
 |--------|------|------|
 | `query` | string | 当前输入 |
 | `validation_message` | string | 校验提示 |
-| `loading` | boolean | 是否正在创建或附着运行 |
-| `attach_mode` | string | `latest/requested/null` |
+| `loading` | boolean | 是否正在创建运行 |
 | `active_run` | object | 当前运行摘要 |
 
 ---
@@ -161,8 +160,8 @@ stateDiagram-v2
 
 | 页面动作/区块 | API | 主要字段 |
 |---------------|-----|----------|
-| 创建或复用运行 | `POST /api/v1/cve/runs` | `run_id`、`status`、`phase` |
-| 轮询运行摘要 | `GET /api/v1/cve/runs/{run_id}` | `status`、`phase`、`summary`、`progress` |
+| 创建运行 | `POST /api/v1/cve/runs` | `run_id`、`status`、`phase` |
+| 轮询运行摘要 | `GET /api/v1/cve/runs/{run_id}` | `status`、`phase`、`summary`、`progress`、`recent_progress` |
 
 页面只消费摘要字段。完整证据、patch 与 diff 延迟到 `P102`。
 
@@ -170,8 +169,8 @@ stateDiagram-v2
 
 ## 🪞 参考资产与约束
 
-- 直接继承 `../../../aetherflow.bak/frontend/src/routes/CVELookupPage.tsx` 的页面节奏。
-- 直接继承 `../../../aetherflow.bak/frontend/src/components/CVELookupCard.tsx` 的“结论优先”组织方式。
+- 当前仓库已落地的视觉方向为“以 A 为底，吸收 C 的视觉表达”。
+- 工作台必须比详情页更轻，强调输入、状态和结论，不把 trace 细节堆进首页。
 - 不把备份仓里偏开发者细节的字段原样堆在首屏。
 
 ---
@@ -181,9 +180,14 @@ stateDiagram-v2
 ### v1.0 - 2026-04-09
 - 新增 CVE 工作台页面规格
 
+### v1.1 - 2026-04-13
+- 回填最小闭环真实页面结构，确认当前为输入区、运行状态、最近进展、结论卡片四块组合
+- 删除 `reuse_running` 和耗时展示等未落地交互
+- 同步当前轮询策略与详情页跳转行为
+
 ---
 
-**文档版本**：v1.0  
+**文档版本**：v1.1
 **创建日期**：2026-04-09  
-**最后更新**：2026-04-09  
+**最后更新**：2026-04-13
 **维护人**：AI + 开发团队

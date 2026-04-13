@@ -6,6 +6,7 @@ import re
 import httpx
 from sqlalchemy.orm import Session
 
+from app.cve.source_trace import record_source_fetch
 from app.models import CVEPatchArtifact
 from app.platform.artifact_store import save_text_artifact
 
@@ -57,6 +58,11 @@ def download_patch_candidate(
     patch_type = candidate["patch_type"]
     download_url = _resolve_download_url(candidate_url, patch_type)
     response: httpx.Response | None = None
+    request_snapshot = {
+        "candidate_url": candidate_url,
+        "download_url": download_url,
+        "patch_type": patch_type,
+    }
 
     try:
         response = httpx.get(
@@ -94,6 +100,20 @@ def download_patch_candidate(
                 "download_url": download_url,
             },
         )
+        record_source_fetch(
+            session,
+            run=run,
+            source_type="cve_patch_download",
+            source_ref=candidate_url,
+            status="succeeded",
+            request_snapshot=request_snapshot,
+            response_meta={
+                "status_code": response.status_code,
+                "content_type": content_type,
+                "download_url": download_url,
+                "artifact_id": str(artifact.artifact_id),
+            },
+        )
     except Exception as exc:
         patch_meta = {
             "error": str(exc),
@@ -107,6 +127,22 @@ def download_patch_candidate(
             patch_type=patch_type,
             download_status="failed",
             patch_meta_json=patch_meta,
+        )
+        record_source_fetch(
+            session,
+            run=run,
+            source_type="cve_patch_download",
+            source_ref=candidate_url,
+            status="failed",
+            request_snapshot=request_snapshot,
+            response_meta={
+                "status_code": response.status_code,
+                "content_type": response.headers.get("content-type", ""),
+                "download_url": download_url,
+            }
+            if response is not None
+            else {"download_url": download_url},
+            error_message=str(exc),
         )
 
     session.add(patch)

@@ -3,7 +3,14 @@ from pathlib import Path
 import httpx
 from sqlalchemy import select
 
-from app.models import Artifact, CVERun, CVEPatchArtifact, TaskAttempt, TaskJob
+from app.models import (
+    Artifact,
+    CVERun,
+    CVEPatchArtifact,
+    SourceFetchRecord,
+    TaskAttempt,
+    TaskJob,
+)
 from app.db.session import create_session_factory
 from app.worker.runtime import process_once
 
@@ -13,16 +20,8 @@ def test_post_run_then_worker_once_then_get_summary_returns_terminal_state(
 ) -> None:
     monkeypatch.setenv("AETHERFLOW_ARTIFACT_ROOT", str(tmp_path))
     monkeypatch.setattr(
-        "app.cve.runtime.resolve_seed_references",
-        lambda cve_id: ["https://example.com/advisory"],
-    )
-    monkeypatch.setattr(
         "app.cve.runtime.plan_frontier",
         lambda seed_references: seed_references,
-    )
-    monkeypatch.setattr(
-        "app.cve.runtime.fetch_page",
-        lambda url: {"url": url, "content": "https://example.com/fix.patch"},
     )
     monkeypatch.setattr(
         "app.cve.runtime.analyze_page",
@@ -37,6 +36,29 @@ def test_post_run_then_worker_once_then_get_summary_returns_terminal_state(
 
     def _fake_http_get(url: str, **kwargs) -> httpx.Response:
         request = httpx.Request("GET", url)
+        if "services.nvd.nist.gov" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "vulnerabilities": [
+                        {
+                            "cve": {
+                                "references": [
+                                    {"url": "https://example.com/advisory"},
+                                ]
+                            }
+                        }
+                    ]
+                },
+                request=request,
+            )
+        if url == "https://example.com/advisory":
+            return httpx.Response(
+                200,
+                text="https://example.com/fix.patch",
+                headers={"content-type": "text/html; charset=utf-8"},
+                request=request,
+            )
         return httpx.Response(
             200,
             text=patch_text,
@@ -44,6 +66,8 @@ def test_post_run_then_worker_once_then_get_summary_returns_terminal_state(
             request=request,
         )
 
+    monkeypatch.setattr("app.cve.seed_resolver.httpx.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.page_fetcher.httpx.get", _fake_http_get)
     monkeypatch.setattr("app.cve.patch_downloader.httpx.get", _fake_http_get)
 
     response = client.post("/api/v1/cve/runs", json={"cve_id": "CVE-2024-3094"})
@@ -75,11 +99,25 @@ def test_post_run_then_worker_once_then_get_summary_returns_terminal_state(
     assert artifact.storage_path.endswith("fix.patch")
     assert Path(artifact.storage_path).read_text(encoding="utf-8") == patch_text
 
+    fetch_records = db_session.execute(
+        select(SourceFetchRecord)
+        .where(SourceFetchRecord.source_id == run.run_id)
+        .order_by(SourceFetchRecord.created_at, SourceFetchRecord.fetch_id)
+    ).scalars()
+    assert {record.source_type for record in fetch_records} == {
+        "cve_seed_resolve",
+        "cve_patch_download",
+        "cve_page_fetch",
+    }
+
 
 def test_worker_once_marks_run_failed_when_seed_resolution_returns_empty(
     client, db_session, test_database_url, monkeypatch
 ) -> None:
-    monkeypatch.setattr("app.cve.runtime.resolve_seed_references", lambda cve_id: [])
+    monkeypatch.setattr(
+        "app.cve.runtime.resolve_seed_references",
+        lambda session, *, run, cve_id: [],
+    )
 
     response = client.post("/api/v1/cve/runs", json={"cve_id": "CVE-2024-3094"})
     run_id = response.json()["data"]["run_id"]
@@ -115,7 +153,10 @@ def test_worker_once_marks_run_terminal_when_seed_resolution_raises(
     def _raise_seed_error(cve_id: str) -> list[str]:
         raise RuntimeError("nvd timeout")
 
-    monkeypatch.setattr("app.cve.runtime.resolve_seed_references", _raise_seed_error)
+    monkeypatch.setattr(
+        "app.cve.runtime.resolve_seed_references",
+        lambda session, *, run, cve_id: _raise_seed_error(cve_id),
+    )
 
     response = client.post("/api/v1/cve/runs", json={"cve_id": "CVE-2024-3094"})
     run_id = response.json()["data"]["run_id"]
@@ -128,14 +169,21 @@ def test_worker_once_marks_run_terminal_when_seed_resolution_raises(
     assert detail.status_code == 200
     body = detail.json()["data"]
     assert body["status"] == "failed"
+    assert body["phase"] == "resolve_seeds"
     assert body["stop_reason"] == "resolve_seeds_failed"
     assert body["summary"]["patch_found"] is False
     assert body["summary"]["error"] == "nvd timeout"
+    assert body["progress"] == {
+        "current_phase": "resolve_seeds",
+        "completed_steps": 0,
+        "total_steps": 6,
+        "terminal": True,
+    }
 
     db_session.expire_all()
     run = db_session.get(CVERun, run_id)
     assert run is not None
-    assert run.phase == "finalize_run"
+    assert run.phase == "resolve_seeds"
 
     job = db_session.get(TaskJob, run.job_id)
     assert job is not None

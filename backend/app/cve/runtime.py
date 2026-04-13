@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from urllib.parse import urldefrag
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -19,9 +20,30 @@ _EXCEPTION_STOP_REASONS = {
     "download_patches": "download_patches_failed",
 }
 
+_MAX_FRONTIER_PAGES = 10
+
 
 def plan_frontier(seed_references: list[str]) -> list[str]:
-    return list(seed_references)
+    frontier: list[str] = []
+    seen_urls: set[str] = set()
+
+    for reference in seed_references:
+        normalized = _normalize_frontier_url(reference)
+        if normalized is None or normalized in seen_urls:
+            continue
+        seen_urls.add(normalized)
+        frontier.append(normalized)
+        if len(frontier) >= _MAX_FRONTIER_PAGES:
+            break
+
+    return frontier
+
+
+def _normalize_frontier_url(url: str) -> str | None:
+    normalized = url.strip()
+    if not normalized:
+        return None
+    return urldefrag(normalized).url
 
 
 def _update_phase(run: CVERun, phase: str) -> None:
@@ -31,7 +53,6 @@ def _update_phase(run: CVERun, phase: str) -> None:
 
 def _finalize_failure(run: CVERun, *, stop_reason: str, summary: dict[str, object]) -> None:
     run.status = "failed"
-    run.phase = "finalize_run"
     run.stop_reason = stop_reason
     run.summary_json = summary
 
@@ -60,7 +81,7 @@ def execute_cve_run(session: Session, *, run_id: UUID) -> None:
     try:
         _update_phase(run, "resolve_seeds")
         session.flush()
-        seed_references = resolve_seed_references(run.cve_id)
+        seed_references = resolve_seed_references(session, run=run, cve_id=run.cve_id)
         if not seed_references:
             _finalize_failure(
                 run,
@@ -75,13 +96,19 @@ def execute_cve_run(session: Session, *, run_id: UUID) -> None:
 
         _update_phase(run, "fetch_page")
         session.flush()
-        snapshots = [fetch_page(url) for url in frontier]
+        snapshots = [fetch_page(session, run=run, url=url) for url in frontier]
 
         _update_phase(run, "analyze_page")
         session.flush()
         patch_candidates: list[dict[str, str]] = []
+        seen_candidate_urls: set[str] = set()
         for snapshot in snapshots:
-            patch_candidates.extend(analyze_page(snapshot))
+            for candidate in analyze_page(snapshot):
+                candidate_url = candidate["candidate_url"]
+                if candidate_url in seen_candidate_urls:
+                    continue
+                seen_candidate_urls.add(candidate_url)
+                patch_candidates.append(candidate)
 
         if not patch_candidates:
             _finalize_failure(

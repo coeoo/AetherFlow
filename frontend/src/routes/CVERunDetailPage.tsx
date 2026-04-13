@@ -1,33 +1,94 @@
 import { Link, useParams } from "react-router-dom";
 
-import { PlaceholderPage } from "../components/layout/PlaceholderPage";
+import { AppShell } from "../components/layout/AppShell";
+import { CVEDiffViewer } from "../features/cve/components/CVEDiffViewer";
+import { CVEPatchList } from "../features/cve/components/CVEPatchList";
+import { CVETraceTimeline } from "../features/cve/components/CVETraceTimeline";
+import { CVEVerdictHero } from "../features/cve/components/CVEVerdictHero";
+import { useCveRunDetail, usePatchContent } from "../features/cve/hooks";
+import { useState } from "react";
 
 export function CVERunDetailPage() {
   const { runId = "未提供 runId" } = useParams();
+  const [selectedCandidateUrl, setSelectedCandidateUrl] = useState<string | null>(null);
+  const detailQuery = useCveRunDetail(runId);
+  const patchContentQuery = usePatchContent(runId, selectedCandidateUrl);
+  const detail = detailQuery.data;
+
+  if (detailQuery.isLoading) {
+    return (
+      <AppShell
+        eyebrow="CVE 结果页"
+        title="CVE 运行详情"
+        description={`正在加载 run_id = ${runId} 的证据页内容。`}
+        actions={
+          <div className="action-row">
+            <Link className="action-link action-link-muted" to="/cve">
+              返回工作台
+            </Link>
+          </div>
+        }
+      >
+        <section className="cve-panel">
+          <p className="card-copy">正在加载运行详情…</p>
+        </section>
+      </AppShell>
+    );
+  }
+
+  if (!detail) {
+    return (
+      <AppShell
+        eyebrow="CVE 结果页"
+        title="CVE 运行详情"
+        description={`run_id = ${runId} 的详情暂不可用。`}
+        actions={
+          <div className="action-row">
+            <Link className="action-link action-link-muted" to="/cve">
+              返回工作台
+            </Link>
+          </div>
+        }
+      >
+        <section className="cve-panel">
+          <p className="cve-error-copy">详情加载失败，请稍后重试。</p>
+        </section>
+      </AppShell>
+    );
+  }
 
   return (
-    <PlaceholderPage
+    <AppShell
       eyebrow="CVE 结果页"
       title="CVE 运行详情"
-      description={`当前路由已绑定运行详情路径，可承接 run_id = ${runId} 的证据页内容。`}
-      status="详情路由已固定"
+      description={`当前正在阅读 run_id = ${runId} 的补丁结论、探索证据与 Diff 内容。`}
       actions={
         <div className="action-row">
-          <Link className="action-link" to="/cve">
+          <Link className="action-link action-link-muted" to="/cve">
             返回工作台
           </Link>
         </div>
       }
-      sections={[
-        {
-          title: "主结论卡",
-          body: "后续首屏会优先展示补丁结论、可信原因和下一步建议，而不是原始 trace 字段。",
-        },
-        {
-          title: "证据阅读区",
-          body: "Patch、Fix Family、Trace 和 Diff Viewer 的结构位置已为后续实现预留。",
-        },
-      ]}
-    />
+    >
+      <CVEVerdictHero detail={detail} />
+
+      <section className="cve-detail-grid">
+        <div className="cve-detail-main">
+          <CVEDiffViewer
+            content={patchContentQuery.data?.content ?? null}
+            loading={patchContentQuery.isLoading}
+            errorMessage={patchContentQuery.error instanceof Error ? patchContentQuery.error.message : null}
+          />
+        </div>
+        <aside className="cve-detail-rail">
+          <CVEPatchList
+            patches={detail.patches}
+            selectedCandidateUrl={selectedCandidateUrl}
+            onSelect={setSelectedCandidateUrl}
+          />
+          <CVETraceTimeline traces={detail.source_traces} />
+        </aside>
+      </section>
+    </AppShell>
   );
 }

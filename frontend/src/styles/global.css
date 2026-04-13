@@ -227,6 +227,242 @@ select {
   font-weight: 700;
 }
 
+.status-pill-succeeded {
+  color: #10311f;
+  background: rgba(212, 236, 224, 0.96);
+}
+
+.status-pill-failed {
+  color: #5a1616;
+  background: rgba(248, 221, 221, 0.98);
+}
+
+.action-link-obsidian {
+  background: linear-gradient(135deg, #050505 0%, #243140 100%);
+}
+
+.cve-workbench-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: 1.15fr 0.85fr;
+}
+
+.cve-panel {
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 18px 40px rgba(49, 67, 88, 0.09);
+}
+
+.cve-panel-featured,
+.cve-verdict-hero,
+.cve-verdict-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(237, 241, 245, 0.95)),
+    rgba(255, 255, 255, 0.82);
+}
+
+.cve-panel-header {
+  display: grid;
+  gap: 8px;
+}
+
+.cve-panel-header h2,
+.cve-panel-header h3 {
+  margin: 0;
+}
+
+.cve-field {
+  display: grid;
+  gap: 10px;
+}
+
+.cve-field-label {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #27425f;
+}
+
+.cve-input {
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid rgba(10, 10, 10, 0.16);
+  border-radius: 18px;
+  background: rgba(241, 244, 247, 0.92);
+}
+
+.cve-input:focus {
+  outline: 2px solid rgba(16, 32, 51, 0.18);
+}
+
+.cve-progress-copy,
+.cve-trace-list,
+.cve-patch-list {
+  display: grid;
+  gap: 12px;
+}
+
+.cve-inline-progress,
+.cve-trace-item,
+.cve-patch-item {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(242, 246, 249, 0.9);
+}
+
+.cve-trace-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cve-status-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cve-status-chip-succeeded,
+.cve-status-chip-downloaded {
+  color: #163826;
+  background: rgba(206, 232, 219, 0.96);
+}
+
+.cve-status-chip-failed {
+  color: #6b2020;
+  background: rgba(243, 217, 217, 0.98);
+}
+
+.cve-inline-button {
+  width: fit-content;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 999px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #050505 0%, #243140 100%);
+  cursor: pointer;
+}
+
+.cve-inline-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.cve-error-copy {
+  margin: 0;
+  color: #8a2323;
+  line-height: 1.6;
+}
+
+.cve-verdict-hero {
+  display: grid;
+  grid-template-columns: 1.3fr 0.8fr;
+  gap: 20px;
+  padding: 28px;
+  border-radius: 32px;
+  box-shadow: 0 20px 48px rgba(49, 67, 88, 0.11);
+}
+
+.cve-verdict-copy {
+  display: grid;
+  gap: 12px;
+}
+
+.cve-verdict-copy h2 {
+  margin: 0;
+  font-size: clamp(2rem, 3vw, 2.9rem);
+  line-height: 1.04;
+}
+
+.cve-verdict-meta {
+  display: grid;
+  gap: 12px;
+}
+
+.cve-kpi-card {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(244, 246, 249, 0.95);
+}
+
+.cve-kpi-card strong {
+  word-break: break-word;
+}
+
+.cve-kpi-card-dark {
+  color: #ffffff;
+  background: linear-gradient(135deg, #050505 0%, #243140 100%);
+}
+
+.cve-kpi-card-dark .card-label {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.cve-detail-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.8fr);
+}
+
+.cve-detail-main,
+.cve-detail-rail {
+  display: grid;
+  gap: 20px;
+}
+
+.cve-diff-panel {
+  min-height: 420px;
+}
+
+.cve-diff-viewer {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 16px;
+  overflow-x: auto;
+  border-radius: 20px;
+  background: #0d1117;
+  color: #f1f5f9;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.diff-line {
+  padding: 2px 10px;
+  border-radius: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-line-add {
+  color: #d7ffe8;
+  background: rgba(34, 88, 59, 0.82);
+}
+
+.diff-line-remove {
+  color: #ffd8d8;
+  background: rgba(103, 39, 39, 0.82);
+}
+
+.diff-line-context {
+  color: #d6deea;
+  background: rgba(255, 255, 255, 0.02);
+}
+
 @media (max-width: 720px) {
   .app-shell {
     padding: 16px;
@@ -240,5 +476,11 @@ select {
 
   .nav-row {
     justify-content: flex-start;
+  }
+
+  .cve-workbench-grid,
+  .cve-verdict-hero,
+  .cve-detail-grid {
+    grid-template-columns: 1fr;
   }
 }
