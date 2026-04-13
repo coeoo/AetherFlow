@@ -97,6 +97,10 @@ class TaskAttempt(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     job: Mapped[TaskJob] = relationship(back_populates="attempts")
+    artifact_links: Mapped[list["TaskAttemptArtifact"]] = relationship(
+        back_populates="attempt",
+        cascade="all, delete-orphan",
+    )
 
 
 class DeliveryTarget(Base):
@@ -191,6 +195,56 @@ class Artifact(Base):
         server_default=text("'{}'::jsonb"),
     )
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+
+    attempt_links: Mapped[list["TaskAttemptArtifact"]] = relationship(
+        back_populates="artifact",
+        cascade="all, delete-orphan",
+    )
+
+
+class TaskAttemptArtifact(Base):
+    __tablename__ = "task_attempt_artifacts"
+
+    attempt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("task_attempts.attempt_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    artifact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("artifacts.artifact_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+
+    attempt: Mapped[TaskAttempt] = relationship(back_populates="artifact_links")
+    artifact: Mapped[Artifact] = relationship(back_populates="attempt_links")
+
+
+class RuntimeHeartbeat(Base):
+    __tablename__ = "runtime_heartbeats"
+
+    role: Mapped[str] = mapped_column(String(32), primary_key=True)
+    instance_name: Mapped[str] = mapped_column(String(128), primary_key=True)
+    heartbeat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=text("NOW()"),

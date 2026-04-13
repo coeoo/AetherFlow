@@ -47,10 +47,12 @@ def test_alembic_upgrade_head(test_database_url: str) -> None:
         "alembic_version",
         "task_jobs",
         "task_attempts",
+        "task_attempt_artifacts",
         "delivery_targets",
         "delivery_records",
         "artifacts",
         "source_fetch_records",
+        "runtime_heartbeats",
     }.issubset(table_names)
 
 
