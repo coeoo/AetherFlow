@@ -1,4 +1,9 @@
 import argparse
+import time
+
+from app.config import load_settings
+from app.db.session import create_session_factory
+from app.worker.runtime import process_once
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -8,7 +13,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    build_parser().parse_args()
+    args = build_parser().parse_args()
+    settings = load_settings()
+    if not settings.database_url:
+        raise RuntimeError("缺少数据库连接信息，无法启动 worker。")
+
+    session_factory = create_session_factory(settings.database_url)
+    if args.once:
+        process_once(session_factory, worker_name=settings.worker_name)
+        return 0
+
+    while True:
+        processed = process_once(session_factory, worker_name=settings.worker_name)
+        if not processed:
+            time.sleep(2)
     return 0
 
 
