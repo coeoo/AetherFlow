@@ -24,6 +24,10 @@
 - 场景不必各自重复实现抓取和文件保存逻辑。
 - 原文和归一化正文都有唯一的 canonical source，不会出现“业务表一份、Artifact 又一份”的双写口径。
 
+### Phase 2 实现边界
+- Phase 2 只落 Artifact 的最小存储、读取和 attempt 关联，不提前做 URL 抓取与 Playwright 动态抓取。
+- URL 模式与抓取审计在首个真实场景切片接入时继续细化。
+
 ---
 
 ## 👥 使用场景
@@ -102,6 +106,7 @@ flowchart TD
 
 ### 涉及的数据表
 - `artifacts`
+- `task_attempt_artifacts`
 - `source_fetch_records`
 
 ### 核心数据字段
@@ -114,6 +119,13 @@ flowchart TD
 | source_url | string | 否 | 来源 URL |
 | storage_path | string | 是 | 存储路径 |
 | checksum | string | 是 | 校验值 |
+
+#### TaskAttemptArtifact
+| 字段名 | 类型 | 必填 | 说明 |
+|--------|------|------|------|
+| attempt_id | uuid | 是 | 关联 `task_attempts` |
+| artifact_id | uuid | 是 | 关联 `artifacts` |
+| created_at | timestamptz | 是 | 关联创建时间 |
 
 ---
 
@@ -157,6 +169,15 @@ flowchart TD
 **触发条件**：调用外部页面抓取时
 
 **规则处理**：写入 `source_fetch_records`
+
+### 规则4：Artifact 保持中立，attempt 归属通过关联表表达
+**规则描述**：`artifacts` 只描述内容对象本身，不在主表里直接写“由哪次 attempt 产出”。
+
+**触发条件**：需要回查某次任务尝试产出了哪些 Artifact 时
+
+**规则处理**：
+- 通过 `task_attempt_artifacts` 表记录运行时归属
+- 不在 `artifacts` 主表中增加 `producer_attempt_id` 一类字段
 
 ---
 
@@ -207,19 +228,20 @@ flowchart TD
 ### 注意事项
 - 必须保存 checksum 以支持去重
 - 必须记录来源 URL 和采集时间
+- Phase 2 先保证文件落盘与内容读取闭环，不提前耦合场景抓取逻辑
 
 ---
 
 ## 🧪 测试要点
 
 ### 功能测试
-- [ ] URL 抓取后能生成 Artifact
+- [ ] 一次 attempt 成功后能生成 Artifact 并写入关联表
 - [ ] Patch 内容可通过 Artifact API 读取
-- [ ] 抓取记录可查询
+- [ ] `task_attempt_artifacts` 可回查某次 attempt 的输出
 
 ### 边界测试
-- [ ] 抓取失败不影响任务审计
-- [ ] 动态页面抓取失败时有降级路径
+- [ ] Artifact API 不暴露底层磁盘路径
+- [ ] Phase 2 不因未实现 URL 抓取而阻塞最小 Artifact 闭环
 
 ---
 

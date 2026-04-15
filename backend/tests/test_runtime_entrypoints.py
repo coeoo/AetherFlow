@@ -39,6 +39,7 @@ def test_dev_compose_does_not_pin_container_name() -> None:
 def test_backend_gitignore_covers_generated_artifacts() -> None:
     gitignore_text = BACKEND_GITIGNORE.read_text(encoding="utf-8")
 
+    assert ".runtime/" in gitignore_text
     assert ".pytest_cache/" in gitignore_text
     assert "*.egg-info/" in gitignore_text
     assert "__pycache__/" in gitignore_text
