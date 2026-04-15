@@ -1,5 +1,8 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+from sqlalchemy import select
 
 from app.cve.service import create_cve_run
 from app.models import Artifact, CVEPatchArtifact, CVERun, SourceFetchRecord, TaskJob
@@ -56,6 +59,62 @@ def test_get_cve_run_returns_404_for_missing_run(client) -> None:
     response = client.get(f"/api/v1/cve/runs/{uuid.uuid4()}")
 
     assert response.status_code == 404
+
+
+def test_get_cve_runs_returns_recent_history_sorted_desc(client, db_session) -> None:
+    older_run = create_cve_run(db_session, cve_id="CVE-2023-1111")
+    newer_run = create_cve_run(db_session, cve_id="CVE-2024-2222")
+
+    older_run.status = "failed"
+    older_run.phase = "fetch_page"
+    older_run.stop_reason = "fetch_failed"
+    older_run.summary_json = {
+        "patch_found": False,
+        "patch_count": 0,
+    }
+    older_run.created_at = datetime(2026, 4, 13, 8, 0, tzinfo=UTC)
+
+    newer_run.status = "succeeded"
+    newer_run.phase = "finalize_run"
+    newer_run.stop_reason = "patches_downloaded"
+    newer_run.summary_json = {
+        "patch_found": True,
+        "patch_count": 1,
+        "primary_patch_url": "https://example.com/fix.patch",
+    }
+    newer_run.created_at = older_run.created_at + timedelta(minutes=5)
+    db_session.commit()
+
+    response = client.get("/api/v1/cve/runs")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == [
+        {
+            "run_id": str(newer_run.run_id),
+            "cve_id": "CVE-2024-2222",
+            "status": "succeeded",
+            "phase": "finalize_run",
+            "stop_reason": "patches_downloaded",
+            "summary": {
+                "patch_found": True,
+                "patch_count": 1,
+                "primary_patch_url": "https://example.com/fix.patch",
+            },
+            "created_at": "2026-04-13T08:05:00+00:00",
+        },
+        {
+            "run_id": str(older_run.run_id),
+            "cve_id": "CVE-2023-1111",
+            "status": "failed",
+            "phase": "fetch_page",
+            "stop_reason": "fetch_failed",
+            "summary": {
+                "patch_found": False,
+                "patch_count": 0,
+            },
+            "created_at": "2026-04-13T08:00:00+00:00",
+        },
+    ]
 
 
 def test_get_cve_run_returns_detail_payload_with_progress_traces_and_patches(
@@ -137,6 +196,9 @@ def test_get_cve_run_returns_detail_payload_with_progress_traces_and_patches(
         ]
     )
     db_session.commit()
+    patch = db_session.execute(
+        select(CVEPatchArtifact).where(CVEPatchArtifact.run_id == run.run_id)
+    ).scalar_one()
 
     response = client.get(f"/api/v1/cve/runs/{run.run_id}")
 
@@ -160,6 +222,7 @@ def test_get_cve_run_returns_detail_payload_with_progress_traces_and_patches(
     assert traces_by_step["cve_page_fetch"]["url"] == "https://example.com/advisory"
     assert body["data"]["patches"] == [
         {
+            "patch_id": str(patch.patch_id),
             "candidate_url": "https://example.com/fix.patch",
             "patch_type": "patch",
             "download_status": "downloaded",
@@ -204,14 +267,18 @@ def test_get_patch_content_returns_diff_text_for_downloaded_patch(
         )
     )
     db_session.commit()
+    patch = db_session.execute(
+        select(CVEPatchArtifact).where(CVEPatchArtifact.run_id == run.run_id)
+    ).scalar_one()
 
     response = client.get(
         f"/api/v1/cve/runs/{run.run_id}/patch-content",
-        params={"candidate_url": "https://example.com/fix.patch"},
+        params={"patch_id": str(patch.patch_id)},
     )
 
     assert response.status_code == 200
     assert response.json()["data"] == {
+        "patch_id": str(patch.patch_id),
         "candidate_url": "https://example.com/fix.patch",
         "content": patch_text,
     }
@@ -251,10 +318,13 @@ def test_get_patch_content_returns_404_when_artifact_is_missing(
         )
     )
     db_session.commit()
+    patch = db_session.execute(
+        select(CVEPatchArtifact).where(CVEPatchArtifact.run_id == run.run_id)
+    ).scalar_one()
 
     response = client.get(
         f"/api/v1/cve/runs/{run.run_id}/patch-content",
-        params={"candidate_url": "https://example.com/missing.patch"},
+        params={"patch_id": str(patch.patch_id)},
     )
 
     assert response.status_code == 404
@@ -313,14 +383,24 @@ def test_get_patch_content_returns_representative_match_when_duplicate_candidate
         ]
     )
     db_session.commit()
+    readable_patch = db_session.execute(
+        select(CVEPatchArtifact).where(
+            CVEPatchArtifact.run_id == run.run_id,
+            CVEPatchArtifact.artifact_id == readable_artifact.artifact_id,
+        )
+    ).scalar_one()
 
     response = client.get(
         f"/api/v1/cve/runs/{run.run_id}/patch-content",
-        params={"candidate_url": "https://example.com/fix.patch"},
+        params={"patch_id": str(readable_patch.patch_id)},
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["content"] == readable_text
+    assert response.json()["data"] == {
+        "patch_id": str(readable_patch.patch_id),
+        "candidate_url": "https://example.com/fix.patch",
+        "content": readable_text,
+    }
 
 
 def test_get_cve_run_detail_deduplicates_duplicate_patch_urls(client, db_session, tmp_path) -> None:
@@ -375,12 +455,19 @@ def test_get_cve_run_detail_deduplicates_duplicate_patch_urls(client, db_session
         ]
     )
     db_session.commit()
+    readable_patch = db_session.execute(
+        select(CVEPatchArtifact).where(
+            CVEPatchArtifact.run_id == run.run_id,
+            CVEPatchArtifact.artifact_id == readable_artifact.artifact_id,
+        )
+    ).scalar_one()
 
     response = client.get(f"/api/v1/cve/runs/{run.run_id}")
 
     assert response.status_code == 200
     assert response.json()["data"]["patches"] == [
         {
+            "patch_id": str(readable_patch.patch_id),
             "candidate_url": "https://example.com/fix.patch",
             "patch_type": "patch",
             "download_status": "downloaded",

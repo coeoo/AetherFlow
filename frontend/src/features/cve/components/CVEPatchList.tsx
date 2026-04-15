@@ -2,11 +2,11 @@ import type { CVEPatch } from "../types";
 
 type Props = {
   patches: CVEPatch[];
-  selectedCandidateUrl: string | null;
-  onSelect: (candidateUrl: string) => void;
+  selectedPatchId: string | null;
+  onSelect: (patchId: string) => void;
 };
 
-export function CVEPatchList({ patches, selectedCandidateUrl, onSelect }: Props) {
+export function CVEPatchList({ patches, selectedPatchId, onSelect }: Props) {
   return (
     <section className="cve-panel">
       <div className="cve-panel-header">
@@ -16,7 +16,7 @@ export function CVEPatchList({ patches, selectedCandidateUrl, onSelect }: Props)
       <div className="cve-patch-list">
         {patches.map((patch, index) => (
           <article
-            key={patch.artifact_id ?? `${patch.candidate_url}:${patch.patch_type}:${index}`}
+            key={patch.patch_id ?? patch.artifact_id ?? `${patch.candidate_url}:${patch.patch_type}:${index}`}
             className="cve-patch-item"
           >
             <div className="cve-trace-title-row">
@@ -29,10 +29,10 @@ export function CVEPatchList({ patches, selectedCandidateUrl, onSelect }: Props)
               <button
                 className="cve-inline-button"
                 disabled={!patch.content_available}
-                onClick={() => onSelect(patch.candidate_url)}
+                onClick={() => onSelect(patch.patch_id)}
                 type="button"
               >
-                {selectedCandidateUrl === patch.candidate_url ? "查看中" : "查看 Diff"}
+                {selectedPatchId === patch.patch_id ? "查看中" : "查看 Diff"}
               </button>
             </div>
           </article>

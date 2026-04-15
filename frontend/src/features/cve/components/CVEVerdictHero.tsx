@@ -1,4 +1,5 @@
 import type { CVERunDetail } from "../types";
+import { getCvePhaseLabel, getCveStopReasonLabel } from "../presentation";
 
 type Props = {
   detail: CVERunDetail;
@@ -21,7 +22,7 @@ export function CVEVerdictHero({ detail }: Props) {
         <p className="card-label">主补丁证据</p>
         <h2>{getVerdictLabel(detail)}</h2>
         <p className="card-copy">
-          当前运行处于 <strong>{detail.phase}</strong>，{detail.summary.patch_count ?? 0} 条 patch 候选已进入结果面。
+          当前运行处于 <strong>{getCvePhaseLabel(detail.phase)}</strong>，{detail.summary.patch_count ?? 0} 条 patch 候选已进入结果面。
         </p>
       </div>
       <div className="cve-verdict-meta">
@@ -31,7 +32,7 @@ export function CVEVerdictHero({ detail }: Props) {
         </div>
         <div className="cve-kpi-card">
           <span className="card-label">停止原因</span>
-          <strong>{detail.stop_reason ?? "运行中"}</strong>
+          <strong>{getCveStopReasonLabel(detail.stop_reason, detail.status)}</strong>
         </div>
       </div>
     </section>

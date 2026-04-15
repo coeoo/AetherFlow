@@ -299,19 +299,32 @@ select {
 
 .cve-progress-copy,
 .cve-trace-list,
-.cve-patch-list {
+.cve-patch-list,
+.cve-history-list {
   display: grid;
   gap: 12px;
 }
 
 .cve-inline-progress,
 .cve-trace-item,
-.cve-patch-item {
+.cve-patch-item,
+.cve-history-item {
   display: grid;
   gap: 8px;
   padding: 14px 16px;
   border-radius: 18px;
   background: rgba(242, 246, 249, 0.9);
+}
+
+.cve-history-panel {
+  grid-column: 1 / -1;
+}
+
+.cve-history-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .cve-trace-title-row {

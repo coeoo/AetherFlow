@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import CVERun, TaskJob
@@ -30,3 +31,12 @@ def create_cve_run(session: Session, *, cve_id: str) -> CVERun:
 
 def get_cve_run(session: Session, *, run_id) -> CVERun | None:
     return session.get(CVERun, run_id)
+
+
+def list_cve_runs(session: Session, *, limit: int) -> list[CVERun]:
+    statement = (
+        select(CVERun)
+        .order_by(CVERun.created_at.desc(), CVERun.run_id.desc())
+        .limit(limit)
+    )
+    return session.execute(statement).scalars().all()

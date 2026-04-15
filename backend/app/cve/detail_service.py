@@ -57,11 +57,20 @@ def get_cve_run_detail(session: Session, *, run_id: UUID) -> dict[str, object] |
 
 
 def get_patch_content(
-    session: Session, *, run_id: UUID, candidate_url: str
+    session: Session,
+    *,
+    run_id: UUID,
+    patch_id: UUID | None = None,
+    candidate_url: str | None = None,
 ) -> dict[str, str] | None:
-    entries = _select_patch_representatives(
-        _load_patch_entries(session, run_id=run_id, candidate_url=candidate_url)
-    )
+    if patch_id is not None:
+        entries = _load_patch_entries(session, run_id=run_id, patch_id=patch_id)
+    elif candidate_url is not None:
+        entries = _select_patch_representatives(
+            _load_patch_entries(session, run_id=run_id, candidate_url=candidate_url)
+        )
+    else:
+        return None
     if not entries:
         return None
 
@@ -70,7 +79,8 @@ def get_patch_content(
         return None
 
     return {
-        "candidate_url": candidate_url,
+        "patch_id": str(entry.patch.patch_id),
+        "candidate_url": entry.patch.candidate_url,
         "content": Path(entry.artifact.storage_path).read_text(encoding="utf-8"),
     }
 
@@ -157,6 +167,7 @@ def _load_patches(session: Session, *, run_id: UUID) -> list[dict[str, object]]:
         patch = entry.patch
         patches.append(
             {
+                "patch_id": str(patch.patch_id),
                 "candidate_url": patch.candidate_url,
                 "patch_type": patch.patch_type,
                 "download_status": patch.download_status,
@@ -195,6 +206,7 @@ def _load_patch_entries(
     session: Session,
     *,
     run_id: UUID,
+    patch_id: UUID | None = None,
     candidate_url: str | None = None,
 ) -> list[_PatchEntry]:
     statement = (
@@ -202,6 +214,8 @@ def _load_patch_entries(
         .where(CVEPatchArtifact.run_id == run_id)
         .order_by(CVEPatchArtifact.created_at, CVEPatchArtifact.patch_id)
     )
+    if patch_id is not None:
+        statement = statement.where(CVEPatchArtifact.patch_id == patch_id)
     if candidate_url is not None:
         statement = statement.where(CVEPatchArtifact.candidate_url == candidate_url)
 

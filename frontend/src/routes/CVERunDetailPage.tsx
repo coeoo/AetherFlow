@@ -1,4 +1,5 @@
 import { Link, useParams } from "react-router-dom";
+import { useState } from "react";
 
 import { AppShell } from "../components/layout/AppShell";
 import { CVEDiffViewer } from "../features/cve/components/CVEDiffViewer";
@@ -6,13 +7,12 @@ import { CVEPatchList } from "../features/cve/components/CVEPatchList";
 import { CVETraceTimeline } from "../features/cve/components/CVETraceTimeline";
 import { CVEVerdictHero } from "../features/cve/components/CVEVerdictHero";
 import { useCveRunDetail, usePatchContent } from "../features/cve/hooks";
-import { useState } from "react";
 
 export function CVERunDetailPage() {
   const { runId = "未提供 runId" } = useParams();
-  const [selectedCandidateUrl, setSelectedCandidateUrl] = useState<string | null>(null);
+  const [selectedPatchId, setSelectedPatchId] = useState<string | null>(null);
   const detailQuery = useCveRunDetail(runId);
-  const patchContentQuery = usePatchContent(runId, selectedCandidateUrl);
+  const patchContentQuery = usePatchContent(runId, selectedPatchId);
   const detail = detailQuery.data;
 
   if (detailQuery.isLoading) {
@@ -83,8 +83,8 @@ export function CVERunDetailPage() {
         <aside className="cve-detail-rail">
           <CVEPatchList
             patches={detail.patches}
-            selectedCandidateUrl={selectedCandidateUrl}
-            onSelect={setSelectedCandidateUrl}
+            selectedPatchId={selectedPatchId}
+            onSelect={setSelectedPatchId}
           />
           <CVETraceTimeline traces={detail.source_traces} />
         </aside>

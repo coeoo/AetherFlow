@@ -25,6 +25,7 @@ export type CVESourceTrace = {
 };
 
 export type CVEPatch = {
+  patch_id: string;
   candidate_url: string;
   patch_type: string;
   download_status: string;
@@ -42,6 +43,16 @@ export type CVERunSummary = {
   error?: string;
 };
 
+export type CVERunListItem = {
+  run_id: string;
+  cve_id: string;
+  status: string;
+  phase: string;
+  stop_reason: string | null;
+  summary: CVERunSummary;
+  created_at: string;
+};
+
 export type CVERunDetail = {
   run_id: string;
   cve_id: string;
@@ -56,6 +67,7 @@ export type CVERunDetail = {
 };
 
 export type CVEPatchContent = {
+  patch_id: string;
   candidate_url: string;
   content: string;
 };

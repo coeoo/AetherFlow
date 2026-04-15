@@ -59,6 +59,7 @@ flowchart TD
 
 - 展示候选补丁、下载状态、类型和是否可查看内容
 - 若同一 URL 被重复发现或重复落表，则显示 `共 N 条记录`
+- 详情页内部选中与 diff 读取优先使用稳定的 `patch_id`
 
 ### 区块4：Trace 时间线
 
@@ -73,6 +74,7 @@ flowchart TD
 - `查看 Diff` 是页内动作，不跳新页面。
 - Trace 默认展示步骤摘要，不展开原始 JSON。
 - Patch 列表与 Trace 时间线在右侧 rail 分层，Diff Viewer 占主列。
+- 前端点击 patch 后，按 `patch_id` 触发 diff 加载。
 
 ---
 
@@ -134,7 +136,7 @@ stateDiagram-v2
 
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
-| `candidate_url` | string | 当前查看的补丁 URL |
+| `patch_id` | string | 当前查看的补丁标识 |
 | `loading` | boolean | 是否正在加载 diff |
 | `content_available` | boolean | 是否存在 diff 内容 |
 | `error_message` | string | diff 读取错误 |
@@ -146,7 +148,7 @@ stateDiagram-v2
 | 页面区块 | API | 主要字段 |
 |----------|-----|----------|
 | Verdict Hero / Patch / Trace | `GET /api/v1/cve/runs/{run_id}` | `summary`、`progress`、`patches`、`source_traces` |
-| Diff Viewer | `GET /api/v1/cve/runs/{run_id}/patch-content?candidate_url=...` | diff 文本内容 |
+| Diff Viewer | `GET /api/v1/cve/runs/{run_id}/patch-content?patch_id=...` | diff 文本内容 |
 
 ---
 
@@ -168,9 +170,13 @@ stateDiagram-v2
 - 移除未落地的 fix family 和独立 `/patches` 接口设计
 - 增加 `duplicate_count`、失败态进度和单栏 diff 展示约束
 
+### v1.2 - 2026-04-15
+- 把详情页补丁选中键从 `candidate_url` 收敛为稳定的 `patch_id`
+- 同步 diff 接口查询方式和页面状态对象
+
 ---
 
-**文档版本**：v1.1
+**文档版本**：v1.2
 **创建日期**：2026-04-09  
-**最后更新**：2026-04-13
+**最后更新**：2026-04-15
 **维护人**：AI + 开发团队

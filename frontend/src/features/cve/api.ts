@@ -1,4 +1,4 @@
-import type { ApiEnvelope, CVEPatchContent, CVERunDetail } from "./types";
+import type { ApiEnvelope, CVEPatchContent, CVERunDetail, CVERunListItem } from "./types";
 
 function getApiBaseUrl() {
   const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
@@ -23,17 +23,21 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function createCveRun(cveId: string) {
-  return requestJson<CVERunDetail>("/api/v1/cve/runs", {
+  return requestJson<CVERunListItem>("/api/v1/cve/runs", {
     method: "POST",
     body: JSON.stringify({ cve_id: cveId }),
   });
+}
+
+export function getCveRunHistory() {
+  return requestJson<CVERunListItem[]>("/api/v1/cve/runs");
 }
 
 export function getCveRunDetail(runId: string) {
   return requestJson<CVERunDetail>(`/api/v1/cve/runs/${runId}`);
 }
 
-export function getPatchContent(runId: string, candidateUrl: string) {
-  const params = new URLSearchParams({ candidate_url: candidateUrl });
+export function getPatchContent(runId: string, patchId: string) {
+  const params = new URLSearchParams({ patch_id: patchId });
   return requestJson<CVEPatchContent>(`/api/v1/cve/runs/${runId}/patch-content?${params.toString()}`);
 }

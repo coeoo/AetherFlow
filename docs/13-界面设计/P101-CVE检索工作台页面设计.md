@@ -11,7 +11,8 @@
 1. 输入或粘贴一个 CVE 编号。
 2. 发起一次运行。
 3. 在当前页直接看到运行状态、最近进展与结论摘要。
-4. 必要时跳转到详情页继续看证据。
+4. 回看最近几次运行的结果。
+5. 必要时跳转到详情页继续看证据。
 
 ---
 
@@ -38,6 +39,7 @@ flowchart TD
     C --> D["📡 Run Status\n状态胶囊 / 当前阶段"]
     D --> E["📃 Recent Progress\n最近 1~3 条进展"]
     E --> F["📊 Verdict Summary\n是否找到补丁 / 证据 / 查看详情"]
+    F --> G["🕘 Recent Runs\n最近运行 / 主证据 / 查看详情"]
 ```
 
 ### 区块1：Page Hero
@@ -69,6 +71,12 @@ flowchart TD
 - 失败时展示 stop reason
 - 主动作：`查看详情`
 
+### 区块6：最近运行
+
+- 展示最近几次 run
+- 每条显示 CVE、状态、失败原因或主证据
+- 支持直接跳详情
+
 ---
 
 ## 🖱️ 关键交互
@@ -76,6 +84,7 @@ flowchart TD
 - 输入非法格式时立即给出前端提示，不发请求。
 - 每次提交都创建新的 run，不做 `reuse_running`。
 - 运行中页面持续轮询，刷新状态区、最近进展与结论摘要区。
+- 页面初始化时加载最近运行列表，便于快速回看。
 - 终态后保留当前结果，不自动清空输入框。
 
 ---
@@ -153,6 +162,7 @@ stateDiagram-v2
 | `validation_message` | string | 校验提示 |
 | `loading` | boolean | 是否正在创建运行 |
 | `active_run` | object | 当前运行摘要 |
+| `recent_runs` | array | 最近运行列表 |
 
 ---
 
@@ -162,6 +172,7 @@ stateDiagram-v2
 |---------------|-----|----------|
 | 创建运行 | `POST /api/v1/cve/runs` | `run_id`、`status`、`phase` |
 | 轮询运行摘要 | `GET /api/v1/cve/runs/{run_id}` | `status`、`phase`、`summary`、`progress`、`recent_progress` |
+| 最近运行列表 | `GET /api/v1/cve/runs` | `run_id`、`cve_id`、`status`、`phase`、`stop_reason`、`summary`、`created_at` |
 
 页面只消费摘要字段。完整证据、patch 与 diff 延迟到 `P102`。
 
@@ -185,9 +196,13 @@ stateDiagram-v2
 - 删除 `reuse_running` 和耗时展示等未落地交互
 - 同步当前轮询策略与详情页跳转行为
 
+### v1.2 - 2026-04-15
+- 增加最近运行区块，允许从工作台直接回看最近几次 run
+- 同步失败原因可读化表达和最近运行列表接口
+
 ---
 
-**文档版本**：v1.1
+**文档版本**：v1.2
 **创建日期**：2026-04-09  
-**最后更新**：2026-04-13
+**最后更新**：2026-04-15
 **维护人**：AI + 开发团队

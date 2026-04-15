@@ -90,7 +90,7 @@ flowchart TD
 - trace 时间线
 
 **交互说明**：
-- 点击 patch：按 `candidate_url` 选中当前 patch
+- 点击 patch：按稳定的 `patch_id` 选中当前 patch
 - 点击“查看 Diff”：按需加载文本内容
 - patch 内容不存在时，按钮不可点
 - trace 默认展示整理后的步骤摘要
@@ -136,6 +136,7 @@ flowchart TD
 #### CVEPatchView
 | 字段名 | 类型 | 必填 | 说明 |
 |--------|------|------|------|
+| patch_id | string | 是 | 稳定补丁标识 |
 | candidate_url | string | 是 | 候选 patch URL |
 | patch_type | string | 是 | `patch/diff` |
 | download_status | string | 是 | 下载状态 |
@@ -157,11 +158,13 @@ flowchart TD
 - `patches` 已按 `candidate_url` 去重，并返回 `duplicate_count`
 
 ### 接口2：获取补丁内容
-**接口路径**：`GET /api/v1/cve/runs/{run_id}/patch-content?candidate_url=...`
+**接口路径**：`GET /api/v1/cve/runs/{run_id}/patch-content?patch_id=...`
 
 **业务规则**：
 - 补丁内容按需加载
 - 如果 Artifact 不存在，返回 404
+- 优先按稳定 `patch_id` 读取内容
+- 为兼容历史调用，接口仍可接受 `candidate_url`
 - 如果同一 `candidate_url` 存在多条记录，按“代表条目”读取可消费内容
 
 ---
@@ -171,7 +174,7 @@ flowchart TD
 #### PatchDiffPanelState
 | 字段名 | 类型 | 必填 | 说明 |
 |--------|------|------|------|
-| candidate_url | string | 否 | 当前查看的补丁 URL |
+| patch_id | string | 否 | 当前查看的补丁标识 |
 | loading | boolean | 是 | 是否正在加载 diff |
 | content_available | boolean | 是 | 是否存在 diff 内容 |
 | error_message | string | 否 | diff 加载失败提示 |
@@ -215,6 +218,9 @@ detail_ready
 
 ### 规则5：`content_available` 必须反映真实可读性
 **规则描述**：只有 Artifact 行存在且磁盘文件仍存在时，按钮才允许查看 diff。
+
+### 规则6：详情页内部交互优先使用稳定标识
+**规则描述**：前端选中补丁和读取 diff 时优先使用 `patch_id`，避免依赖 `candidate_url` 这种业务键。
 
 ---
 
@@ -310,9 +316,13 @@ detail_ready
 - 增加失败进度、代表条目、`duplicate_count` 和真实 `content_available` 契约
 - 同步来源证据 `source_fetch_records` 的详情页消费方式
 
+### v1.3 - 2026-04-15
+- 把详情页补丁交互从 `candidate_url` 收敛为稳定的 `patch_id`
+- 同步 diff 内容接口、详情 payload 和前端状态对象
+
 ---
 
-**文档版本**：v1.2
+**文档版本**：v1.3
 **创建日期**：2026-04-09  
-**最后更新**：2026-04-13
+**最后更新**：2026-04-15
 **维护人**：AI + 开发团队

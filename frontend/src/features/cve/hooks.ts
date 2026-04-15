@@ -1,10 +1,17 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 
-import { createCveRun, getCveRunDetail, getPatchContent } from "./api";
+import { createCveRun, getCveRunDetail, getCveRunHistory, getPatchContent } from "./api";
 
 export function useCreateCveRun() {
   return useMutation({
     mutationFn: createCveRun,
+  });
+}
+
+export function useCveRunHistory() {
+  return useQuery({
+    queryKey: ["cve", "runs"],
+    queryFn: getCveRunHistory,
   });
 }
 
@@ -23,10 +30,10 @@ export function useCveRunDetail(runId: string | null) {
   });
 }
 
-export function usePatchContent(runId: string | null, candidateUrl: string | null) {
+export function usePatchContent(runId: string | null, patchId: string | null) {
   return useQuery({
-    queryKey: ["cve", "patch-content", runId, candidateUrl],
-    queryFn: () => getPatchContent(runId!, candidateUrl!),
-    enabled: Boolean(runId && candidateUrl),
+    queryKey: ["cve", "patch-content", runId, patchId],
+    queryFn: () => getPatchContent(runId!, patchId!),
+    enabled: Boolean(runId && patchId),
   });
 }

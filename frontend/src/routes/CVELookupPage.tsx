@@ -2,13 +2,16 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { AppShell } from "../components/layout/AppShell";
-import { useCreateCveRun, useCveRunDetail } from "../features/cve/hooks";
+import { CVERunHistoryList } from "../features/cve/components/CVERunHistoryList";
+import { useCreateCveRun, useCveRunDetail, useCveRunHistory } from "../features/cve/hooks";
+import { getCvePhaseLabel, getCveStopReasonLabel } from "../features/cve/presentation";
 
 export function CVELookupPage() {
   const [query, setQuery] = useState("CVE-2024-3094");
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const createRun = useCreateCveRun();
+  const historyQuery = useCveRunHistory();
   const detailQuery = useCveRunDetail(activeRunId);
   const detail = detailQuery.data;
 
@@ -72,7 +75,7 @@ export function CVELookupPage() {
             <h2>当前阶段与最近进展</h2>
           </div>
           <p className={`status-pill status-pill-${detail?.status ?? "queued"}`}>{detail?.status ?? "idle"}</p>
-          <p className="card-copy">当前阶段：{detail?.phase ?? "尚未开始"}</p>
+          <p className="card-copy">当前阶段：{detail ? getCvePhaseLabel(detail.phase) : "尚未开始"}</p>
           <div className="cve-progress-copy">
             {detail?.recent_progress?.length ? (
               detail.recent_progress.map((item) => (
@@ -95,7 +98,9 @@ export function CVELookupPage() {
           <p className="card-copy">
             主证据：{detail?.summary.primary_patch_url ?? "运行完成后会在这里显示最可信的 patch URL"}
           </p>
-          <p className="card-copy">停止原因：{detail?.stop_reason ?? "运行中"}</p>
+          <p className="card-copy">
+            停止原因：{getCveStopReasonLabel(detail?.stop_reason ?? null, detail?.status ?? "running")}
+          </p>
           {detail ? (
             <div className="action-row">
               <Link className="action-link action-link-obsidian" to={`/cve/runs/${detail.run_id}`}>
@@ -104,6 +109,8 @@ export function CVELookupPage() {
             </div>
           ) : null}
         </section>
+
+        <CVERunHistoryList runs={historyQuery.data ?? []} />
       </section>
     </AppShell>
   );
