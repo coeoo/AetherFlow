@@ -1,5 +1,5 @@
 import type { CVERunDetail } from "../types";
-import { getCvePhaseLabel, getCveStopReasonLabel } from "../presentation";
+import { getCveFailureAdvice, getCvePhaseLabel, getCveStopReasonLabel } from "../presentation";
 
 type Props = {
   detail: CVERunDetail;
@@ -16,6 +16,8 @@ function getVerdictLabel(detail: CVERunDetail) {
 }
 
 export function CVEVerdictHero({ detail }: Props) {
+  const failureAdvice = detail.status === "failed" ? getCveFailureAdvice(detail.stop_reason) : null;
+
   return (
     <section className="cve-verdict-hero">
       <div className="cve-verdict-copy">
@@ -24,6 +26,8 @@ export function CVEVerdictHero({ detail }: Props) {
         <p className="card-copy">
           当前运行处于 <strong>{getCvePhaseLabel(detail.phase)}</strong>，{detail.summary.patch_count ?? 0} 条 patch 候选已进入结果面。
         </p>
+        {failureAdvice ? <p className="card-copy cve-guidance-copy">{failureAdvice}</p> : null}
+        {detail.summary.error ? <p className="cve-error-copy">错误摘要：{detail.summary.error}</p> : null}
       </div>
       <div className="cve-verdict-meta">
         <div className="cve-kpi-card cve-kpi-card-dark">

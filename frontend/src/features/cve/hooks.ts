@@ -1,10 +1,23 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { createCveRun, getCveRunDetail, getCveRunHistory, getPatchContent } from "./api";
+import type { CVERunListItem } from "./types";
 
 export function useCreateCveRun() {
+  const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: createCveRun,
+    onSuccess: async (createdRun) => {
+      queryClient.setQueryData<CVERunListItem[]>(["cve", "runs"], (currentRuns) => {
+        const deduplicatedRuns = (currentRuns ?? []).filter((run) => run.run_id !== createdRun.run_id);
+        return [createdRun, ...deduplicatedRuns];
+      });
+
+      await queryClient.invalidateQueries({
+        queryKey: ["cve", "runs"],
+      });
+    },
   });
 }
 

@@ -1,19 +1,25 @@
 import type { CVESourceTrace } from "../types";
+import { getCveTraceHeadline } from "../presentation";
 
 type Props = {
   traces: CVESourceTrace[];
 };
 
 export function CVETraceTimeline({ traces }: Props) {
+  const hasFailedTrace = traces.some((trace) => trace.status === "failed");
+
   return (
     <section className="cve-panel">
       <div className="cve-panel-header">
         <p className="card-label">Trace 时间线</p>
-        <h3>探索过的关键页面</h3>
+        <h3>{getCveTraceHeadline(hasFailedTrace)}</h3>
       </div>
       <div className="cve-trace-list">
         {traces.map((trace) => (
-          <article key={trace.fetch_id} className="cve-trace-item">
+          <article
+            key={trace.fetch_id}
+            className={`cve-trace-item${trace.status === "failed" ? " cve-trace-item-failed" : ""}`}
+          >
             <div className="cve-trace-title-row">
               <strong>{trace.label}</strong>
               <span className={`cve-status-chip cve-status-chip-${trace.status}`}>{trace.status}</span>

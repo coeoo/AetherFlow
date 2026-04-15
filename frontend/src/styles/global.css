@@ -378,6 +378,13 @@ select {
   line-height: 1.6;
 }
 
+.cve-guidance-copy {
+  padding: 14px 16px;
+  border-radius: 18px;
+  color: #15314a;
+  background: rgba(226, 236, 244, 0.92);
+}
+
 .cve-verdict-hero {
   display: grid;
   grid-template-columns: 1.3fr 0.8fr;
@@ -422,6 +429,11 @@ select {
 
 .cve-kpi-card-dark .card-label {
   color: rgba(255, 255, 255, 0.72);
+}
+
+.cve-trace-item-failed {
+  border: 1px solid rgba(163, 54, 54, 0.18);
+  background: rgba(250, 240, 240, 0.98);
 }
 
 .cve-detail-grid {
