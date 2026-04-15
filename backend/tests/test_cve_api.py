@@ -153,8 +153,54 @@ def test_get_cve_run_returns_detail_payload_with_progress_traces_and_patches(
                 source_type="cve_seed_resolve",
                 source_ref=run.cve_id,
                 status="succeeded",
-                request_snapshot_json={"cve_id": run.cve_id},
-                response_meta_json={"reference_count": 2},
+                request_snapshot_json={
+                    "cve_id": run.cve_id,
+                    "sources": ["cve_official", "osv", "github_advisory", "nvd"],
+                    "request_urls": {
+                        "cve_official": f"https://cveawg.mitre.org/api/cve/{run.cve_id}",
+                        "osv": f"https://api.osv.dev/v1/vulns/{run.cve_id}",
+                        "github_advisory": f"https://api.github.com/advisories?cve_id={run.cve_id}&per_page=20",
+                        "nvd": f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={run.cve_id}",
+                    },
+                },
+                response_meta_json={
+                    "status_code": 200,
+                    "reference_count": 2,
+                    "source_results": [
+                        {
+                            "source": "cve_official",
+                            "status": "success",
+                            "status_code": 200,
+                            "reference_count": 2,
+                            "error_kind": None,
+                            "error_message": None,
+                        },
+                        {
+                            "source": "osv",
+                            "status": "not_found",
+                            "status_code": 404,
+                            "reference_count": 0,
+                            "error_kind": None,
+                            "error_message": None,
+                        },
+                        {
+                            "source": "github_advisory",
+                            "status": "not_found",
+                            "status_code": 200,
+                            "reference_count": 0,
+                            "error_kind": None,
+                            "error_message": None,
+                        },
+                        {
+                            "source": "nvd",
+                            "status": "not_found",
+                            "status_code": 200,
+                            "reference_count": 0,
+                            "error_kind": None,
+                            "error_message": None,
+                        },
+                    ],
+                },
             ),
             SourceFetchRecord(
                 scene_name="cve",
@@ -220,6 +266,40 @@ def test_get_cve_run_returns_detail_payload_with_progress_traces_and_patches(
     assert len(body["data"]["source_traces"]) == 3
     traces_by_step = {item["step"]: item for item in body["data"]["source_traces"]}
     assert traces_by_step["cve_page_fetch"]["url"] == "https://example.com/advisory"
+    assert traces_by_step["cve_seed_resolve"]["response_meta"]["source_results"] == [
+        {
+            "source": "cve_official",
+            "status": "success",
+            "status_code": 200,
+            "reference_count": 2,
+            "error_kind": None,
+            "error_message": None,
+        },
+        {
+            "source": "osv",
+            "status": "not_found",
+            "status_code": 404,
+            "reference_count": 0,
+            "error_kind": None,
+            "error_message": None,
+        },
+        {
+            "source": "github_advisory",
+            "status": "not_found",
+            "status_code": 200,
+            "reference_count": 0,
+            "error_kind": None,
+            "error_message": None,
+        },
+        {
+            "source": "nvd",
+            "status": "not_found",
+            "status_code": 200,
+            "reference_count": 0,
+            "error_kind": None,
+            "error_message": None,
+        },
+    ]
     assert body["data"]["patches"] == [
         {
             "patch_id": str(patch.patch_id),

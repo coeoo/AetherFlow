@@ -259,26 +259,40 @@ def test_execute_cve_run_writes_source_fetch_records_without_breaking_summary(
     db_session.commit()
     monkeypatch.setenv("AETHERFLOW_ARTIFACT_ROOT", str(tmp_path))
     patch_text = "diff --git a/app.py b/app.py\n+patched = True\n"
+    request_urls = {
+        "cve_official": f"https://cveawg.mitre.org/api/cve/{run.cve_id}",
+        "osv": f"https://api.osv.dev/v1/vulns/{run.cve_id}",
+        "github_advisory": f"https://api.github.com/advisories?cve_id={run.cve_id}&per_page=20",
+        "nvd": f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={run.cve_id}",
+    }
 
     def _fake_http_get(url: str, **kwargs) -> httpx.Response:
         request = httpx.Request("GET", url)
-        if "services.nvd.nist.gov" in url:
+        if url == request_urls["cve_official"]:
             return httpx.Response(
                 200,
                 json={
-                    "vulnerabilities": [
-                        {
-                            "cve": {
-                                "references": [
-                                    {"url": "https://example.com/advisory"},
-                                    {"url": "https://example.com/advisory#dup"},
-                                ]
-                            }
+                    "containers": {
+                        "cna": {
+                            "references": [
+                                {"url": "https://example.com/advisory"},
+                                {"url": "https://example.com/advisory#dup"},
+                            ]
                         }
-                    ]
+                    }
                 },
                 request=request,
             )
+        if url == request_urls["osv"]:
+            return httpx.Response(
+                404,
+                json={"code": 5, "message": "not found"},
+                request=request,
+            )
+        if url == request_urls["github_advisory"]:
+            return httpx.Response(200, json=[], request=request)
+        if url == request_urls["nvd"]:
+            return httpx.Response(200, json={"vulnerabilities": []}, request=request)
         if url == "https://example.com/advisory":
             return httpx.Response(
                 200,
@@ -302,7 +316,7 @@ def test_execute_cve_run_writes_source_fetch_records_without_breaking_summary(
             }
         ],
     )
-    monkeypatch.setattr("app.cve.seed_resolver.httpx.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.seed_sources.httpx.get", _fake_http_get)
     monkeypatch.setattr("app.cve.page_fetcher.httpx.get", _fake_http_get)
     monkeypatch.setattr("app.cve.patch_downloader.httpx.get", _fake_http_get)
 
@@ -328,6 +342,47 @@ def test_execute_cve_run_writes_source_fetch_records_without_breaking_summary(
         "cve_patch_download",
         "cve_page_fetch",
     }
+    seed_record = next(record for record in records if record.source_type == "cve_seed_resolve")
+    assert seed_record.request_snapshot_json == {
+        "cve_id": run.cve_id,
+        "sources": ["cve_official", "osv", "github_advisory", "nvd"],
+        "request_urls": request_urls,
+    }
+    assert seed_record.response_meta_json["reference_count"] == 1
+    assert seed_record.response_meta_json["source_results"] == [
+        {
+            "source": "cve_official",
+            "status": "success",
+            "status_code": 200,
+            "reference_count": 1,
+            "error_kind": None,
+            "error_message": None,
+        },
+        {
+            "source": "osv",
+            "status": "not_found",
+            "status_code": 404,
+            "reference_count": 0,
+            "error_kind": None,
+            "error_message": None,
+        },
+        {
+            "source": "github_advisory",
+            "status": "not_found",
+            "status_code": 200,
+            "reference_count": 0,
+            "error_kind": None,
+            "error_message": None,
+        },
+        {
+            "source": "nvd",
+            "status": "not_found",
+            "status_code": 200,
+            "reference_count": 0,
+            "error_kind": None,
+            "error_message": None,
+        },
+    ]
 
 
 def test_execute_cve_run_deduplicates_patch_candidates_across_pages(

@@ -33,25 +33,40 @@ def test_post_run_then_worker_once_then_get_summary_returns_terminal_state(
         ],
     )
     patch_text = "diff --git a/app.py b/app.py\n+patched = True\n"
+    cve_id = "CVE-2024-3094"
+    request_urls = {
+        "cve_official": f"https://cveawg.mitre.org/api/cve/{cve_id}",
+        "osv": f"https://api.osv.dev/v1/vulns/{cve_id}",
+        "github_advisory": f"https://api.github.com/advisories?cve_id={cve_id}&per_page=20",
+        "nvd": f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={cve_id}",
+    }
 
     def _fake_http_get(url: str, **kwargs) -> httpx.Response:
         request = httpx.Request("GET", url)
-        if "services.nvd.nist.gov" in url:
+        if url == request_urls["cve_official"]:
             return httpx.Response(
                 200,
                 json={
-                    "vulnerabilities": [
-                        {
-                            "cve": {
-                                "references": [
-                                    {"url": "https://example.com/advisory"},
-                                ]
-                            }
+                    "containers": {
+                        "cna": {
+                            "references": [
+                                {"url": "https://example.com/advisory"},
+                            ]
                         }
-                    ]
+                    }
                 },
                 request=request,
             )
+        if url == request_urls["osv"]:
+            return httpx.Response(
+                404,
+                json={"code": 5, "message": "not found"},
+                request=request,
+            )
+        if url == request_urls["github_advisory"]:
+            return httpx.Response(200, json=[], request=request)
+        if url == request_urls["nvd"]:
+            return httpx.Response(200, json={"vulnerabilities": []}, request=request)
         if url == "https://example.com/advisory":
             return httpx.Response(
                 200,
@@ -66,11 +81,11 @@ def test_post_run_then_worker_once_then_get_summary_returns_terminal_state(
             request=request,
         )
 
-    monkeypatch.setattr("app.cve.seed_resolver.httpx.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.seed_sources.httpx.get", _fake_http_get)
     monkeypatch.setattr("app.cve.page_fetcher.httpx.get", _fake_http_get)
     monkeypatch.setattr("app.cve.patch_downloader.httpx.get", _fake_http_get)
 
-    response = client.post("/api/v1/cve/runs", json={"cve_id": "CVE-2024-3094"})
+    response = client.post("/api/v1/cve/runs", json={"cve_id": cve_id})
     run_id = response.json()["data"]["run_id"]
 
     session_factory = create_session_factory(test_database_url)
@@ -84,6 +99,46 @@ def test_post_run_then_worker_once_then_get_summary_returns_terminal_state(
     assert body["stop_reason"] == "patches_downloaded"
     assert body["summary"]["patch_found"] is True
     assert body["summary"]["patch_count"] == 1
+    seed_trace = next(item for item in body["source_traces"] if item["step"] == "cve_seed_resolve")
+    assert seed_trace["request_snapshot"] == {
+        "cve_id": cve_id,
+        "sources": ["cve_official", "osv", "github_advisory", "nvd"],
+        "request_urls": request_urls,
+    }
+    assert seed_trace["response_meta"]["source_results"] == [
+        {
+            "source": "cve_official",
+            "status": "success",
+            "status_code": 200,
+            "reference_count": 1,
+            "error_kind": None,
+            "error_message": None,
+        },
+        {
+            "source": "osv",
+            "status": "not_found",
+            "status_code": 404,
+            "reference_count": 0,
+            "error_kind": None,
+            "error_message": None,
+        },
+        {
+            "source": "github_advisory",
+            "status": "not_found",
+            "status_code": 200,
+            "reference_count": 0,
+            "error_kind": None,
+            "error_message": None,
+        },
+        {
+            "source": "nvd",
+            "status": "not_found",
+            "status_code": 200,
+            "reference_count": 0,
+            "error_kind": None,
+            "error_message": None,
+        },
+    ]
 
     db_session.expire_all()
     run = db_session.get(CVERun, run_id)

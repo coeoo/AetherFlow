@@ -19,6 +19,18 @@ const PHASE_LABELS: Record<string, string> = {
   finalize_run: "收敛结果",
 };
 
+const PATCH_TYPE_LABELS: Record<string, string> = {
+  patch: "Patch",
+  diff: "Diff",
+  debdiff: "Debdiff",
+  github_commit_patch: "GitHub Commit Patch",
+  github_pull_patch: "GitHub PR Patch",
+  gitlab_commit_patch: "GitLab Commit Patch",
+  gitlab_merge_request_patch: "GitLab MR Patch",
+  kernel_commit_patch: "Kernel Commit Patch",
+  bugzilla_attachment_patch: "Bugzilla Attachment Patch",
+};
+
 const STOP_REASON_ADVICE: Record<string, string> = {
   no_seed_references: "建议先检查当前 CVE 是否存在可用参考链接，再确认是否需要补充其他来源。",
   fetch_failed: "建议先检查目标页面是否仍可访问，再确认是否需要补抓或更换来源。",
@@ -40,6 +52,10 @@ export function getCveStopReasonLabel(stopReason: string | null, status: string)
 
 export function getCvePhaseLabel(phase: string) {
   return PHASE_LABELS[phase] ?? phase;
+}
+
+export function getCvePatchTypeLabel(patchType: string) {
+  return PATCH_TYPE_LABELS[patchType] ?? patchType;
 }
 
 export function getCveFailureAdvice(stopReason: string | null) {
