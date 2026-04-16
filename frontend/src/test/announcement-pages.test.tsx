@@ -231,6 +231,12 @@ test("announcement detail page renders package summary from api payload", async 
                 channel_type: "wecom",
                 match_reason: "命中来源投递白名单",
               },
+              {
+                target_id: "target-002",
+                name: "邮件通知组",
+                channel_type: "email",
+                match_reason: "命中平台启用目标",
+              },
             ],
             recent_records: [],
           },
@@ -247,8 +253,8 @@ test("announcement detail page renders package summary from api payload", async 
           created_count: 1,
           records: [
             {
-              target_id: "target-001",
-              target_name: "安全响应群",
+              target_id: "target-002",
+              target_name: "邮件通知组",
               status: "prepared",
             },
           ],
@@ -270,7 +276,9 @@ test("announcement detail page renders package summary from api payload", async 
   expect(screen.getByText("检测到与 Linux 生态相关的安全公告。")).toBeInTheDocument();
   expect(screen.getByText("安全响应群")).toBeInTheDocument();
   expect(screen.getByText(/wecom · 命中来源投递白名单/)).toBeInTheDocument();
+  expect(screen.getByText("邮件通知组")).toBeInTheDocument();
 
+  fireEvent.click(screen.getByLabelText("选择目标 安全响应群"));
   fireEvent.click(screen.getByRole("button", { name: "生成投递记录" }));
 
   expect(await screen.findByText("已生成 1 条投递记录")).toBeInTheDocument();
@@ -280,7 +288,12 @@ test("announcement detail page renders package summary from api payload", async 
   );
   expect(fetchMock).toHaveBeenCalledWith(
     expect.stringContaining("/api/v1/announcements/runs/run-001/deliveries"),
-    expect.objectContaining({ method: "POST" }),
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        target_ids: ["target-002"],
+      }),
+    }),
   );
 });
 
@@ -464,7 +477,7 @@ test("delivery center target tab supports creating and editing targets", async (
   );
 });
 
-test("delivery center records tab loads announcement delivery records", async () => {
+test("delivery center records tab keeps filters in url and queries by scene status channel", async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes("/api/v1/platform/delivery-targets")) {
@@ -476,7 +489,11 @@ test("delivery center records tab loads announcement delivery records", async ()
     }
 
     if (url.includes("/api/v1/platform/delivery-records")) {
-      if (url.includes("status=prepared")) {
+      if (
+        url.includes("scene_name=announcement") &&
+        url.includes("status=prepared") &&
+        url.includes("channel_type=wecom")
+      ) {
         return mockJsonResponse({
           code: 0,
           message: "success",
@@ -528,16 +545,29 @@ test("delivery center records tab loads announcement delivery records", async ()
 
   vi.stubGlobal("fetch", fetchMock);
 
-  renderPath("/deliveries?tab=records");
+  renderPath("/deliveries?tab=records&scene_name=announcement&status=prepared&channel_type=wecom");
 
   expect(await screen.findByText("OpenSSL advisory")).toBeInTheDocument();
   expect(screen.getByText(/安全响应群 · announcement · prepared/)).toBeInTheDocument();
+  expect(screen.getByLabelText("场景筛选")).toHaveValue("announcement");
+  expect(screen.getByLabelText("状态筛选")).toHaveValue("prepared");
+  expect(screen.getByLabelText("渠道筛选")).toHaveValue("wecom");
   expect(screen.getByRole("link", { name: "目标管理" })).toHaveAttribute(
     "href",
     "/deliveries",
   );
-  expect(screen.getByRole("link", { name: "仅看 prepared" })).toHaveAttribute(
-    "href",
-    "/deliveries?tab=records&status=prepared",
-  );
+
+  fireEvent.change(screen.getByLabelText("渠道筛选"), {
+    target: { value: "email" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "应用筛选" }));
+
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "/api/v1/platform/delivery-records?scene_name=announcement&status=prepared&channel_type=email",
+      ),
+      expect.anything(),
+    );
+  });
 });

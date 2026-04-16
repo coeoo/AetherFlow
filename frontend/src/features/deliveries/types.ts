@@ -12,6 +12,12 @@ export type DeliveryRecordView = {
   payload_summary: Record<string, unknown>;
 };
 
+export type DeliveryRecordFilters = {
+  scene_name: string | null;
+  status: string | null;
+  channel_type: string | null;
+};
+
 export type DeliveryTargetView = {
   target_id: string;
   name: string;

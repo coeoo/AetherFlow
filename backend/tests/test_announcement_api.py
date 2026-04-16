@@ -466,6 +466,54 @@ def test_get_platform_delivery_records_filters_by_status(client, db_session) -> 
     assert [item["payload_summary"]["title"] for item in body["data"]] == ["OpenSSL advisory"]
 
 
+def test_get_platform_delivery_records_filters_by_channel_type(client, db_session) -> None:
+    wecom_target = DeliveryTarget(
+        name="安全响应群",
+        channel_type="wecom",
+        enabled=True,
+        config_json={},
+    )
+    email_target = DeliveryTarget(
+        name="邮件通知组",
+        channel_type="email",
+        enabled=True,
+        config_json={},
+    )
+    db_session.add_all([wecom_target, email_target])
+    db_session.flush()
+
+    wecom_record = DeliveryRecord(
+        target_id=wecom_target.target_id,
+        scene_name="announcement",
+        source_ref_type="announcement_run",
+        source_ref_id=uuid.uuid4(),
+        status="prepared",
+        payload_summary_json={"title": "OpenSSL advisory"},
+        response_snapshot_json={"mode": "platform_only"},
+    )
+    email_record = DeliveryRecord(
+        target_id=email_target.target_id,
+        scene_name="announcement",
+        source_ref_type="announcement_run",
+        source_ref_id=uuid.uuid4(),
+        status="prepared",
+        payload_summary_json={"title": "Kernel advisory"},
+        response_snapshot_json={"mode": "platform_only"},
+    )
+    db_session.add_all([wecom_record, email_record])
+    db_session.commit()
+
+    response = client.get(
+        "/api/v1/platform/delivery-records?scene_name=announcement&channel_type=email"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 0
+    assert [item["channel_type"] for item in body["data"]] == ["email"]
+    assert [item["payload_summary"]["title"] for item in body["data"]] == ["Kernel advisory"]
+
+
 def test_get_platform_delivery_targets_returns_target_views(client, db_session) -> None:
     enabled_target = DeliveryTarget(
         name="安全响应群",

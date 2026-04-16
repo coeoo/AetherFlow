@@ -1,6 +1,7 @@
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { AppShell } from "../components/layout/AppShell";
 
+import { AppShell } from "../components/layout/AppShell";
 import {
   useAnnouncementRunDetail,
   useCreateAnnouncementRunDeliveries,
@@ -12,6 +13,12 @@ export function AnnouncementRunDetailPage() {
   const createDeliveries = useCreateAnnouncementRunDeliveries(runId);
   const detail = detailQuery.data;
   const delivery = detail?.delivery;
+
+  const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    setSelectedTargetIds(delivery?.matched_targets.map((target) => target.target_id) ?? []);
+  }, [delivery?.matched_targets]);
 
   if (detailQuery.isLoading) {
     return (
@@ -93,14 +100,34 @@ export function AnnouncementRunDetailPage() {
             <h2>推荐列表</h2>
           </div>
           {delivery?.matched_targets.length ? (
-            delivery.matched_targets.map((target) => (
-              <article key={target.target_id} className="cve-inline-progress">
-                <strong>{target.name}</strong>
-                <span>
-                  {target.channel_type} · {target.match_reason}
-                </span>
-              </article>
-            ))
+            <>
+              <p className="card-copy">已选择 {selectedTargetIds.length} 个目标用于生成投递记录。</p>
+              {delivery.matched_targets.map((target) => {
+                const checked = selectedTargetIds.includes(target.target_id);
+                return (
+                  <article key={target.target_id} className="cve-inline-progress">
+                    <label className="action-row">
+                      <input
+                        aria-label={`选择目标 ${target.name}`}
+                        checked={checked}
+                        type="checkbox"
+                        onChange={() => {
+                          setSelectedTargetIds((current) =>
+                            current.includes(target.target_id)
+                              ? current.filter((item) => item !== target.target_id)
+                              : [...current, target.target_id],
+                          );
+                        }}
+                      />
+                      <strong>{target.name}</strong>
+                    </label>
+                    <span>
+                      {target.channel_type} · {target.match_reason}
+                    </span>
+                  </article>
+                );
+              })}
+            </>
           ) : (
             <p className="card-copy">当前还没有匹配到可用目标。</p>
           )}
@@ -111,11 +138,11 @@ export function AnnouncementRunDetailPage() {
               disabled={
                 createDeliveries.isPending ||
                 !delivery?.notify_recommended ||
-                !delivery?.matched_targets.length
+                selectedTargetIds.length === 0
               }
               type="button"
               onClick={() => {
-                createDeliveries.mutate();
+                createDeliveries.mutate(selectedTargetIds);
               }}
             >
               {createDeliveries.isPending ? "生成中…" : "生成投递记录"}

@@ -43,12 +43,14 @@ export function getAnnouncementRunDetail(runId: string) {
   return requestJson<AnnouncementRunDetail>(`/api/v1/announcements/runs/${runId}`);
 }
 
-export function createAnnouncementDeliveries(runId: string) {
+export function createAnnouncementDeliveries(runId: string, targetIds: string[]) {
   return requestJson<AnnouncementCreateDeliveriesResult>(
     `/api/v1/announcements/runs/${runId}/deliveries`,
     {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        target_ids: targetIds,
+      }),
     },
   );
 }

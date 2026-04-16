@@ -171,6 +171,7 @@ def list_platform_delivery_records(
     *,
     scene_name: str | None,
     status: str | None,
+    channel_type: str | None,
     limit: int,
 ) -> list[dict[str, object]]:
     query = _delivery_record_query()
@@ -178,6 +179,8 @@ def list_platform_delivery_records(
         query = query.where(DeliveryRecord.scene_name == scene_name)
     if status:
         query = query.where(DeliveryRecord.status == status)
+    if channel_type:
+        query = query.where(DeliveryTarget.channel_type == channel_type)
 
     rows = session.execute(query).all()
     records = [_serialize_delivery_record(record, target) for record, target in rows]

@@ -8,7 +8,7 @@ import {
   useDeliveryTargets,
   useUpdateDeliveryTarget,
 } from "../features/deliveries/hooks";
-import type { DeliveryTargetView } from "../features/deliveries/types";
+import type { DeliveryRecordFilters, DeliveryTargetView } from "../features/deliveries/types";
 
 type DeliveryTargetFormState = {
   name: string;
@@ -25,11 +25,19 @@ const EMPTY_TARGET_FORM: DeliveryTargetFormState = {
 };
 
 export function DeliveryCenterPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") === "records" ? "records" : "targets";
-  const statusFilter = searchParams.get("status");
+  const urlRecordFilters = getRecordFiltersFromSearchParams(searchParams);
   const targetsQuery = useDeliveryTargets();
-  const recordsQuery = useDeliveryRecords("announcement", activeTab === "records" ? statusFilter : null);
+  const recordsQuery = useDeliveryRecords(
+    activeTab === "records"
+      ? urlRecordFilters
+      : {
+          scene_name: "announcement",
+          status: null,
+          channel_type: null,
+        },
+  );
   const createTarget = useCreateDeliveryTarget();
   const updateTarget = useUpdateDeliveryTarget();
   const targets = targetsQuery.data ?? [];
@@ -37,6 +45,7 @@ export function DeliveryCenterPage() {
 
   const [editingTargetId, setEditingTargetId] = useState<string | null>(null);
   const [formState, setFormState] = useState<DeliveryTargetFormState>(EMPTY_TARGET_FORM);
+  const [recordFilters, setRecordFilters] = useState<DeliveryRecordFilters>(urlRecordFilters);
   const [formError, setFormError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
@@ -55,6 +64,10 @@ export function DeliveryCenterPage() {
 
     setFormState(toTargetFormState(target));
   }, [editingTargetId, targets]);
+
+  useEffect(() => {
+    setRecordFilters(getRecordFiltersFromSearchParams(searchParams));
+  }, [searchParams]);
 
   function resetEditor() {
     setEditingTargetId(null);
@@ -119,6 +132,11 @@ export function DeliveryCenterPage() {
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "保存目标失败");
     }
+  }
+
+  function applyRecordFilters(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSearchParams(buildRecordSearchParams(recordFilters));
   }
 
   return (
@@ -282,20 +300,81 @@ export function DeliveryCenterPage() {
           </div>
           {activeTab === "records" ? (
             <>
-              <div className="action-row">
-                <Link
-                  className={statusFilter === null ? "action-link action-link-obsidian" : "action-link"}
-                  to="/deliveries?tab=records"
-                >
-                  全部状态
-                </Link>
-                <Link
-                  className={statusFilter === "prepared" ? "action-link action-link-obsidian" : "action-link"}
-                  to="/deliveries?tab=records&status=prepared"
-                >
-                  仅看 prepared
-                </Link>
-              </div>
+              <form className="stack-sm" onSubmit={applyRecordFilters}>
+                <label className="stack-xs">
+                  <span>场景筛选</span>
+                  <select
+                    aria-label="场景筛选"
+                    value={recordFilters.scene_name ?? ""}
+                    onChange={(event) =>
+                      setRecordFilters((current) => ({
+                        ...current,
+                        scene_name: event.target.value || null,
+                      }))
+                    }
+                  >
+                    <option value="">全部场景</option>
+                    <option value="announcement">announcement</option>
+                  </select>
+                </label>
+                <label className="stack-xs">
+                  <span>状态筛选</span>
+                  <select
+                    aria-label="状态筛选"
+                    value={recordFilters.status ?? ""}
+                    onChange={(event) =>
+                      setRecordFilters((current) => ({
+                        ...current,
+                        status: event.target.value || null,
+                      }))
+                    }
+                  >
+                    <option value="">全部状态</option>
+                    <option value="prepared">prepared</option>
+                    <option value="skipped">skipped</option>
+                    <option value="succeeded">succeeded</option>
+                    <option value="failed">failed</option>
+                  </select>
+                </label>
+                <label className="stack-xs">
+                  <span>渠道筛选</span>
+                  <select
+                    aria-label="渠道筛选"
+                    value={recordFilters.channel_type ?? ""}
+                    onChange={(event) =>
+                      setRecordFilters((current) => ({
+                        ...current,
+                        channel_type: event.target.value || null,
+                      }))
+                    }
+                  >
+                    <option value="">全部渠道</option>
+                    <option value="wecom">wecom</option>
+                    <option value="email">email</option>
+                    <option value="webhook">webhook</option>
+                  </select>
+                </label>
+                <div className="action-row">
+                  <button className="action-link action-link-obsidian" type="submit">
+                    应用筛选
+                  </button>
+                  <button
+                    className="action-link action-link-muted"
+                    type="button"
+                    onClick={() => {
+                      const clearedFilters = {
+                        scene_name: null,
+                        status: null,
+                        channel_type: null,
+                      };
+                      setRecordFilters(clearedFilters);
+                      setSearchParams(buildRecordSearchParams(clearedFilters));
+                    }}
+                  >
+                    清空筛选
+                  </button>
+                </div>
+              </form>
               {recordsQuery.isLoading ? <p className="card-copy">正在加载投递记录…</p> : null}
               {!recordsQuery.isLoading && !records.length ? (
                 <p className="card-copy">当前还没有投递记录。</p>
@@ -325,4 +404,26 @@ function toTargetFormState(target: DeliveryTargetView): DeliveryTargetFormState 
     enabled: target.enabled,
     configText: JSON.stringify(target.config_json ?? target.config_summary ?? {}, null, 2),
   };
+}
+
+function getRecordFiltersFromSearchParams(searchParams: URLSearchParams): DeliveryRecordFilters {
+  return {
+    scene_name: searchParams.get("scene_name"),
+    status: searchParams.get("status"),
+    channel_type: searchParams.get("channel_type"),
+  };
+}
+
+function buildRecordSearchParams(filters: DeliveryRecordFilters): URLSearchParams {
+  const nextSearchParams = new URLSearchParams({ tab: "records" });
+  if (filters.scene_name) {
+    nextSearchParams.set("scene_name", filters.scene_name);
+  }
+  if (filters.status) {
+    nextSearchParams.set("status", filters.status);
+  }
+  if (filters.channel_type) {
+    nextSearchParams.set("channel_type", filters.channel_type);
+  }
+  return nextSearchParams;
 }

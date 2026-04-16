@@ -34,14 +34,14 @@ export function useCreateAnnouncementRunDeliveries(runId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: () => createAnnouncementDeliveries(runId),
+    mutationFn: (targetIds: string[]) => createAnnouncementDeliveries(runId, targetIds),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({
           queryKey: ["announcements", "run", runId],
         }),
         queryClient.invalidateQueries({
-          queryKey: ["deliveries", "records", "announcement"],
+          queryKey: ["deliveries", "records"],
         }),
       ]);
     },

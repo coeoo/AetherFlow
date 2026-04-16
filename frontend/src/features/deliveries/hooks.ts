@@ -6,12 +6,16 @@ import {
   getDeliveryTargets,
   updateDeliveryTarget,
 } from "./api";
-import type { CreateDeliveryTargetInput, UpdateDeliveryTargetInput } from "./types";
+import type {
+  CreateDeliveryTargetInput,
+  DeliveryRecordFilters,
+  UpdateDeliveryTargetInput,
+} from "./types";
 
-export function useDeliveryRecords(sceneName: string, status: string | null = null) {
+export function useDeliveryRecords(filters: DeliveryRecordFilters) {
   return useQuery({
-    queryKey: ["deliveries", "records", sceneName, status],
-    queryFn: () => getFilteredDeliveryRecords(sceneName, status),
+    queryKey: ["deliveries", "records", filters],
+    queryFn: () => getFilteredDeliveryRecords(filters),
   });
 }
 

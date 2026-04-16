@@ -33,6 +33,7 @@ class UpdateDeliveryTargetRequest(BaseModel):
 def get_delivery_records(
     scene_name: str | None = Query(default=None),
     status: str | None = Query(default=None),
+    channel_type: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> dict[str, object]:
     settings = load_settings()
@@ -42,6 +43,7 @@ def get_delivery_records(
             session,
             scene_name=scene_name,
             status=status,
+            channel_type=channel_type,
             limit=limit,
         )
 

@@ -1,6 +1,7 @@
 import type {
   ApiEnvelope,
   CreateDeliveryTargetInput,
+  DeliveryRecordFilters,
   DeliveryRecordView,
   DeliveryTargetView,
   UpdateDeliveryTargetInput,
@@ -28,16 +29,16 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return payload.data;
 }
 
-export function getDeliveryRecords(sceneName: string) {
-  return requestJson<DeliveryRecordView[]>(
-    `/api/v1/platform/delivery-records?scene_name=${encodeURIComponent(sceneName)}`,
-  );
-}
-
-export function getFilteredDeliveryRecords(sceneName: string, status: string | null) {
-  const query = new URLSearchParams({ scene_name: sceneName });
-  if (status) {
-    query.set("status", status);
+export function getFilteredDeliveryRecords(filters: DeliveryRecordFilters) {
+  const query = new URLSearchParams();
+  if (filters.scene_name) {
+    query.set("scene_name", filters.scene_name);
+  }
+  if (filters.status) {
+    query.set("status", filters.status);
+  }
+  if (filters.channel_type) {
+    query.set("channel_type", filters.channel_type);
   }
   return requestJson<DeliveryRecordView[]>(`/api/v1/platform/delivery-records?${query.toString()}`);
 }
