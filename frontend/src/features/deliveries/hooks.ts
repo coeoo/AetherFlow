@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getFilteredDeliveryRecords, getDeliveryTargets, updateDeliveryTarget } from "./api";
-import type { UpdateDeliveryTargetInput } from "./types";
+import {
+  createDeliveryTarget,
+  getFilteredDeliveryRecords,
+  getDeliveryTargets,
+  updateDeliveryTarget,
+} from "./api";
+import type { CreateDeliveryTargetInput, UpdateDeliveryTargetInput } from "./types";
 
 export function useDeliveryRecords(sceneName: string, status: string | null = null) {
   return useQuery({
@@ -14,6 +19,19 @@ export function useDeliveryTargets() {
   return useQuery({
     queryKey: ["deliveries", "targets"],
     queryFn: getDeliveryTargets,
+  });
+}
+
+export function useCreateDeliveryTarget() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: CreateDeliveryTargetInput) => createDeliveryTarget(input),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["deliveries", "targets"],
+      });
+    },
   });
 }
 

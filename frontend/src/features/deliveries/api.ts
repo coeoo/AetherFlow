@@ -1,5 +1,6 @@
 import type {
   ApiEnvelope,
+  CreateDeliveryTargetInput,
   DeliveryRecordView,
   DeliveryTargetView,
   UpdateDeliveryTargetInput,
@@ -45,9 +46,17 @@ export function getDeliveryTargets() {
   return requestJson<DeliveryTargetView[]>("/api/v1/platform/delivery-targets");
 }
 
+export function createDeliveryTarget(input: CreateDeliveryTargetInput) {
+  return requestJson<DeliveryTargetView>("/api/v1/platform/delivery-targets", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export function updateDeliveryTarget(input: UpdateDeliveryTargetInput) {
+  const { target_id, ...payload } = input;
   return requestJson<DeliveryTargetView>(`/api/v1/platform/delivery-targets/${input.target_id}`, {
     method: "PATCH",
-    body: JSON.stringify({ enabled: input.enabled }),
+    body: JSON.stringify(payload),
   });
 }

@@ -284,40 +284,80 @@ test("announcement detail page renders package summary from api payload", async 
   );
 });
 
-test("delivery center page defaults to delivery targets tab", async () => {
+test("delivery center target tab supports creating and editing targets", async () => {
+  let targets = [
+    {
+      target_id: "target-001",
+      name: "安全响应群",
+      channel_type: "wecom",
+      enabled: true,
+      config_json: {
+        webhook_url: "https://example.com/webhook",
+        scene_names: ["announcement"],
+      },
+      config_summary: {
+        webhook_url: "https://example.com/webhook",
+        scene_names: ["announcement"],
+      },
+    },
+  ];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.includes("/api/v1/platform/delivery-targets")) {
-      if (init?.method === "PATCH") {
-        return mockJsonResponse({
-          code: 0,
-          message: "success",
-          data: {
-            target_id: "target-001",
-            name: "安全响应群",
-            channel_type: "wecom",
-            enabled: false,
+      if (init?.method === "POST") {
+        targets = [
+          ...targets,
+          {
+            target_id: "target-002",
+            name: "邮件通知组",
+            channel_type: "email",
+            enabled: true,
+            config_json: {
+              recipients: ["soc@example.com"],
+              scene_names: ["announcement"],
+            },
             config_summary: {
+              recipients: ["soc@example.com"],
               scene_names: ["announcement"],
             },
           },
+        ];
+        return mockJsonResponse({
+          code: 0,
+          message: "success",
+          data: targets[1],
+        });
+      }
+
+      if (init?.method === "PATCH") {
+        targets = [
+          {
+            target_id: "target-001",
+            name: "公告邮件组",
+            channel_type: "email",
+            enabled: false,
+            config_json: {
+              recipients: ["team@example.com"],
+              scene_names: ["announcement"],
+            },
+            config_summary: {
+              recipients: ["team@example.com"],
+              scene_names: ["announcement"],
+            },
+          },
+          targets[1]!,
+        ];
+        return mockJsonResponse({
+          code: 0,
+          message: "success",
+          data: targets[0],
         });
       }
 
       return mockJsonResponse({
         code: 0,
         message: "success",
-        data: [
-          {
-            target_id: "target-001",
-            name: "安全响应群",
-            channel_type: "wecom",
-            enabled: true,
-            config_summary: {
-              scene_names: ["announcement"],
-            },
-          },
-        ],
+        data: targets,
       });
     }
 
@@ -338,17 +378,89 @@ test("delivery center page defaults to delivery targets tab", async () => {
 
   expect(await screen.findByText("安全响应群")).toBeInTheDocument();
   expect(screen.getByText(/wecom · 启用/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "新建目标" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "投递记录" })).toHaveAttribute(
     "href",
     "/deliveries?tab=records",
   );
 
-  fireEvent.click(screen.getByRole("button", { name: "停用目标" }));
+  fireEvent.click(screen.getByRole("button", { name: "新建目标" }));
+  fireEvent.change(screen.getByLabelText("目标名称"), {
+    target: { value: "邮件通知组" },
+  });
+  fireEvent.change(screen.getByLabelText("渠道类型"), {
+    target: { value: "email" },
+  });
+  fireEvent.change(screen.getByLabelText("配置 JSON"), {
+    target: {
+      value: JSON.stringify(
+        {
+          recipients: ["soc@example.com"],
+          scene_names: ["announcement"],
+        },
+        null,
+        2,
+      ),
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "创建目标" }));
 
-  expect(await screen.findByText("目标状态已更新")).toBeInTheDocument();
+  expect(await screen.findByText("目标已保存")).toBeInTheDocument();
+  expect(await screen.findByText("邮件通知组")).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringContaining("/api/v1/platform/delivery-targets"),
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        name: "邮件通知组",
+        channel_type: "email",
+        enabled: true,
+        config_json: {
+          recipients: ["soc@example.com"],
+          scene_names: ["announcement"],
+        },
+      }),
+    }),
+  );
+
+  fireEvent.click(screen.getAllByRole("button", { name: "编辑目标" })[0]!);
+  fireEvent.change(screen.getByLabelText("目标名称"), {
+    target: { value: "公告邮件组" },
+  });
+  fireEvent.change(screen.getByLabelText("渠道类型"), {
+    target: { value: "email" },
+  });
+  fireEvent.change(screen.getByLabelText("配置 JSON"), {
+    target: {
+      value: JSON.stringify(
+        {
+          recipients: ["team@example.com"],
+          scene_names: ["announcement"],
+        },
+        null,
+        2,
+      ),
+    },
+  });
+  fireEvent.click(screen.getByLabelText("启用目标"));
+  fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+
+  expect(await screen.findByText("公告邮件组")).toBeInTheDocument();
+  expect(screen.getByText(/email · 禁用/)).toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith(
     expect.stringContaining("/api/v1/platform/delivery-targets/target-001"),
-    expect.objectContaining({ method: "PATCH" }),
+    expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({
+        name: "公告邮件组",
+        channel_type: "email",
+        enabled: false,
+        config_json: {
+          recipients: ["team@example.com"],
+          scene_names: ["announcement"],
+        },
+      }),
+    }),
   );
 });
 

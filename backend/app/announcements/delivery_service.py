@@ -14,6 +14,8 @@ from app.models import (
     DeliveryTarget,
 )
 
+ALLOWED_DELIVERY_CHANNEL_TYPES = {"email", "wecom", "webhook"}
+
 
 def get_announcement_delivery_panel(
     session: Session,
@@ -185,42 +187,59 @@ def list_platform_delivery_records(
 
 def list_delivery_targets(session: Session) -> list[dict[str, object]]:
     targets = session.execute(select(DeliveryTarget)).scalars()
-    serialized = [
-        {
-            "target_id": str(target.target_id),
-            "name": target.name,
-            "channel_type": target.channel_type,
-            "enabled": target.enabled,
-            "config_summary": dict(target.config_json or {}),
-        }
-        for target in targets
-    ]
+    serialized = [_serialize_delivery_target(target) for target in targets]
     serialized.sort(key=lambda item: (not bool(item["enabled"]), str(item["name"])))
     return serialized
+
+
+def create_delivery_target(
+    session: Session,
+    *,
+    name: str,
+    channel_type: str,
+    enabled: bool,
+    config_json: dict[str, object] | None,
+) -> dict[str, object]:
+    validated_name = _normalize_delivery_target_name(name)
+    validated_channel_type = _normalize_delivery_channel_type(channel_type)
+    normalized_config = _normalize_delivery_target_config(config_json)
+
+    target = DeliveryTarget(
+        name=validated_name,
+        channel_type=validated_channel_type,
+        enabled=enabled,
+        config_json=normalized_config,
+    )
+    session.add(target)
+    session.flush()
+    return _serialize_delivery_target(target)
 
 
 def update_delivery_target(
     session: Session,
     *,
     target_id: UUID | str,
-    enabled: bool | None,
+    name: str | None = None,
+    channel_type: str | None = None,
+    enabled: bool | None = None,
+    config_json: dict[str, object] | None = None,
 ) -> dict[str, object]:
     target_uuid = UUID(str(target_id))
     target = session.get(DeliveryTarget, target_uuid)
     if target is None:
         raise LookupError("投递目标不存在")
 
+    if name is not None:
+        target.name = _normalize_delivery_target_name(name)
+    if channel_type is not None:
+        target.channel_type = _normalize_delivery_channel_type(channel_type)
     if enabled is not None:
         target.enabled = enabled
+    if config_json is not None:
+        target.config_json = _normalize_delivery_target_config(config_json)
     session.flush()
 
-    return {
-        "target_id": str(target.target_id),
-        "name": target.name,
-        "channel_type": target.channel_type,
-        "enabled": target.enabled,
-        "config_summary": dict(target.config_json or {}),
-    }
+    return _serialize_delivery_target(target)
 
 
 def _delivery_record_query() -> Select:
@@ -333,3 +352,37 @@ def _serialize_delivery_record(
         "created_at": record.created_at.isoformat(),
         "payload_summary": dict(record.payload_summary_json or {}),
     }
+
+
+def _serialize_delivery_target(target: DeliveryTarget) -> dict[str, object]:
+    config_json = dict(target.config_json or {})
+    return {
+        "target_id": str(target.target_id),
+        "name": target.name,
+        "channel_type": target.channel_type,
+        "enabled": target.enabled,
+        "config_json": config_json,
+        "config_summary": config_json,
+    }
+
+
+def _normalize_delivery_target_name(name: str) -> str:
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise ValueError("投递目标名称不能为空")
+    return normalized_name
+
+
+def _normalize_delivery_channel_type(channel_type: str) -> str:
+    normalized_channel_type = channel_type.strip().lower()
+    if normalized_channel_type not in ALLOWED_DELIVERY_CHANNEL_TYPES:
+        raise ValueError("投递渠道类型不支持")
+    return normalized_channel_type
+
+
+def _normalize_delivery_target_config(
+    config_json: dict[str, object] | None,
+) -> dict[str, object]:
+    if config_json is None:
+        return {}
+    return dict(config_json)

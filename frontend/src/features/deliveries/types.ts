@@ -17,12 +17,19 @@ export type DeliveryTargetView = {
   name: string;
   channel_type: string;
   enabled: boolean;
+  config_json: Record<string, unknown>;
   config_summary: Record<string, unknown>;
 };
 
-export type UpdateDeliveryTargetInput = {
-  target_id: string;
+export type CreateDeliveryTargetInput = {
+  name: string;
+  channel_type: string;
   enabled: boolean;
+  config_json: Record<string, unknown>;
+};
+
+export type UpdateDeliveryTargetInput = Partial<CreateDeliveryTargetInput> & {
+  target_id: string;
 };
 
 export type ApiEnvelope<T> = {

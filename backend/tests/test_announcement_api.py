@@ -493,6 +493,10 @@ def test_get_platform_delivery_targets_returns_target_views(client, db_session) 
             "name": "安全响应群",
             "channel_type": "wecom",
             "enabled": True,
+            "config_json": {
+                "webhook_url": "https://example.com/webhook",
+                "scene_names": ["announcement"],
+            },
             "config_summary": {
                 "webhook_url": "https://example.com/webhook",
                 "scene_names": ["announcement"],
@@ -503,6 +507,9 @@ def test_get_platform_delivery_targets_returns_target_views(client, db_session) 
             "name": "Webhook 备用通道",
             "channel_type": "webhook",
             "enabled": False,
+            "config_json": {
+                "url": "https://example.com/fallback",
+            },
             "config_summary": {
                 "url": "https://example.com/fallback",
             },
@@ -510,7 +517,46 @@ def test_get_platform_delivery_targets_returns_target_views(client, db_session) 
     ]
 
 
-def test_patch_platform_delivery_target_updates_enabled_status(client, db_session) -> None:
+def test_post_platform_delivery_target_creates_target(client, db_session) -> None:
+    response = client.post(
+        "/api/v1/platform/delivery-targets",
+        json={
+            "name": "邮件通知组",
+            "channel_type": "email",
+            "enabled": True,
+            "config_json": {
+                "recipients": ["soc@example.com"],
+                "scene_names": ["announcement"],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 0
+    assert body["data"]["name"] == "邮件通知组"
+    assert body["data"]["channel_type"] == "email"
+    assert body["data"]["enabled"] is True
+    assert body["data"]["config_json"] == {
+        "recipients": ["soc@example.com"],
+        "scene_names": ["announcement"],
+    }
+
+    created_target = (
+        db_session.query(DeliveryTarget)
+        .filter(DeliveryTarget.name == "邮件通知组")
+        .one_or_none()
+    )
+    assert created_target is not None
+    assert created_target.channel_type == "email"
+    assert created_target.enabled is True
+    assert created_target.config_json == {
+        "recipients": ["soc@example.com"],
+        "scene_names": ["announcement"],
+    }
+
+
+def test_patch_platform_delivery_target_updates_editable_fields(client, db_session) -> None:
     target = DeliveryTarget(
         name="安全响应群",
         channel_type="wecom",
@@ -522,7 +568,15 @@ def test_patch_platform_delivery_target_updates_enabled_status(client, db_sessio
 
     response = client.patch(
         f"/api/v1/platform/delivery-targets/{target.target_id}",
-        json={"enabled": False},
+        json={
+            "name": "公告邮件组",
+            "channel_type": "email",
+            "enabled": False,
+            "config_json": {
+                "recipients": ["team@example.com"],
+                "scene_names": ["announcement"],
+            },
+        },
     )
 
     assert response.status_code == 200
@@ -530,13 +584,26 @@ def test_patch_platform_delivery_target_updates_enabled_status(client, db_sessio
     assert body["code"] == 0
     assert body["data"] == {
         "target_id": str(target.target_id),
-        "name": "安全响应群",
-        "channel_type": "wecom",
+        "name": "公告邮件组",
+        "channel_type": "email",
         "enabled": False,
-        "config_summary": {"scene_names": ["announcement"]},
+        "config_json": {
+            "recipients": ["team@example.com"],
+            "scene_names": ["announcement"],
+        },
+        "config_summary": {
+            "recipients": ["team@example.com"],
+            "scene_names": ["announcement"],
+        },
     }
 
     db_session.expire_all()
     reloaded_target = db_session.get(DeliveryTarget, target.target_id)
     assert reloaded_target is not None
+    assert reloaded_target.name == "公告邮件组"
+    assert reloaded_target.channel_type == "email"
     assert reloaded_target.enabled is False
+    assert reloaded_target.config_json == {
+        "recipients": ["team@example.com"],
+        "scene_names": ["announcement"],
+    }
