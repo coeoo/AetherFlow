@@ -138,7 +138,7 @@ flowchart TD
 |--------|------|------|------|
 | patch_id | string | 是 | 稳定补丁标识 |
 | candidate_url | string | 是 | 候选 patch URL |
-| patch_type | string | 是 | `patch/diff` |
+| patch_type | string | 是 | `patch/diff/debdiff/github_pull_patch/gitlab_commit_patch/gitlab_merge_request_patch/kernel_commit_patch/bugzilla_attachment_patch` 等 |
 | download_status | string | 是 | 下载状态 |
 | artifact_id | string | 否 | 关联 Artifact |
 | duplicate_count | number | 是 | 同 URL 的落表记录数 |
@@ -156,6 +156,8 @@ flowchart TD
 **业务规则**：
 - 直接返回详情页所需完整 payload
 - `patches` 已按 `candidate_url` 去重，并返回 `duplicate_count`
+- `source_traces` 中的 `cve_seed_resolve` 会暴露 `response_meta.source_results`
+- 前端应通过展示层把新增 `patch_type` 转成可读标签
 
 ### 接口2：获取补丁内容
 **接口路径**：`GET /api/v1/cve/runs/{run_id}/patch-content?patch_id=...`
@@ -225,6 +227,9 @@ detail_ready
 ### 规则7：失败排障必须给出最短阅读路径
 **规则描述**：失败 run 的详情页应先给停止原因，再给建议动作和最近失败步骤，避免要求用户自己从整条 trace 里排查。
 
+### 规则8：详情页必须保留来源级 seed 可解释性
+**规则描述**：对于 `cve_seed_resolve` trace，详情页不能只展示合并后的引用数，还必须允许前端消费每个来源的 `status`、`status_code` 与 `reference_count`。
+
 ---
 
 ## 🚨 异常处理
@@ -279,6 +284,7 @@ detail_ready
 - [x] patch 列表能展示下载状态
 - [x] diff 查看可按需加载
 - [x] 重复 `candidate_url` 只展示一条代表记录，并返回 `duplicate_count`
+- [x] 详情接口能暴露 `source_results` 与新增 `patch_type`
 
 ### 边界测试
 - [x] 无效 run_id 显示空态
@@ -327,9 +333,14 @@ detail_ready
 - 增加失败详情页的排障表达约束：建议动作、错误摘要和失败步骤强调
 - 明确失败 run 详情应先给最短阅读路径，再给完整 trace
 
+### v1.5 - 2026-04-15
+- 同步官方优先多源 seed trace 已进入详情 payload
+- 扩充 `patch_type` 取值说明，覆盖 Debdiff、GitHub、GitLab、Kernel、Bugzilla 等类型
+- 明确详情页展示层需要对新增类型做可读文案映射
+
 ---
 
-**文档版本**：v1.4
+**文档版本**：v1.5
 **创建日期**：2026-04-09  
 **最后更新**：2026-04-15
 **维护人**：AI + 开发团队
