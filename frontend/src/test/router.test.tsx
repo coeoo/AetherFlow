@@ -25,6 +25,107 @@ function renderPath(path: string) {
   );
 }
 
+function mockJsonResponse(data: unknown) {
+  return {
+    ok: true,
+    json: async () => data,
+  } as Response;
+}
+
+beforeEach(() => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/announcements/sources")) {
+        return mockJsonResponse({
+          code: 0,
+          message: "success",
+          data: [],
+        });
+      }
+
+      if (url.endsWith("/api/v1/announcements/runs/run-002")) {
+        return mockJsonResponse({
+          code: 0,
+          message: "success",
+          data: {
+            run_id: "run-002",
+            entry_mode: "monitor_source",
+            status: "succeeded",
+            stage: "finalize_run",
+            summary: {
+              linux_related: true,
+              confidence: 0.9,
+              notify_recommended: true,
+              primary_title: "OpenSSL advisory",
+            },
+            input_snapshot: {
+              source_url: "https://www.openwall.com/lists/oss-security/2026/04/15/42",
+            },
+            document: {
+              document_id: "document-002",
+              title: "OpenSSL advisory",
+              source_name: "Openwall",
+              source_url: "https://www.openwall.com/lists/oss-security/2026/04/15/42",
+              published_at: "2026-04-15T09:00:00+00:00",
+              content_excerpt: "OpenSSL vulnerability for Linux systems",
+            },
+            package: {
+              package_id: "package-002",
+              confidence: 0.9,
+              severity: "high",
+              analyst_summary: "检测到与 Linux 生态相关的安全公告。",
+              notify_recommended: true,
+              affected_products: [],
+              iocs: [],
+              remediation: [],
+              evidence: [],
+            },
+            delivery: {
+              run_id: "run-002",
+              notify_recommended: true,
+              auto_send_applied: false,
+              skip_reason: null,
+              matched_targets: [
+                {
+                  target_id: "target-001",
+                  name: "安全响应群",
+                  channel_type: "wecom",
+                  match_reason: "命中来源投递白名单",
+                },
+              ],
+              recent_records: [],
+            },
+          },
+        });
+      }
+
+      if (url.includes("/api/v1/platform/delivery-records")) {
+        return mockJsonResponse({
+          code: 0,
+          message: "success",
+          data: [],
+        });
+      }
+
+      if (url.includes("/api/v1/platform/delivery-targets")) {
+        return mockJsonResponse({
+          code: 0,
+          message: "success",
+          data: [],
+        });
+      }
+
+      throw new Error(`未预期的请求: ${url}`);
+    }),
+  );
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 test.each([
   ["/", "平台首页"],
   ["/cve", "CVE 检索工作台"],
@@ -34,6 +135,7 @@ test.each([
   ["/announcements/sources", "监控源管理"],
   ["/announcements/runs/run-002", "安全公告情报包详情"],
   ["/deliveries", "投递中心"],
+  ["/deliveries?tab=records", "投递中心"],
   ["/system/tasks", "平台任务中心"],
   ["/system/health", "系统状态"],
 ])("renders route shell for %s", async (path, heading) => {
@@ -51,18 +153,30 @@ test("keeps utility navigation aligned to 投递中心 and 系统 only", async (
   expect(screen.queryByRole("link", { name: "系统状态" })).not.toBeInTheDocument();
 });
 
-test("reuses the monitoring placeholder content for /announcements?tab=monitoring", async () => {
+test("renders the monitoring workbench content for /announcements?tab=monitoring", async () => {
   renderPath("/announcements?tab=monitoring");
 
-  expect(await screen.findByText("批次列表")).toBeInTheDocument();
-  expect(screen.getByText("当前工作台正在复用监控批次占位模块，后续可平滑拆分为独立监控页。")).toBeInTheDocument();
+  expect(await screen.findByText("监控批次视图已接入")).toBeInTheDocument();
+  expect(
+    screen.getAllByText("当前工作台正在复用监控批次占位模块，后续可平滑拆分为独立监控页。"),
+  ).toHaveLength(2);
+  expect(screen.getByText("当前监控源")).toBeInTheDocument();
 });
 
 test("exposes a real #delivery anchor in announcement run detail", async () => {
   renderPath("/announcements/runs/run-002");
 
   expect(await screen.findByRole("heading", { name: "安全公告情报包详情" })).toBeInTheDocument();
+  expect(await screen.findByText("投递建议与记录")).toBeInTheDocument();
   expect(document.getElementById("delivery")).not.toBeNull();
+  expect(screen.getByRole("link", { name: "跳到投递区块" })).toHaveAttribute(
+    "href",
+    "/announcements/runs/run-002#delivery",
+  );
+  expect(screen.getByRole("link", { name: "进入投递中心" })).toHaveAttribute(
+    "href",
+    "/deliveries?tab=records",
+  );
 });
 
 test("loads the Manrope font from the application entry", () => {

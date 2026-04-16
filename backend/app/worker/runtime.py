@@ -10,9 +10,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
+from app.announcements.runtime import execute_announcement_run, execute_monitor_fetch
 from app.cve.runtime import execute_cve_run
 from app.db.session import create_session_factory
-from app.models import CVERun
+from app.models import AnnouncementRun, CVERun
 from app.platform.artifact_store import delete_artifact, write_text_artifact
 from app.platform.runtime_heartbeats import upsert_runtime_heartbeat
 from app.platform.task_runtime import (
@@ -56,6 +57,8 @@ def process_once(session_factory: sessionmaker[Session], *, worker_name: str) ->
     with session_factory() as session:
         attempt = claim_next_job(session, scene_name="cve", worker_name=worker_name)
         if attempt is None:
+            attempt = claim_next_job(session, scene_name="announcement", worker_name=worker_name)
+        if attempt is None:
             return False
 
         job = attempt.job
@@ -69,6 +72,29 @@ def process_once(session_factory: sessionmaker[Session], *, worker_name: str) ->
                 if run is None:
                     raise RuntimeError(f"CVE run 不存在: {run_id}")
                 _finish_cve_attempt_from_run(session, attempt=attempt, run=run)
+                session.commit()
+                return True
+            if job.scene_name == "announcement" and job.job_type == "announcement_manual_extract":
+                run_id = session.execute(
+                    select(AnnouncementRun.run_id).where(AnnouncementRun.job_id == job.job_id)
+                ).scalar_one()
+                execute_announcement_run(session, run_id=run_id)
+                run = session.get(AnnouncementRun, run_id)
+                if run is None:
+                    raise RuntimeError(f"公告 run 不存在: {run_id}")
+                if run.status == "succeeded":
+                    finish_attempt_success(session, attempt=attempt)
+                else:
+                    finish_attempt_failure(
+                        session,
+                        attempt=attempt,
+                        error_message=f"场景运行失败: {run.summary_json.get('error', 'unknown')}",
+                    )
+                session.commit()
+                return True
+            if job.scene_name == "announcement" and job.job_type == "announcement_monitor_fetch":
+                execute_monitor_fetch(session, job=job)
+                finish_attempt_success(session, attempt=attempt)
                 session.commit()
                 return True
 
