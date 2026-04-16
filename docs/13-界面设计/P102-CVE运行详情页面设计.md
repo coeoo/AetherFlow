@@ -36,9 +36,10 @@
 ```mermaid
 flowchart TD
     A["Topbar 导航"] --> B["🏆 Verdict Hero\n主结论 / stop reason / 下一步"]
-    B --> C["📄 Diff Viewer\n单栏按需加载大文本"]
-    C --> D["📋 Patch List\n候选补丁 / 下载状态 / 重复记录数"]
-    D --> E["⏱️ Trace Timeline\n页面探索过程"]
+    B --> C["🧭 Fix Family Summary\n来源页聚合 / 优先阅读入口"]
+    C --> D["📄 Diff Viewer\n单栏按需加载大文本"]
+    D --> E["📋 Patch List\n候选补丁 / 下载状态 / 重复记录数"]
+    E --> F["⏱️ Trace Timeline\n页面探索过程"]
 ```
 
 ### 区块1：Verdict Hero
@@ -50,19 +51,26 @@ flowchart TD
 - 下一步建议
 - 失败时显示错误摘要
 
-### 区块2：Diff Viewer
+### 区块2：Fix Family Summary
+
+- 按来源页聚合展示 patch family
+- 显示来源 host、候选补丁数量、下载成功数量
+- `source_url` 既可能是 advisory 页面，也可能是 seed 中直接命中的 commit / patch 引用
+- 只做最小 summary，不做图谱或多跳关系图
+
+### 区块3：Diff Viewer
 
 - 单栏展示 diff
 - 新增/删除行分色
 - 只有用户点击查看时才加载
 
-### 区块3：Patch 列表
+### 区块4：Patch 列表
 
 - 展示候选补丁、下载状态、类型和是否可查看内容
 - 若同一 URL 被重复发现或重复落表，则显示 `共 N 条记录`
 - 详情页内部选中与 diff 读取优先使用稳定的 `patch_id`
 
-### 区块4：Trace 时间线
+### 区块5：Trace 时间线
 
 - 以可读时间线展示页面探索过程
 - 每步包含来源、状态、URL 与错误信息
@@ -73,6 +81,7 @@ flowchart TD
 ## 🖱️ 关键交互
 
 - 页面首屏默认显示 Verdict Hero，不需要滚动就能读到主结论。
+- Fix Family Summary 位于 Patch List 之前，先回答“这些 patch 是从哪类来源页发现的”。
 - `查看 Diff` 是页内动作，不跳新页面。
 - Trace 默认展示步骤摘要，不展开原始 JSON。
 - Patch 列表与 Trace 时间线在右侧 rail 分层，Diff Viewer 占主列。
@@ -100,7 +109,7 @@ stateDiagram-v2
 
 ### 成功态
 
-- 按结论 -> Diff Viewer -> Patch -> Trace 的顺序展示。
+- 按结论 -> Fix Family Summary -> Diff Viewer -> Patch -> Trace 的顺序展示。
 
 ### 空结果态
 
@@ -132,6 +141,7 @@ stateDiagram-v2
 | `stop_reason` | string | 停止原因 |
 | `summary` | object | 运行摘要 |
 | `progress` | object | 阶段进度 |
+| `fix_families` | array | 来源页聚合视图 |
 | `patches` | array | 补丁记录 |
 | `source_traces` | array | 页面探索证据 |
 
@@ -150,7 +160,7 @@ stateDiagram-v2
 
 | 页面区块 | API | 主要字段 |
 |----------|-----|----------|
-| Verdict Hero / Patch / Trace | `GET /api/v1/cve/runs/{run_id}` | `summary`、`progress`、`patches`、`source_traces` |
+| Verdict Hero / Family / Patch / Trace | `GET /api/v1/cve/runs/{run_id}` | `summary`、`progress`、`fix_families`、`patches`、`source_traces` |
 | Diff Viewer | `GET /api/v1/cve/runs/{run_id}/patch-content?patch_id=...` | diff 文本内容 |
 
 ---
@@ -158,7 +168,7 @@ stateDiagram-v2
 ## 🪞 参考资产与约束
 
 - 视觉方向沿用“以 A 为底，吸收 C 的视觉表达”。
-- 详情页信息重心是结论优先，不实现 fix family 视图。
+- 详情页信息重心是结论优先，当前只实现最小 family summary，不实现 graph 级关系图。
 - 不把原始 trace JSON 作为默认展示方式。
 
 ---
@@ -181,9 +191,17 @@ stateDiagram-v2
 - 为失败 run 增加排障表达：建议动作、错误摘要和“最近失败步骤”视图
 - 同步失败 trace 的视觉强调要求
 
+### v1.4 - 2026-04-16
+- 在右侧 rail 中新增 Fix Family Summary，位置先于 Patch List。
+- 收口当前 family 表达边界：只做来源页聚合 summary，不引入图谱或持久化 family 语义。
+
+### v1.5 - 2026-04-16
+- 同步 family `source_url` 可以直接来自 seed 中命中的 commit / patch 引用。
+- 补充 direct seed candidate 场景下的页面表达边界。
+
 ---
 
-**文档版本**：v1.3
+**文档版本**：v1.5
 **创建日期**：2026-04-09  
-**最后更新**：2026-04-15
+**最后更新**：2026-04-16
 **维护人**：AI + 开发团队

@@ -313,6 +313,20 @@ def test_get_cve_run_returns_detail_payload_with_progress_traces_and_patches(
             "download_url": "https://example.com/fix.patch",
         }
     ]
+    assert body["data"]["fix_families"] == [
+        {
+            "family_key": "family:https://example.com/fix.patch",
+            "title": "example.com",
+            "source_url": "https://example.com/fix.patch",
+            "source_host": "example.com",
+            "discovery_rule": "unknown",
+            "patch_count": 1,
+            "downloaded_patch_count": 1,
+            "primary_patch_id": str(patch.patch_id),
+            "patch_ids": [str(patch.patch_id)],
+            "patch_types": ["patch"],
+        }
+    ]
 
 
 def test_get_patch_content_returns_diff_text_for_downloaded_patch(

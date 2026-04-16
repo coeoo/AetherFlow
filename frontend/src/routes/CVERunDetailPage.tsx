@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { AppShell } from "../components/layout/AppShell";
 import { CVEDiffViewer } from "../features/cve/components/CVEDiffViewer";
+import { CVEFixFamilySummary } from "../features/cve/components/CVEFixFamilySummary";
 import { CVEPatchList } from "../features/cve/components/CVEPatchList";
 import { CVETraceTimeline } from "../features/cve/components/CVETraceTimeline";
 import { CVEVerdictHero } from "../features/cve/components/CVEVerdictHero";
@@ -81,6 +82,7 @@ export function CVERunDetailPage() {
           />
         </div>
         <aside className="cve-detail-rail">
+          <CVEFixFamilySummary families={detail.fix_families ?? []} />
           <CVEPatchList
             patches={detail.patches}
             selectedPatchId={selectedPatchId}

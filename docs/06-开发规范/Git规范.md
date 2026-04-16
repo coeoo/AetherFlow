@@ -22,7 +22,7 @@
 
 ```text
 docs(platform): 完成任务与投递中心功能设计
-feat(cve): 实现 graph run 创建与详情查询
+feat(cve): 实现 fast-first run 创建与详情查询
 test(announcement): 补充监控源调度回归测试
 ```
 
@@ -61,3 +61,5 @@ test(announcement): 补充监控源调度回归测试
 ### v1.0 - 2026-04-09
 - 初始化 Git 规范
 
+### v1.1 - 2026-04-16
+- 把 `feat(cve)` 提交示例从旧的 `graph run` 表述收口为当前真实的 `fast-first run` 口径。

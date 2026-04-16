@@ -85,7 +85,7 @@ frontend_cmd() {
     fi
 
     printf \
-        "export VITE_API_BASE_URL=%q && exec npm --prefix frontend run dev -- --host %q --port %q" \
+        "export VITE_DEV_PROXY_TARGET=%q && exec npm --prefix frontend run dev -- --host %q --port %q" \
         "$AETHERFLOW_DEV_API_BASE_URL" \
         "$AETHERFLOW_DEV_FRONTEND_HOST" \
         "$AETHERFLOW_DEV_FRONTEND_PORT"

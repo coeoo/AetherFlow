@@ -17,7 +17,7 @@
 ## 🎯 功能目标
 
 ### 业务目标
-提供一个“可解释”的运行详情页，完整展示一次 CVE run 的结论、进度、来源证据、patch 列表和 diff。
+提供一个“可解释”的运行详情页，完整展示一次 CVE run 的结论、进度、来源证据、fix family 概览、patch 列表和 diff。
 
 ### 用户价值
 - 用户不仅知道有没有补丁，还知道系统是如何找到补丁的。
@@ -57,11 +57,12 @@ flowchart TD
     B --> C{"run 存在？"}
     C -->|否| D["展示空态\n允许返回"]
     C -->|是| E["展示结论卡片\nstop_reason / 主判据"]
-    E --> F["展示 Patch 列表\n下载状态 / 重复记录数"]
-    F --> G["展示 Trace 时间线\n页面探索过程"]
-    G --> H{"用户点击查看 diff？"}
-    H -->|是| I["按需加载 diff 内容"]
-    H -->|否| J["保持当前视图"]
+    E --> F["展示 Fix Family 概览\n来源页 / 聚合补丁数"]
+    F --> G["展示 Patch 列表\n下载状态 / 重复记录数"]
+    G --> H["展示 Trace 时间线\n页面探索过程"]
+    H --> I{"用户点击查看 diff？"}
+    I -->|是| J["按需加载 diff 内容"]
+    I -->|否| K["保持当前视图"]
 ```
 
 ---
@@ -71,6 +72,7 @@ flowchart TD
 | 功能点 | 功能描述 | 优先级 | 状态 |
 |--------|---------|--------|------|
 | 结论卡片 | 展示是否命中主补丁、主要依据 | P0 | ✅ 已完成 |
+| Fix Family 概览 | 按来源页聚合 patch 候选并给出主阅读入口 | P0 | ✅ 已完成 |
 | Patch 列表 | 展示候选补丁、下载状态与重复记录数 | P0 | ✅ 已完成 |
 | Diff 查看 | 在线查看补丁内容 | P0 | ✅ 已完成 |
 | Trace 时间线 | 展示页面探索过程 | P0 | ✅ 已完成 |
@@ -85,6 +87,7 @@ flowchart TD
 
 **页面元素**：
 - 顶部结论卡片
+- fix family 概览区块
 - diff 查看器
 - patch 列表区块
 - trace 时间线
@@ -93,6 +96,7 @@ flowchart TD
 - 点击 patch：按稳定的 `patch_id` 选中当前 patch
 - 点击“查看 Diff”：按需加载文本内容
 - patch 内容不存在时，按钮不可点
+- fix family 概览只做聚合表达，不替代 patch 明细列表
 - trace 默认展示整理后的步骤摘要
 
 ---
@@ -105,7 +109,7 @@ flowchart TD
 
 **页面边界**：
 - 本模块负责详情接口、patch 与证据数据对象。
-- `P102` 负责“结论 -> Diff Viewer -> Patch -> Trace”的页面排序。
+- `P102` 负责“结论 -> Family -> Diff Viewer -> Patch -> Trace”的页面排序。
 
 ---
 
@@ -129,9 +133,24 @@ flowchart TD
 | stop_reason | string | 否 | 停止原因 |
 | summary | object | 是 | 运行摘要 |
 | progress | object | 是 | 阶段进度摘要 |
+| fix_families | array | 是 | 来源页聚合视图 |
 | recent_progress | array | 是 | 最近 1 到 3 条进展 |
 | patches | array | 是 | 补丁记录 |
 | source_traces | array | 是 | 页面探索证据 |
+
+#### CVEFixFamilyView
+| 字段名 | 类型 | 必填 | 说明 |
+|--------|------|------|------|
+| family_key | string | 是 | 当前 run 内的稳定家族键 |
+| title | string | 是 | 当前 family 标题 |
+| source_url | string | 是 | 发现该 family 的来源页 |
+| source_host | string | 是 | 来源 host |
+| discovery_rule | string | 是 | `matcher/bugzilla_attachment/unknown` |
+| patch_count | number | 是 | 当前 family 中的 patch 数量 |
+| downloaded_patch_count | number | 是 | 下载成功数量 |
+| primary_patch_id | string | 是 | 当前代表 patch |
+| patch_ids | array | 是 | family 内 patch 列表 |
+| patch_types | array | 是 | family 内 patch 类型去重结果 |
 
 #### CVEPatchView
 | 字段名 | 类型 | 必填 | 说明 |
@@ -155,6 +174,8 @@ flowchart TD
 
 **业务规则**：
 - 直接返回详情页所需完整 payload
+- `fix_families` 只表达当前来源页聚合结果，不代表已落地 graph runtime
+- `fix_families.source_url` 既可能是 advisory / 公告页，也可能是 seed 中直接命中的 commit / patch 引用
 - `patches` 已按 `candidate_url` 去重，并返回 `duplicate_count`
 - `source_traces` 中的 `cve_seed_resolve` 会暴露 `response_meta.source_results`
 - 前端应通过展示层把新增 `patch_type` 转成可读标签
@@ -209,8 +230,8 @@ detail_ready
 ### 规则1：先给结论，再给证据
 **规则描述**：详情页顶部必须先说明主结论，而不是先显示调试数据。
 
-### 规则2：当前不实现 fix family
-**规则描述**：主补丁由 `summary.primary_patch_url` 和 patch 列表共同表达，不扩展 family 视图。
+### 规则2：当前只实现最小 fix family 视图
+**规则描述**：当前 `fix_families` 只按来源页聚合 patch 候选，用于增强详情页可解释性；不引入 family 持久化表，也不等价于 graph runtime。
 
 ### 规则3：证据链可读性优先
 **规则描述**：trace 不只是原始 JSON，要整理为人类可读的时间线与步骤原因。
@@ -229,6 +250,12 @@ detail_ready
 
 ### 规则8：详情页必须保留来源级 seed 可解释性
 **规则描述**：对于 `cve_seed_resolve` trace，详情页不能只展示合并后的引用数，还必须允许前端消费每个来源的 `status`、`status_code` 与 `reference_count`。
+
+### 规则9：family 只是聚合视图，不替代 patch 明细
+**规则描述**：详情页仍以 `patches` 作为可交互明细列表，family 只负责帮助用户快速理解“这些 patch 是从哪类来源页发现的”。
+
+### 规则10：family 来源既可以是页面，也可以是 seed 直达候选
+**规则描述**：如果 patch 是直接从 seed 中的 commit / patch / diff 引用命中的，详情页允许把该引用自身作为 family `source_url` 展示，而不是强制要求存在中间页面。
 
 ---
 
@@ -338,9 +365,17 @@ detail_ready
 - 扩充 `patch_type` 取值说明，覆盖 Debdiff、GitHub、GitLab、Kernel、Bugzilla 等类型
 - 明确详情页展示层需要对新增类型做可读文案映射
 
+### v1.6 - 2026-04-16
+- 新增最小 `fix_families` 聚合视图，用来源页维度组织 patch 候选。
+- 明确当前 family 只是详情聚合层增强，不是已落地 graph runtime 或 family 持久化模型。
+
+### v1.7 - 2026-04-16
+- 同步 family 来源既可能来自 advisory 页面，也可能来自 seed 直达 commit / patch 引用。
+- 补充 direct seed candidate 场景下的详情页展示边界。
+
 ---
 
-**文档版本**：v1.5
+**文档版本**：v1.7
 **创建日期**：2026-04-09  
-**最后更新**：2026-04-15
+**最后更新**：2026-04-16
 **维护人**：AI + 开发团队

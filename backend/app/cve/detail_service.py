@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 from uuid import UUID
 
 from sqlalchemy import select
@@ -41,7 +42,7 @@ def get_cve_run_detail(session: Session, *, run_id: UUID) -> dict[str, object] |
         return None
 
     traces = _load_source_traces(session, run_id=run_id)
-    patches = _load_patches(session, run_id=run_id)
+    patch_entries = _load_patch_representatives(session, run_id=run_id)
     return {
         "run_id": str(run.run_id),
         "cve_id": run.cve_id,
@@ -52,7 +53,8 @@ def get_cve_run_detail(session: Session, *, run_id: UUID) -> dict[str, object] |
         "progress": _build_progress(run),
         "recent_progress": _build_recent_progress(traces),
         "source_traces": traces,
-        "patches": patches,
+        "fix_families": _build_fix_families(patch_entries),
+        "patches": _serialize_patches(patch_entries),
     }
 
 
@@ -161,9 +163,13 @@ def _pick_trace_url(record: SourceFetchRecord) -> str | None:
     )
 
 
-def _load_patches(session: Session, *, run_id: UUID) -> list[dict[str, object]]:
+def _load_patch_representatives(session: Session, *, run_id: UUID) -> list[_PatchEntry]:
+    return _select_patch_representatives(_load_patch_entries(session, run_id=run_id))
+
+
+def _serialize_patches(entries: list[_PatchEntry]) -> list[dict[str, object]]:
     patches: list[dict[str, object]] = []
-    for entry in _select_patch_representatives(_load_patch_entries(session, run_id=run_id)):
+    for entry in entries:
         patch = entry.patch
         patches.append(
             {
@@ -179,6 +185,61 @@ def _load_patches(session: Session, *, run_id: UUID) -> list[dict[str, object]]:
             }
         )
     return patches
+
+
+def _build_fix_families(entries: list[_PatchEntry]) -> list[dict[str, object]]:
+    grouped_entries: dict[str, list[_PatchEntry]] = {}
+    family_metadata: dict[str, dict[str, str]] = {}
+    family_order: list[str] = []
+
+    for entry in entries:
+        meta = dict(entry.patch.patch_meta_json or {})
+        source_url = str(meta.get("discovered_from_url") or entry.patch.candidate_url)
+        source_host = str(meta.get("discovered_from_host") or urlparse(source_url).hostname or source_url)
+        discovery_rule = str(meta.get("discovery_rule") or "unknown")
+        family_key = f"family:{source_url}"
+        if family_key not in grouped_entries:
+            family_order.append(family_key)
+            grouped_entries[family_key] = []
+            family_metadata[family_key] = {
+                "source_url": source_url,
+                "source_host": source_host,
+                "discovery_rule": discovery_rule,
+            }
+        grouped_entries[family_key].append(entry)
+
+    families: list[dict[str, object]] = []
+    for family_key in family_order:
+        family_entries = grouped_entries[family_key]
+        representative = max(family_entries, key=_patch_entry_priority)
+        patch_types = _dedupe_patch_types(family_entries)
+        downloaded_patch_count = sum(
+            1 for entry in family_entries if entry.patch.download_status == "downloaded"
+        )
+        metadata = family_metadata[family_key]
+        families.append(
+            {
+                "family_key": family_key,
+                "title": metadata["source_host"],
+                "source_url": metadata["source_url"],
+                "source_host": metadata["source_host"],
+                "discovery_rule": metadata["discovery_rule"],
+                "patch_count": len(family_entries),
+                "downloaded_patch_count": downloaded_patch_count,
+                "primary_patch_id": str(representative.patch.patch_id),
+                "patch_ids": [str(entry.patch.patch_id) for entry in family_entries],
+                "patch_types": patch_types,
+            }
+        )
+
+    return sorted(
+        families,
+        key=lambda family: (
+            -int(family["downloaded_patch_count"]),
+            -int(family["patch_count"]),
+            family_order.index(str(family["family_key"])),
+        ),
+    )
 
 
 _STOP_REASON_COMPLETED_STEPS = {
@@ -270,6 +331,18 @@ def _patch_entry_priority(entry: _PatchEntry) -> tuple[int, int, int, str, str]:
         entry.content_type or "",
         str(patch.patch_id),
     )
+
+
+def _dedupe_patch_types(entries: list[_PatchEntry]) -> list[str]:
+    patch_types: list[str] = []
+    seen_patch_types: set[str] = set()
+    for entry in entries:
+        patch_type = entry.patch.patch_type
+        if patch_type in seen_patch_types:
+            continue
+        seen_patch_types.add(patch_type)
+        patch_types.append(patch_type)
+    return patch_types
 
 
 def _with_duplicate_count(entry: _PatchEntry, *, duplicate_count: int) -> _PatchEntry:

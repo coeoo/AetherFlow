@@ -150,3 +150,26 @@ def test_dev_attach_rejects_unknown_window_with_available_window_list() -> None:
         assert "  - frontend" in attach_result.stderr
     finally:
         kill_tmux_session(session_name)
+
+
+def test_frontend_cmd_prefers_dev_proxy_target_over_absolute_api_base_url() -> None:
+    result = subprocess.run(
+        [
+            "bash",
+            "-lc",
+            "source scripts/dev_common.sh && frontend_cmd",
+        ],
+        cwd=ROOT_DIR,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "AETHERFLOW_DEV_API_BASE_URL": "http://127.0.0.1:18080",
+            "AETHERFLOW_DEV_FRONTEND_HOST": "127.0.0.1",
+            "AETHERFLOW_DEV_FRONTEND_PORT": "5173",
+        },
+        check=True,
+    )
+
+    assert "VITE_DEV_PROXY_TARGET" in result.stdout
+    assert "VITE_API_BASE_URL" not in result.stdout

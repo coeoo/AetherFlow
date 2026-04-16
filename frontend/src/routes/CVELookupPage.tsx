@@ -12,7 +12,7 @@ export function CVELookupPage() {
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const createRun = useCreateCveRun();
   const historyQuery = useCveRunHistory();
-  const detailQuery = useCveRunDetail(activeRunId);
+  const detailQuery = useCveRunDetail(activeRunId, { refreshHistoryOnTerminal: true });
   const detail = detailQuery.data;
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {

@@ -98,6 +98,62 @@ def test_execute_cve_run_downloads_patch_and_updates_summary(
     assert Path(artifact.storage_path).read_text(encoding="utf-8") == patch_text
 
 
+def test_execute_cve_run_persists_discovery_metadata_into_patch_meta_json(
+    db_session, monkeypatch, tmp_path
+) -> None:
+    run = create_cve_run(db_session, cve_id="CVE-2024-3094")
+    db_session.commit()
+    monkeypatch.setenv("AETHERFLOW_ARTIFACT_ROOT", str(tmp_path))
+
+    monkeypatch.setattr(
+        "app.cve.runtime.resolve_seed_references",
+        lambda session, *, run, cve_id: ["https://example.com/advisory"],
+    )
+    monkeypatch.setattr(
+        "app.cve.runtime.plan_frontier",
+        lambda seed_references: seed_references,
+    )
+    monkeypatch.setattr(
+        "app.cve.runtime.fetch_page",
+        lambda session, *, run, url: {
+            "url": url,
+            "content": "patch: https://example.com/fix.patch",
+        },
+    )
+    monkeypatch.setattr(
+        "app.cve.runtime.analyze_page",
+        lambda snapshot: [
+            {
+                "candidate_url": "https://example.com/fix.patch",
+                "patch_type": "patch",
+            }
+        ],
+    )
+
+    def _fake_http_get(url: str, **kwargs) -> httpx.Response:
+        request = httpx.Request("GET", url)
+        return httpx.Response(
+            200,
+            text="diff --git a/app.py b/app.py\n+patched = True\n",
+            headers={"content-type": "text/x-patch"},
+            request=request,
+        )
+
+    monkeypatch.setattr("app.cve.patch_downloader.httpx.get", _fake_http_get)
+
+    execute_cve_run(db_session, run_id=run.run_id)
+    db_session.commit()
+
+    patch = (
+        db_session.query(CVEPatchArtifact)
+        .filter(CVEPatchArtifact.run_id == run.run_id)
+        .one()
+    )
+    assert patch.patch_meta_json["discovered_from_url"] == "https://example.com/advisory"
+    assert patch.patch_meta_json["discovered_from_host"] == "example.com"
+    assert patch.patch_meta_json["discovery_rule"] == "matcher"
+
+
 def test_execute_cve_run_marks_patch_download_failure(db_session, monkeypatch) -> None:
     run = create_cve_run(db_session, cve_id="CVE-2024-3094")
     db_session.commit()
@@ -250,6 +306,147 @@ def test_plan_frontier_deduplicates_urls_and_limits_page_count() -> None:
         "https://example.com/i",
         "https://example.com/j",
     ]
+
+
+def test_plan_frontier_skips_direct_patch_matches_before_limiting_pages() -> None:
+    frontier = plan_frontier(
+        [
+            "https://example.com/a#top",
+            "https://github.com/acme/project/commit/abc1234",
+            "https://example.com/b",
+            "https://example.com/c",
+            "https://example.com/d",
+            "https://example.com/e",
+            "https://example.com/f",
+            "https://example.com/g",
+            "https://example.com/h",
+            "https://example.com/i",
+            "https://example.com/j",
+            "https://example.com/k",
+        ]
+    )
+
+    assert frontier == [
+        "https://example.com/a",
+        "https://example.com/b",
+        "https://example.com/c",
+        "https://example.com/d",
+        "https://example.com/e",
+        "https://example.com/f",
+        "https://example.com/g",
+        "https://example.com/h",
+        "https://example.com/i",
+        "https://example.com/j",
+    ]
+
+
+def test_execute_cve_run_consumes_direct_seed_candidates_beyond_page_budget(
+    db_session, monkeypatch
+) -> None:
+    run = create_cve_run(db_session, cve_id="CVE-2024-3094")
+    db_session.commit()
+    downloaded_candidates: list[str] = []
+
+    monkeypatch.setattr(
+        "app.cve.runtime.resolve_seed_references",
+        lambda session, *, run, cve_id: [
+            *[f"https://example.com/advisory-{index}" for index in range(12)],
+            "https://github.com/acme/project/commit/abc1234",
+        ],
+    )
+    monkeypatch.setattr(
+        "app.cve.runtime.fetch_page",
+        lambda session, *, run, url: {"url": url, "content": "no patch here"},
+    )
+    monkeypatch.setattr("app.cve.runtime.analyze_page", lambda snapshot: [])
+
+    def _fake_download(session, *, run, candidate):
+        downloaded_candidates.append(candidate["candidate_url"])
+        patch = CVEPatchArtifact(
+            run_id=run.run_id,
+            candidate_url=candidate["candidate_url"],
+            patch_type=candidate["patch_type"],
+            download_status="downloaded",
+            patch_meta_json={
+                "download_url": candidate["candidate_url"],
+                "discovered_from_url": candidate["discovered_from_url"],
+                "discovered_from_host": candidate["discovered_from_host"],
+                "discovery_rule": candidate["discovery_rule"],
+            },
+        )
+        session.add(patch)
+        session.flush()
+        return patch
+
+    monkeypatch.setattr("app.cve.runtime.download_patch_candidate", _fake_download)
+
+    execute_cve_run(db_session, run_id=run.run_id)
+    db_session.commit()
+
+    reloaded_run = db_session.get(CVERun, run.run_id)
+    assert reloaded_run is not None
+    assert reloaded_run.status == "succeeded"
+    assert reloaded_run.stop_reason == "patches_downloaded"
+    assert reloaded_run.summary_json["primary_patch_url"] == (
+        "https://github.com/acme/project/commit/abc1234.patch"
+    )
+    assert downloaded_candidates == [
+        "https://github.com/acme/project/commit/abc1234.patch"
+    ]
+
+
+def test_execute_cve_run_tolerates_failed_page_fetch_when_other_pages_produce_patch_candidates(
+    db_session, monkeypatch
+) -> None:
+    run = create_cve_run(db_session, cve_id="CVE-2024-3094")
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "app.cve.runtime.resolve_seed_references",
+        lambda session, *, run, cve_id: [
+            "https://example.com/broken-advisory",
+            "https://example.com/working-advisory",
+        ],
+    )
+
+    def _fake_fetch_page(session, *, run, url):
+        if url.endswith("broken-advisory"):
+            raise RuntimeError("404 gone")
+        return {"url": url, "content": "patch: https://example.com/fix.patch"}
+
+    monkeypatch.setattr("app.cve.runtime.fetch_page", _fake_fetch_page)
+    monkeypatch.setattr(
+        "app.cve.runtime.analyze_page",
+        lambda snapshot: [
+            {
+                "candidate_url": "https://example.com/fix.patch",
+                "patch_type": "patch",
+            }
+        ],
+    )
+
+    def _fake_download(session, *, run, candidate):
+        patch = CVEPatchArtifact(
+            run_id=run.run_id,
+            candidate_url=candidate["candidate_url"],
+            patch_type=candidate["patch_type"],
+            download_status="downloaded",
+            patch_meta_json={"download_url": candidate["candidate_url"]},
+        )
+        session.add(patch)
+        session.flush()
+        return patch
+
+    monkeypatch.setattr("app.cve.runtime.download_patch_candidate", _fake_download)
+
+    execute_cve_run(db_session, run_id=run.run_id)
+    db_session.commit()
+
+    reloaded_run = db_session.get(CVERun, run.run_id)
+    assert reloaded_run is not None
+    assert reloaded_run.status == "succeeded"
+    assert reloaded_run.stop_reason == "patches_downloaded"
+    assert reloaded_run.summary_json["patch_count"] == 1
 
 
 def test_execute_cve_run_writes_source_fetch_records_without_breaking_summary(

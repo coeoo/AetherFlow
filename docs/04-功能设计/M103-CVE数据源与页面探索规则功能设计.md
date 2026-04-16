@@ -17,7 +17,7 @@
 ## 🎯 功能目标
 
 ### 业务目标
-定义 CVE 场景的真实后端主链：多源 seed 解析、frontier 规划、页面抓取、规则匹配、单页特化提取、patch 下载与 stop reason 生成。
+定义 CVE 场景的真实后端主链：多源 seed 解析、frontier 规划、seed 直达候选优先消费、页面抓取、规则匹配、单页特化提取、patch 下载与 stop reason 生成。
 
 ### 用户价值
 - 用户看到的补丁结果不是“黑盒猜出来的”，而是沿当前可信数据源和页面规则推导出来的。
@@ -43,14 +43,14 @@ flowchart TD
     A["输入 CVE ID"] --> B["resolve_seeds\n官方优先多源聚合"]
     B --> C{"有 seed references？"}
     C -->|否| D["终止\nstop_reason = no_seed_references"]
-    C -->|是| E["plan_frontier\n规划下一跳页面"]
-    E --> F["fetch_page\nHTTP / Playwright 抓取"]
-    F --> G{"抓取成功？"}
-    G -->|否| H["记录失败信息\n当前直接终止"]
-    G -->|是| I["analyze_page\n规则匹配 + Bugzilla 单页提取"]
+    C -->|是| E["plan_frontier\n拆分 direct candidates + page frontier"]
+    E --> F["优先收集 seed 中的 direct patch/commit 候选"]
+    F --> G["fetch_page\n仅抓取普通页面"]
+    G --> H["analyze_page\n规则匹配 + Bugzilla 单页提取"]
+    H --> I["合并 direct candidates 与 page candidates"]
     I --> J{"命中显式 patch 候选？"}
     J -->|是| K["download_patches\n下载并生成 Artifact"]
-    J -->|否| N1["终止\nstop_reason = no_patch_candidates"]
+    J -->|否| N1["终止\nstop_reason = no_patch_candidates\n或 fetch_failed"]
     K --> N["finalize_run\n生成 stop_reason 与 summary"]
 ```
 
@@ -61,13 +61,13 @@ flowchart TD
 | 功能点 | 功能描述 | 优先级 | 状态 |
 |--------|---------|--------|------|
 | Seed 解析 | 当前从 `cve_official -> osv -> github_advisory -> nvd` 聚合 seed，并记录来源级 trace | P0 | ✅ 已完成 |
-| Frontier 规划 | 当前最小一跳规划，按 `urldefrag` 去重并限制页数 | P0 | ✅ 已完成 |
+| Frontier 规划 | 当前最小一跳规划，已支持 direct patch candidate 过滤、去重和页面预算限制 | P0 | ✅ 已完成 |
 | 规则匹配 | 当前命中 `.patch` / `.diff` / `.debdiff` / `patch=` / GitHub / GitLab / kernel stable | P0 | ✅ 已完成 |
 | 单页特化提取 | 当前支持 Bugzilla detail 页 raw attachment | P0 | ✅ 已完成 |
 | 内容下载与校验 | 下载 patch 并校验不是 HTML 页面 | P0 | ✅ 已完成 |
 | 平台状态对齐 | run 与 job/attempt 终态对齐 | P0 | ✅ 已完成 |
 | 多源聚合 | `cve_official`、OSV、GitHub Advisory、NVD 已落地 | P0 | ✅ 已完成 |
-| Trace 落表与 frontier 治理 | `source_fetch_records` 已接入 seed/page/download，frontier 仍保持最小一跳 | P1 | 🟡 部分完成 |
+| Trace 落表与 frontier 治理 | `source_fetch_records` 已接入 seed/page/download，frontier 已支持高信号优先与单页失败局部容错 | P1 | ✅ 已完成 |
 | 受限 LLM 兜底 | 在规则不足时从候选中做有限选择 | P2 | ⚪ 未开始 |
 
 ---
@@ -153,6 +153,12 @@ flowchart TD
 ### 规则8：页面分析必须先 matcher，后单页特化提取
 **规则描述**：`analyze_page` 先保留 HTML 中 URL 扫描得到的 matcher 候选，再追加 Bugzilla raw attachment 候选，并按 `urldefrag(candidate_url).url` 去重。
 
+### 规则9：seed 中的 direct patch/commit 候选必须优先于普通页面探索
+**规则描述**：`plan_frontier` 必须先从全部 seed references 中识别 `.patch`、`.diff`、GitHub / GitLab commit、kernel patch 等高信号候选，再对剩余普通页面做最小一跳页面规划。
+
+### 规则10：单页抓取失败只能作为局部失败处理
+**规则描述**：普通页面抓取失败必须写入 `source_fetch_records`，但只要仍有可分析页面或 direct candidate，就不允许整条 run 立即终止。
+
 ---
 
 ## 🚨 异常处理
@@ -184,9 +190,10 @@ flowchart TD
 **错误提示**：在详情页体现为该步抓取失败
 
 **处理方案**：
-- 当前第一轮直接终止
-- `stop_reason = fetch_failed`
-- 错误信息进入 `summary.error`
+- 先把失败写入该步 trace
+- 只要仍有 direct candidate 或其他成功页面，run 继续向后执行
+- 只有在没有可继续消费的页面快照且也没有 direct candidate 时，才收口为 `stop_reason = fetch_failed`
+- 如果抓取阶段已经结束，但后续没有形成任何候选，则收口为 `stop_reason = no_patch_candidates`
 
 ### 异常3：阶段执行异常
 **触发条件**：`resolve_seeds`、`analyze_page`、`download_patches` 等阶段抛出异常
@@ -239,6 +246,8 @@ flowchart TD
 - [x] 下载后能生成 patch Artifact
 - [x] 普通 HTML commit 页面会被拒绝
 - [x] 运行失败时平台任务状态与场景 run 状态对齐
+- [x] seed 中的 direct commit / patch 候选会在页面预算之外被优先消费
+- [x] 单页抓取失败时，只要仍有其他页面或 direct candidate，run 仍可继续成功
 
 ### 边界测试
 - [x] 无 reference 时 stop reason 正确
@@ -247,6 +256,7 @@ flowchart TD
 - [x] seed / page / download trace 已落表
 - [x] 多源 seed 聚合已落地
 - [x] Debian BTS、Bugzilla、Openwall regression fixture 已离线固化
+- [x] `fetch_failed` 只在“无其他可继续消费页面且无 direct candidate”时出现
 - [ ] LLM 兜底（后续）
 
 ---
@@ -258,6 +268,7 @@ flowchart TD
 | 设计 | 完成主链规则设计 | 0.5天 | AI | ✅ |
 | 开发 | 官方优先多源 seed 聚合 | 2天 | AI | ✅ |
 | 开发 | 非 NVD 规则匹配与单页 Bugzilla 提取 | 2天 | AI | ✅ |
+| 开发 | direct seed candidate 优先消费与页面抓取局部容错 | 1天 | AI | ✅ |
 | 测试 | 回归样例、异常路径与状态对齐补强 | 1.5天 | AI | ✅ |
 | 下一步 | graph/fix family/LLM fallback 评估 | 1天 | - | ⚪ |
 
@@ -278,6 +289,11 @@ flowchart TD
 - 更新主流程、功能清单、trace 结构、测试要点与下一步边界
 - 把旧的“仅 NVD seed / source_fetch_records 未接入”描述修正为当前实现状态
 
+### v1.3 - 2026-04-16
+- 同步 Phase B2 已落地：seed 直达 patch/commit 候选优先消费。
+- 同步页面抓取改为局部容错，不再被单页失败默认拖死整条 run。
+- 收紧 `fetch_failed` 与 `no_patch_candidates` 的收口边界。
+
 ### v1.1 - 2026-04-13
 - 根据第一轮真实实现更新功能边界
 - 明确当前仅支持 NVD seed、显式 patch 规则和 GitHub commit 转 patch
@@ -288,7 +304,7 @@ flowchart TD
 
 ---
 
-**文档版本**：v1.2  
-**创建日期**：2026-04-09  
-**最后更新**：2026-04-15  
+**文档版本**：v1.3
+**创建日期**：2026-04-09
+**最后更新**：2026-04-16
 **维护人**：AI + 开发团队

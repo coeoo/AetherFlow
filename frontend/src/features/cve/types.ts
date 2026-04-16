@@ -36,6 +36,19 @@ export type CVEPatch = {
   download_url: string | null;
 };
 
+export type CVEFixFamily = {
+  family_key: string;
+  title: string;
+  source_url: string;
+  source_host: string;
+  discovery_rule: string;
+  patch_count: number;
+  downloaded_patch_count: number;
+  primary_patch_id: string;
+  patch_ids: string[];
+  patch_types: string[];
+};
+
 export type CVERunSummary = {
   patch_found?: boolean;
   patch_count?: number;
@@ -61,6 +74,7 @@ export type CVERunDetail = {
   stop_reason: string | null;
   summary: CVERunSummary;
   progress: CVERunProgress;
+  fix_families: CVEFixFamily[];
   recent_progress: CVERunRecentProgress[];
   source_traces: CVESourceTrace[];
   patches: CVEPatch[];
