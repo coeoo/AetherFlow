@@ -130,7 +130,7 @@ flowchart TD
 ## ✅ 业务规则
 
 ### 规则1：规则优先于 LLM
-**规则描述**：能用显式规则命中 patch 时，不走 LLM；当前第一轮尚未接入 LLM。
+**规则描述**：能用显式规则命中 patch 时，不走 LLM；当前仍未接入 CVE 专用 LLM fallback。
 
 ### 规则2：LLM 只能做候选选择，不能编造新 URL
 **规则描述**：作为后续扩展保留；当前第一轮未实现。
@@ -158,6 +158,9 @@ flowchart TD
 
 ### 规则10：单页抓取失败只能作为局部失败处理
 **规则描述**：普通页面抓取失败必须写入 `source_fetch_records`，但只要仍有可分析页面或 direct candidate，就不允许整条 run 立即终止。
+
+### 规则11：当前 `fix_families` 只属于详情聚合视图，不代表已落地 family 持久化或 graph runtime
+**规则描述**：当前已实现的是基于 `patch_meta_json` 的 family 视图聚合；`cve_fix_families` 表、graph node / edge 结构和 family 持久化模型都不属于当前代码事实。
 
 ---
 
@@ -231,7 +234,7 @@ flowchart TD
 
 ### 注意事项
 - 不把主链塞回旧 pipeline/stages 目录
-- 当前主线不引入 graph run、fix family 或 LLM fallback
+- 当前主线不引入 graph run、fix family 持久化或 LLM fallback
 - 文档和实现都必须保持“官方记录优先、多源补充、规则优先”的口径
 - 测试环境重建 public schema 时，需要避免复用旧缓存连接状态
 

@@ -189,7 +189,7 @@ def _serialize_patches(entries: list[_PatchEntry]) -> list[dict[str, object]]:
 
 def _build_fix_families(entries: list[_PatchEntry]) -> list[dict[str, object]]:
     grouped_entries: dict[str, list[_PatchEntry]] = {}
-    family_metadata: dict[str, dict[str, str]] = {}
+    family_metadata: dict[str, dict[str, object]] = {}
     family_order: list[str] = []
 
     for entry in entries:
@@ -205,6 +205,13 @@ def _build_fix_families(entries: list[_PatchEntry]) -> list[dict[str, object]]:
                 "source_url": source_url,
                 "source_host": source_host,
                 "discovery_rule": discovery_rule,
+                "evidence_sources": _build_evidence_sources(
+                    meta,
+                    source_url=source_url,
+                    source_host=source_host,
+                    discovery_rule=discovery_rule,
+                    candidate_url=entry.patch.candidate_url,
+                ),
             }
         grouped_entries[family_key].append(entry)
 
@@ -217,6 +224,36 @@ def _build_fix_families(entries: list[_PatchEntry]) -> list[dict[str, object]]:
             1 for entry in family_entries if entry.patch.download_status == "downloaded"
         )
         metadata = family_metadata[family_key]
+        evidence_sources = _merge_evidence_sources(
+            metadata.get("evidence_sources"),
+            [
+                _build_evidence_sources(
+                    dict(entry.patch.patch_meta_json or {}),
+                    source_url=str(
+                        dict(entry.patch.patch_meta_json or {}).get("discovered_from_url")
+                        or entry.patch.candidate_url
+                    ),
+                    source_host=str(
+                        dict(entry.patch.patch_meta_json or {}).get("discovered_from_host")
+                        or urlparse(
+                            str(
+                                dict(entry.patch.patch_meta_json or {}).get("discovered_from_url")
+                                or entry.patch.candidate_url
+                            )
+                        ).hostname
+                        or entry.patch.candidate_url
+                    ),
+                    discovery_rule=str(
+                        dict(entry.patch.patch_meta_json or {}).get("discovery_rule") or "unknown"
+                    ),
+                    candidate_url=entry.patch.candidate_url,
+                )
+                for entry in family_entries
+            ],
+        )
+        related_source_hosts = _dedupe_strings(
+            [str(source["source_host"]) for source in evidence_sources]
+        )
         families.append(
             {
                 "family_key": family_key,
@@ -229,6 +266,9 @@ def _build_fix_families(entries: list[_PatchEntry]) -> list[dict[str, object]]:
                 "primary_patch_id": str(representative.patch.patch_id),
                 "patch_ids": [str(entry.patch.patch_id) for entry in family_entries],
                 "patch_types": patch_types,
+                "evidence_source_count": len(evidence_sources),
+                "related_source_hosts": related_source_hosts,
+                "evidence_sources": evidence_sources,
             }
         )
 
@@ -240,6 +280,101 @@ def _build_fix_families(entries: list[_PatchEntry]) -> list[dict[str, object]]:
             family_order.index(str(family["family_key"])),
         ),
     )
+
+
+def _build_evidence_sources(
+    meta: dict[str, object],
+    *,
+    source_url: str,
+    source_host: str,
+    discovery_rule: str,
+    candidate_url: str,
+) -> list[dict[str, object]]:
+    raw_sources = meta.get("discovery_sources")
+    if isinstance(raw_sources, list) and raw_sources:
+        normalized_sources: list[dict[str, object]] = []
+        for index, raw_source in enumerate(raw_sources):
+            if not isinstance(raw_source, dict):
+                continue
+            normalized_source_url = str(raw_source.get("source_url") or "").strip()
+            if not normalized_source_url:
+                continue
+            normalized_sources.append(
+                {
+                    "source_url": normalized_source_url,
+                    "source_host": str(
+                        raw_source.get("source_host")
+                        or urlparse(normalized_source_url).hostname
+                        or normalized_source_url
+                    ),
+                    "discovery_rule": str(raw_source.get("discovery_rule") or "unknown"),
+                    "source_kind": str(raw_source.get("source_kind") or "page"),
+                    "order": index,
+                }
+            )
+        if normalized_sources:
+            return normalized_sources
+
+    return [
+        {
+            "source_url": source_url,
+            "source_host": source_host,
+            "discovery_rule": discovery_rule,
+            "source_kind": "candidate" if source_url == candidate_url else "page",
+            "order": 0,
+        }
+    ]
+
+
+def _merge_evidence_sources(
+    primary_sources: object,
+    nested_sources: list[list[dict[str, object]]],
+) -> list[dict[str, object]]:
+    merged_sources: list[dict[str, object]] = []
+    seen_source_keys: set[tuple[str, str, str]] = set()
+
+    for source_group in [primary_sources, *nested_sources]:
+        if not isinstance(source_group, list):
+            continue
+        for raw_source in source_group:
+            if not isinstance(raw_source, dict):
+                continue
+            source_url = str(raw_source.get("source_url") or "").strip()
+            if not source_url:
+                continue
+            normalized_source = {
+                "source_url": source_url,
+                "source_host": str(
+                    raw_source.get("source_host")
+                    or urlparse(source_url).hostname
+                    or source_url
+                ),
+                "discovery_rule": str(raw_source.get("discovery_rule") or "unknown"),
+                "source_kind": str(raw_source.get("source_kind") or "candidate"),
+                "order": len(merged_sources),
+            }
+            source_key = (
+                str(normalized_source["source_url"]),
+                str(normalized_source["discovery_rule"]),
+                str(normalized_source["source_kind"]),
+            )
+            if source_key in seen_source_keys:
+                continue
+            seen_source_keys.add(source_key)
+            merged_sources.append(normalized_source)
+
+    return merged_sources
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
 
 
 _STOP_REASON_COMPLETED_STEPS = {

@@ -81,6 +81,10 @@ def test_get_cve_runs_returns_recent_history_sorted_desc(client, db_session) -> 
         "patch_found": True,
         "patch_count": 1,
         "primary_patch_url": "https://example.com/fix.patch",
+        "primary_family_source_url": "https://www.openwall.com/lists/oss-security/2024/03/29/4",
+        "primary_family_source_host": "www.openwall.com",
+        "primary_family_evidence_source_count": 3,
+        "primary_family_related_source_hosts": ["www.openwall.com"],
     }
     newer_run.created_at = older_run.created_at + timedelta(minutes=5)
     db_session.commit()
@@ -99,6 +103,10 @@ def test_get_cve_runs_returns_recent_history_sorted_desc(client, db_session) -> 
                 "patch_found": True,
                 "patch_count": 1,
                 "primary_patch_url": "https://example.com/fix.patch",
+                "primary_family_source_url": "https://www.openwall.com/lists/oss-security/2024/03/29/4",
+                "primary_family_source_host": "www.openwall.com",
+                "primary_family_evidence_source_count": 3,
+                "primary_family_related_source_hosts": ["www.openwall.com"],
             },
             "created_at": "2026-04-13T08:05:00+00:00",
         },
@@ -325,6 +333,17 @@ def test_get_cve_run_returns_detail_payload_with_progress_traces_and_patches(
             "primary_patch_id": str(patch.patch_id),
             "patch_ids": [str(patch.patch_id)],
             "patch_types": ["patch"],
+            "evidence_source_count": 1,
+            "related_source_hosts": ["example.com"],
+            "evidence_sources": [
+                {
+                    "source_url": "https://example.com/fix.patch",
+                    "source_host": "example.com",
+                    "discovery_rule": "unknown",
+                    "source_kind": "candidate",
+                    "order": 0,
+                }
+            ],
         }
     ]
 

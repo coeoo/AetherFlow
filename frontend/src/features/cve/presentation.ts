@@ -84,3 +84,20 @@ export function formatCveRunCreatedAt(createdAt: string) {
     hour12: false,
   }).format(date);
 }
+
+export function getCveHistorySourceSummary(summary: {
+  primary_family_source_host?: string;
+  primary_family_evidence_source_count?: number;
+} | null | undefined) {
+  const sourceHost = summary?.primary_family_source_host?.trim();
+  if (!sourceHost) {
+    return null;
+  }
+
+  const evidenceSourceCount = summary?.primary_family_evidence_source_count ?? 0;
+  if (evidenceSourceCount > 1) {
+    return `来源：${sourceHost} 等 ${evidenceSourceCount} 个关联来源`;
+  }
+
+  return `来源：${sourceHost}`;
+}

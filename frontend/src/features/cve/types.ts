@@ -47,12 +47,27 @@ export type CVEFixFamily = {
   primary_patch_id: string;
   patch_ids: string[];
   patch_types: string[];
+  evidence_source_count: number;
+  related_source_hosts: string[];
+  evidence_sources: CVEFixFamilyEvidenceSource[];
+};
+
+export type CVEFixFamilyEvidenceSource = {
+  source_url: string;
+  source_host: string;
+  discovery_rule: string;
+  source_kind: string;
+  order: number;
 };
 
 export type CVERunSummary = {
   patch_found?: boolean;
   patch_count?: number;
   primary_patch_url?: string;
+  primary_family_source_url?: string;
+  primary_family_source_host?: string;
+  primary_family_evidence_source_count?: number;
+  primary_family_related_source_hosts?: string[];
   error?: string;
 };
 

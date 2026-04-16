@@ -152,6 +152,114 @@ def test_execute_cve_run_persists_discovery_metadata_into_patch_meta_json(
     assert patch.patch_meta_json["discovered_from_url"] == "https://example.com/advisory"
     assert patch.patch_meta_json["discovered_from_host"] == "example.com"
     assert patch.patch_meta_json["discovery_rule"] == "matcher"
+    assert patch.patch_meta_json["canonical_candidate_key"] == "https://example.com/fix.patch"
+    assert patch.patch_meta_json["evidence_source_count"] == 1
+    assert patch.patch_meta_json["discovery_sources"] == [
+        {
+            "source_url": "https://example.com/advisory",
+            "source_host": "example.com",
+            "discovery_rule": "matcher",
+            "source_kind": "page",
+            "order": 0,
+        }
+    ]
+
+
+def test_execute_cve_run_accumulates_multiple_discovery_sources_for_same_candidate(
+    db_session, monkeypatch
+) -> None:
+    run = create_cve_run(db_session, cve_id="CVE-2024-3094")
+    db_session.commit()
+    downloaded_candidates: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        "app.cve.runtime.resolve_seed_references",
+        lambda session, *, run, cve_id: [
+            "https://github.com/acme/project/commit/abc1234",
+            "https://example.com/advisory",
+        ],
+    )
+    monkeypatch.setattr(
+        "app.cve.runtime.fetch_page",
+        lambda session, *, run, url: {
+            "url": url,
+            "content": "commit: https://github.com/acme/project/commit/abc1234.patch",
+        },
+    )
+    monkeypatch.setattr(
+        "app.cve.runtime.analyze_page",
+        lambda snapshot: [
+            {
+                "candidate_url": "https://github.com/acme/project/commit/abc1234.patch",
+                "patch_type": "github_commit_patch",
+            }
+        ],
+    )
+
+    def _fake_download(session, *, run, candidate):
+        downloaded_candidates.append(candidate)
+        patch = CVEPatchArtifact(
+            run_id=run.run_id,
+            candidate_url=str(candidate["candidate_url"]),
+            patch_type=str(candidate["patch_type"]),
+            download_status="downloaded",
+            patch_meta_json={
+                "discovered_from_url": candidate["discovered_from_url"],
+                "discovered_from_host": candidate["discovered_from_host"],
+                "discovery_rule": candidate["discovery_rule"],
+                "canonical_candidate_key": candidate["canonical_candidate_key"],
+                "discovery_sources": candidate["discovery_sources"],
+                "evidence_source_count": candidate["evidence_source_count"],
+            },
+        )
+        session.add(patch)
+        session.flush()
+        return patch
+
+    monkeypatch.setattr("app.cve.runtime.download_patch_candidate", _fake_download)
+
+    execute_cve_run(db_session, run_id=run.run_id)
+    db_session.commit()
+
+    reloaded_run = db_session.get(CVERun, run.run_id)
+    assert reloaded_run is not None
+    assert reloaded_run.summary_json["primary_family_source_url"] == (
+        "https://github.com/acme/project/commit/abc1234"
+    )
+    assert reloaded_run.summary_json["primary_family_source_host"] == "github.com"
+    assert reloaded_run.summary_json["primary_family_evidence_source_count"] == 2
+    assert reloaded_run.summary_json["primary_family_related_source_hosts"] == [
+        "github.com",
+        "example.com",
+    ]
+
+    assert downloaded_candidates == [
+        {
+            "candidate_url": "https://github.com/acme/project/commit/abc1234.patch",
+            "patch_type": "github_commit_patch",
+            "discovered_from_url": "https://github.com/acme/project/commit/abc1234",
+            "discovered_from_host": "github.com",
+            "discovery_rule": "matcher",
+            "canonical_candidate_key": "https://github.com/acme/project/commit/abc1234",
+            "evidence_source_count": 2,
+            "discovery_sources": [
+                {
+                    "source_url": "https://github.com/acme/project/commit/abc1234",
+                    "source_host": "github.com",
+                    "discovery_rule": "matcher",
+                    "source_kind": "seed",
+                    "order": 0,
+                },
+                {
+                    "source_url": "https://example.com/advisory",
+                    "source_host": "example.com",
+                    "discovery_rule": "matcher",
+                    "source_kind": "page",
+                    "order": 1,
+                },
+            ],
+        }
+    ]
 
 
 def test_execute_cve_run_marks_patch_download_failure(db_session, monkeypatch) -> None:

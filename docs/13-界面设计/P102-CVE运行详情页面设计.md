@@ -169,6 +169,7 @@ stateDiagram-v2
 
 - 视觉方向沿用“以 A 为底，吸收 C 的视觉表达”。
 - 详情页信息重心是结论优先，当前只实现最小 family summary，不实现 graph 级关系图。
+- Family Summary 需要显示关联来源数量，并允许用户直接阅读额外来源 URL。
 - 不把原始 trace JSON 作为默认展示方式。
 
 ---
@@ -199,9 +200,13 @@ stateDiagram-v2
 - 同步 family `source_url` 可以直接来自 seed 中命中的 commit / patch 引用。
 - 补充 direct seed candidate 场景下的页面表达边界。
 
+### v1.6 - 2026-04-16
+- 为 Fix Family Summary 增加多来源共指表达：关联来源数量与额外来源列表。
+- 明确这仍属于详情聚合视图增强，不引入 family 独立页面或图谱视图。
+
 ---
 
-**文档版本**：v1.5
+**文档版本**：v1.6
 **创建日期**：2026-04-09  
 **最后更新**：2026-04-16
 **维护人**：AI + 开发团队

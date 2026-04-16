@@ -26,9 +26,21 @@ export function CVEFixFamilySummary({ families }: Props) {
             <p className="card-copy">{family.source_url}</p>
             <p className="card-copy">包含 {family.patch_count} 条候选补丁</p>
             <p className="card-copy">已下载 {family.downloaded_patch_count} 条</p>
+            {family.evidence_source_count > 1 ? (
+              <p className="card-copy">
+                另有 {family.evidence_source_count - 1} 个关联来源共同指向该 fix
+              </p>
+            ) : null}
             <p className="card-copy">
               类型：{family.patch_types.map((patchType) => getCvePatchTypeLabel(patchType)).join(" / ")}
             </p>
+            {family.evidence_sources.length > 1 ? (
+              <div className="card-copy">
+                {family.evidence_sources.slice(1).map((source) => (
+                  <p key={`${family.family_key}-${source.source_url}`}>{source.source_url}</p>
+                ))}
+              </div>
+            ) : null}
           </article>
         ))}
       </div>

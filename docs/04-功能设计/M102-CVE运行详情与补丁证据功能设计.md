@@ -151,6 +151,9 @@ flowchart TD
 | primary_patch_id | string | 是 | 当前代表 patch |
 | patch_ids | array | 是 | family 内 patch 列表 |
 | patch_types | array | 是 | family 内 patch 类型去重结果 |
+| evidence_source_count | number | 是 | 当前 family 关联的来源数量 |
+| related_source_hosts | array | 是 | 关联来源 host 去重结果 |
+| evidence_sources | array | 是 | 关联来源最小审计列表 |
 
 #### CVEPatchView
 | 字段名 | 类型 | 必填 | 说明 |
@@ -176,6 +179,7 @@ flowchart TD
 - 直接返回详情页所需完整 payload
 - `fix_families` 只表达当前来源页聚合结果，不代表已落地 graph runtime
 - `fix_families.source_url` 既可能是 advisory / 公告页，也可能是 seed 中直接命中的 commit / patch 引用
+- `fix_families.evidence_sources` 用于表达“同一 fix 还有哪些来源也共同指向它”
 - `patches` 已按 `candidate_url` 去重，并返回 `duplicate_count`
 - `source_traces` 中的 `cve_seed_resolve` 会暴露 `response_meta.source_results`
 - 前端应通过展示层把新增 `patch_type` 转成可读标签
@@ -256,6 +260,9 @@ detail_ready
 
 ### 规则10：family 来源既可以是页面，也可以是 seed 直达候选
 **规则描述**：如果 patch 是直接从 seed 中的 commit / patch / diff 引用命中的，详情页允许把该引用自身作为 family `source_url` 展示，而不是强制要求存在中间页面。
+
+### 规则11：family 必须保留多来源共指的最小审计信息
+**规则描述**：当前详情页不做 graph runtime，但 `fix_families` 必须能表达同一 fix 被多个来源共同指向的最小来源列表，用于解释规则链路为何收敛到该 patch。
 
 ---
 

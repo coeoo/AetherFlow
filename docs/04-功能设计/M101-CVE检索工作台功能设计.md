@@ -151,6 +151,15 @@ graph TD
 | progress | object | 是 | 进度摘要 |
 | recent_progress | array | 是 | 最近 1 到 3 条进展 |
 
+补充说明：
+
+- `summary` 当前允许包含：
+  - `primary_family_source_url`
+  - `primary_family_source_host`
+  - `primary_family_evidence_source_count`
+  - `primary_family_related_source_hosts`
+- 工作台最近运行列表只消费这组字段中的 host 级摘要，不展示完整来源 URL 列表
+
 ---
 
 ## 🔌 接口设计
@@ -197,6 +206,7 @@ graph TD
 - 按创建时间倒序返回最近若干次 run
 - 工作台页消费 `run_id`、`cve_id`、`status`、`phase`、`stop_reason`、`summary` 和 `created_at`
 - 当前活跃 run 进入终态后，前端必须主动刷新该列表一次，确保最近运行与顶部摘要一致
+- 当 `summary.primary_family_source_host` 存在时，最近运行列表应显示主 family 的来源摘要
 
 ---
 
@@ -255,6 +265,9 @@ idle
 
 ### 规则7：工作台摘要与最近运行列表必须在终态后保持一致
 **规则描述**：active run 进入 `succeeded/failed` 后，工作台必须同步刷新最近运行列表，不能出现顶部已终态、底部仍 `queued` 的错位。
+
+### 规则8：工作台最近运行列表只展示主 family 的 host 级摘要
+**规则描述**：列表项可以提示“该结论有多少关联来源共同指向”，但只展示 host 级摘要，不展示完整 URL 列表；完整来源仍留给详情页。
 
 ---
 

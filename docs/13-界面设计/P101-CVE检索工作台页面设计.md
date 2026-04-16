@@ -75,6 +75,7 @@ flowchart TD
 
 - 展示最近几次 run
 - 每条显示 CVE、状态、失败原因或主证据
+- 若存在主 family 摘要，额外显示来源 host 提示
 - 支持直接跳详情
 
 ---
@@ -172,7 +173,7 @@ stateDiagram-v2
 |---------------|-----|----------|
 | 创建运行 | `POST /api/v1/cve/runs` | `run_id`、`status`、`phase` |
 | 轮询运行摘要 | `GET /api/v1/cve/runs/{run_id}` | `status`、`phase`、`summary`、`progress`、`recent_progress` |
-| 最近运行列表 | `GET /api/v1/cve/runs` | `run_id`、`cve_id`、`status`、`phase`、`stop_reason`、`summary`、`created_at` |
+| 最近运行列表 | `GET /api/v1/cve/runs` | `run_id`、`cve_id`、`status`、`phase`、`stop_reason`、`summary.primary_patch_url`、`summary.primary_family_source_host`、`summary.primary_family_evidence_source_count`、`created_at` |
 
 页面只消费摘要字段。完整证据、patch 与 diff 延迟到 `P102`。
 
@@ -200,9 +201,13 @@ stateDiagram-v2
 - 增加最近运行区块，允许从工作台直接回看最近几次 run
 - 同步失败原因可读化表达和最近运行列表接口
 
+### v1.3 - 2026-04-16
+- 为最近运行列表增加主 family 来源摘要表达。
+- 当存在多来源共指时，列表只展示 host 级提示，如“来源：www.openwall.com 等 3 个关联来源”。
+
 ---
 
-**文档版本**：v1.2
+**文档版本**：v1.3
 **创建日期**：2026-04-09  
-**最后更新**：2026-04-15
+**最后更新**：2026-04-16
 **维护人**：AI + 开发团队
