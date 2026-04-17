@@ -29,8 +29,9 @@ export function createCveRun(cveId: string) {
   });
 }
 
-export function getCveRunHistory() {
-  return requestJson<CVERunListItem[]>("/api/v1/cve/runs");
+export function getCveRunHistory(limit = 20) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return requestJson<CVERunListItem[]>(`/api/v1/cve/runs?${params.toString()}`);
 }
 
 export function getCveRunDetail(runId: string) {

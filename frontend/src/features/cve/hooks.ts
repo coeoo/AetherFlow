@@ -22,10 +22,10 @@ export function useCreateCveRun() {
   });
 }
 
-export function useCveRunHistory() {
+export function useCveRunHistory(limit = 20) {
   return useQuery({
     queryKey: ["cve", "runs"],
-    queryFn: getCveRunHistory,
+    queryFn: () => getCveRunHistory(limit),
   });
 }
 

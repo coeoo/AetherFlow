@@ -8,11 +8,16 @@ AetherFlow 是一个面向安全情报处理的承载平台与场景工作台仓
 ## 当前状态
 
 - 已完成：文档先行、数据库分层与 FK 收口、运行拓扑统一、平台任务/Artifact/
-  心跳底座、CVE patch fast-first 最小主链、前端 CVE 工作台与详情页、统一验
-  证命令与健康检查入口。
-- 未完成：安全公告场景主链、投递业务闭环、任务中心与系统页真实数据化、
-  scheduler 完整调度语义。
-- 当前可验证的是“平台底座与 CVE 最小闭环可运行”，不是“所有业务场景已经闭环”。
+  心跳底座、CVE patch fast-first 最小主链、平台首页真实摘要、系统状态页真实健
+  康摘要、任务中心真实列表、安全公告工作台手动提取、公告监控批次查询与详情、
+  投递中心目标管理与投递记录执行动作、统一验证命令与健康检查入口。
+- 部分完成：scheduler 已承担 heartbeat 与监控批次相关职责，安全公告场景已具备
+  手动提取与监控结果查询切片，但“完整自动调度语义”和“更多来源适配闭环”仍需
+  继续收口。
+- 未完成：更完整的安全公告自动调度策略、更多渠道适配细节、平台级更深的运维治理
+  与更复杂的权限/租户能力。
+- 当前可验证的是“平台底座 + CVE 主链 + 公告监控/投递执行最小闭环可运行”，不
+  是“所有长期规划能力都已经完成”。
 
 ## 目录概览
 
@@ -68,7 +73,7 @@ docker compose -f infra/docker-compose.dev.yml up -d postgres
 ```bash
 timeout 60s ./.venv/bin/python -m uvicorn app.main:app \
   --app-dir backend \
-  --host 127.0.0.1 \
+  --host 0.0.0.0 \
   --port 18080
 ```
 
@@ -76,13 +81,25 @@ timeout 60s ./.venv/bin/python -m uvicorn app.main:app \
 
 ```bash
 curl -sS http://127.0.0.1:18080/api/v1/platform/health
+curl -sS http://127.0.0.1:18080/api/v1/platform/home-summary
 ```
 
 启动前端开发服务器：
 
 ```bash
-npm --prefix frontend run dev
+npm --prefix frontend run dev -- --host 0.0.0.0 --port 5180
 ```
+
+当前前端可直接验证的入口：
+
+- `/`：平台首页，展示场景入口、最近任务、最近投递与系统状态摘要
+- `/cve`：CVE 工作台
+- `/announcements`：安全公告手动提取工作台
+- `/announcements?tab=monitoring`：公告监控批次与关联 run 详情
+- `/deliveries`：投递目标管理
+- `/deliveries?tab=records`：投递记录、立即发送、计划发送、失败重试
+- `/system/health`：系统状态页
+- `/system/tasks`：任务中心
 
 ## 参考文档
 

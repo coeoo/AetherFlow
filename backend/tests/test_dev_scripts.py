@@ -78,9 +78,9 @@ def test_dev_start_and_status_manage_tmux_session() -> None:
         assert tmux_window_names(session_name) == {"postgres", "api", "frontend"}
         assert "本地开发会话已创建" in start_result.stdout
         assert f"tmux 会话: {session_name}" in start_result.stdout
-        assert "API 地址: http://127.0.0.1:18080" in start_result.stdout
-        assert "前端地址: http://127.0.0.1:127.0.0.1:18080" not in start_result.stdout
-        assert "前端地址: http://127.0.0.1" in start_result.stdout
+        assert "API 地址: http://0.0.0.0:18080" in start_result.stdout
+        assert "前端地址: http://0.0.0.0:0.0.0.0:18080" not in start_result.stdout
+        assert "前端地址: http://0.0.0.0:5180" in start_result.stdout
         assert "附着会话: bash scripts/dev_attach.sh" in start_result.stdout
         assert "查看状态: bash scripts/dev_status.sh" in start_result.stdout
         assert "tmux_session=" in start_result.stdout
@@ -101,6 +101,34 @@ def test_dev_start_and_status_manage_tmux_session() -> None:
         assert "worker=disabled" in status_result.stdout
     finally:
         kill_tmux_session(session_name)
+
+
+def test_dev_common_defaults_bind_public_host_and_frontend_port_5180() -> None:
+    result = subprocess.run(
+        [
+            "bash",
+            "-lc",
+            (
+                "source scripts/dev_common.sh && "
+                "printf '%s\\n%s\\n%s\\n%s\\n' "
+                "\"$(api_url)\" "
+                "\"$(frontend_url)\" "
+                "\"$(api_cmd)\" "
+                "\"$(frontend_cmd)\""
+            ),
+        ],
+        cwd=ROOT_DIR,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+        check=True,
+    )
+
+    output_lines = result.stdout.splitlines()
+    assert output_lines[0] == "http://0.0.0.0:18080"
+    assert output_lines[1] == "http://0.0.0.0:5180"
+    assert "--host 0.0.0.0 --port 18080" in output_lines[2]
+    assert "--host 0.0.0.0 --port 5180" in output_lines[3]
 
 
 def test_dev_start_with_worker_and_stop_cleans_tmux_session() -> None:

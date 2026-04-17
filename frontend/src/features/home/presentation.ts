@@ -2,7 +2,15 @@ import type { SceneEntryCardView } from "./types";
 import type { PlatformTaskListItemView } from "../tasks/types";
 
 export function getSceneActionLabel(scene: SceneEntryCardView) {
-  return scene.scene_name === "cve" ? "进入 CVE 补丁检索" : "进入安全公告提取";
+  return scene.scene_name === "cve" ? "进入 Patch 检索" : "进入安全公告提取";
+}
+
+export function getSceneTitle(scene: SceneEntryCardView) {
+  return scene.scene_name === "cve" ? "Patch 检索" : scene.title;
+}
+
+export function getScenePath(scene: SceneEntryCardView) {
+  return scene.scene_name === "cve" ? "/patch" : scene.path;
 }
 
 export function getRecentJobTitle(job: PlatformTaskListItemView) {

@@ -1,0 +1,117 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - paragraph [ref=e6]: AETHERFLOW
+      - generic [ref=e7]: 把原始安全信号处理成可复查的结构化情报
+    - generic [ref=e8]:
+      - navigation "主导航" [ref=e9]:
+        - link "首页" [ref=e10] [cursor=pointer]:
+          - /url: /
+        - link "Patch 检索" [ref=e11] [cursor=pointer]:
+          - /url: /patch
+        - link "安全公告提取" [ref=e12] [cursor=pointer]:
+          - /url: /announcements
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - generic [ref=e15]: ⌕
+          - searchbox "搜索参数" [ref=e16]
+        - navigation "工具导航" [ref=e17]:
+          - link "投递中心" [ref=e18] [cursor=pointer]:
+            - /url: /deliveries
+          - link "系统" [ref=e19] [cursor=pointer]:
+            - /url: /system/health
+        - generic [ref=e20]: AF
+  - generic [ref=e21]:
+    - complementary [ref=e22]:
+      - generic [ref=e23]:
+        - generic [ref=e24]: ◼
+        - generic [ref=e25]:
+          - strong [ref=e26]: Patch 检索
+          - generic [ref=e27]: Patch 检索
+      - navigation "场景导航" [ref=e28]:
+        - link "首页总览" [ref=e29] [cursor=pointer]:
+          - /url: /
+        - link "Patch 检索工作区" [ref=e30] [cursor=pointer]:
+          - /url: /patch
+        - link "安全公告提取工作区" [ref=e31] [cursor=pointer]:
+          - /url: /announcements
+        - link "投递中心工作区" [ref=e32] [cursor=pointer]:
+          - /url: /deliveries
+        - link "任务中心" [ref=e33] [cursor=pointer]:
+          - /url: /system/tasks
+        - link "系统状态" [ref=e34] [cursor=pointer]:
+          - /url: /system/health
+      - generic [ref=e36]:
+        - strong [ref=e37]: Workspace
+        - generic [ref=e38]: 保持现有中文场景和路由，只替换成统一后台骨架。
+    - main [ref=e39]:
+      - generic [ref=e41]:
+        - paragraph [ref=e42]: Patch 检索
+        - heading "Patch 检索" [level=1] [ref=e43]
+        - paragraph [ref=e44]: 以漏洞编号作为入口，优先回看历史 Patch 结果；只有在你主动确认时，才发起一次新的检索。
+      - generic [ref=e46]:
+        - paragraph [ref=e47]: 查询入口
+        - heading "先看历史，再决定是否重新检索" [level=2] [ref=e48]
+        - paragraph [ref=e49]:
+          - text: 当前页面统一以
+          - strong [ref=e50]: Patch 结果中心
+          - text: 作为主视图。 输入使用
+          - strong [ref=e51]: 漏洞编号
+          - text: 作为检索入口，但会优先展示已有历史结果。
+        - generic [ref=e52]:
+          - generic [ref=e53]:
+            - generic [ref=e54]: 漏洞编号
+            - textbox "漏洞编号" [ref=e55]:
+              - /placeholder: CVE-2024-3094
+              - text: CVE-2022-2509
+          - button "查看历史结果" [ref=e57] [cursor=pointer]
+      - generic [ref=e58]:
+        - generic [ref=e60]:
+          - generic [ref=e61]:
+            - generic [ref=e62]:
+              - paragraph [ref=e63]: 当前结果
+              - heading "CVE-2022-2509" [level=2] [ref=e64]
+            - paragraph [ref=e65]: 当前没有历史结果，可立即开始一次 Patch 检索。
+          - generic [ref=e66]:
+            - paragraph [ref=e67]: 等待中
+            - generic [ref=e68]:
+              - paragraph [ref=e69]:
+                - text: 当前仅支持使用
+                - strong [ref=e70]: 漏洞编号
+                - text: 作为 Patch 检索入口。若该编号还没有历史结果，可以立即发起一次新的检索。
+              - button "开始检索" [ref=e72] [cursor=pointer]
+        - generic [ref=e74]:
+          - generic [ref=e75]:
+            - paragraph [ref=e76]: 最近运行
+            - heading "回看刚刚跑过的结论" [level=2] [ref=e77]
+          - generic [ref=e78]:
+            - article [ref=e79]:
+              - generic [ref=e80]:
+                - strong [ref=e81]: CVE-2024-3094
+                - generic [ref=e82]: queued
+              - paragraph [ref=e83]: 阶段：解析参考链接
+              - paragraph [ref=e84]: 结论：运行中
+              - generic [ref=e85]:
+                - generic [ref=e86]: 04/17 13:57
+                - link "查看运行详情" [ref=e87] [cursor=pointer]:
+                  - /url: /patch/runs/35795dbc-9bac-43c6-98f4-48eeaf020f1a
+            - article [ref=e88]:
+              - generic [ref=e89]:
+                - strong [ref=e90]: CVE-2024-3094
+                - generic [ref=e91]: queued
+              - paragraph [ref=e92]: 阶段：解析参考链接
+              - paragraph [ref=e93]: 结论：运行中
+              - generic [ref=e94]:
+                - generic [ref=e95]: 04/17 13:12
+                - link "查看运行详情" [ref=e96] [cursor=pointer]:
+                  - /url: /patch/runs/de562147-868e-4821-8657-6788484f8c43
+            - article [ref=e97]:
+              - generic [ref=e98]:
+                - strong [ref=e99]: CVE-2024-3094
+                - generic [ref=e100]: failed
+              - paragraph [ref=e101]: 阶段：下载补丁
+              - paragraph [ref=e102]: 结论：补丁下载失败
+              - generic [ref=e103]:
+                - generic [ref=e104]: 04/17 11:41
+                - link "查看运行详情" [ref=e105] [cursor=pointer]:
+                  - /url: /patch/runs/4d35b4d5-933d-4216-ac09-2a92d0f4fd23

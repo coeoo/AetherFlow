@@ -36,8 +36,8 @@ export function CVERunHistoryList({ runs }: Props) {
                 {sourceSummary ? <p className="card-copy">{sourceSummary}</p> : null}
                 <div className="cve-history-footer">
                   <span className="card-label">{formatCveRunCreatedAt(run.created_at)}</span>
-                  <Link className="action-link action-link-muted" to={`/cve/runs/${run.run_id}`}>
-                    查看详情
+                  <Link className="action-link action-link-muted" to={`/patch/runs/${run.run_id}`}>
+                    查看运行详情
                   </Link>
                 </div>
               </article>

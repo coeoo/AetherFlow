@@ -21,7 +21,7 @@ export function getTaskRunLink(task: PlatformTaskListItemView | PlatformTaskDeta
     return null;
   }
   if (task.scene_name === "cve") {
-    return `/cve/runs/${task.scene_run_id}`;
+    return `/patch/runs/${task.scene_run_id}`;
   }
   if (task.scene_name === "announcement") {
     return `/announcements/runs/${task.scene_run_id}`;

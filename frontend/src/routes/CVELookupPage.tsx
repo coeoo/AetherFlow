@@ -1,117 +1,184 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { AppShell } from "../components/layout/AppShell";
-import { CVERunHistoryList } from "../features/cve/components/CVERunHistoryList";
-import { useCreateCveRun, useCveRunDetail, useCveRunHistory } from "../features/cve/hooks";
-import { getCvePhaseLabel, getCveStopReasonLabel } from "../features/cve/presentation";
+import { PatchLookupResultPage } from "../features/cve/components/PatchLookupResultPage";
+import {
+  useCreateCveRun,
+  useCveRunDetail,
+  useCveRunHistory,
+  usePatchContent,
+} from "../features/cve/hooks";
+
+type ResultSource = "history" | "fresh" | null;
+
+const CVE_ID_PATTERN = /^CVE-\d{4}-\d{4,}$/;
+
+function normalizeCveQuery(value: string | null) {
+  return value?.trim().toUpperCase() ?? "";
+}
+
+function findLatestHistoryRun(query: string, runHistory: ReturnType<typeof useCveRunHistory>["data"]) {
+  if (!query || !runHistory?.length) {
+    return null;
+  }
+
+  return runHistory.find((run) => normalizeCveQuery(run.cve_id) === query) ?? null;
+}
 
 export function CVELookupPage() {
-  const [query, setQuery] = useState("CVE-2024-3094");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const submittedQuery = normalizeCveQuery(searchParams.get("q"));
+  const [queryInput, setQueryInput] = useState(submittedQuery);
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [resultSource, setResultSource] = useState<ResultSource>(null);
+  const [selectedPatchId, setSelectedPatchId] = useState<string | null>(null);
+
+  const historyQuery = useCveRunHistory(20);
   const createRun = useCreateCveRun();
-  const historyQuery = useCveRunHistory();
-  const detailQuery = useCveRunDetail(activeRunId, { refreshHistoryOnTerminal: true });
-  const detail = detailQuery.data;
+  const matchedHistoryRun = findLatestHistoryRun(submittedQuery, historyQuery.data);
+  const detailQuery = useCveRunDetail(selectedRunId, {
+    refreshHistoryOnTerminal: resultSource === "fresh",
+  });
+  const detail = detailQuery.data ?? null;
+  const patchContentQuery = usePatchContent(selectedRunId, selectedPatchId);
+
+  useEffect(() => {
+    setQueryInput(submittedQuery);
+    setValidationMessage(null);
+    setSelectedRunId(null);
+    setResultSource(null);
+    setSelectedPatchId(null);
+  }, [submittedQuery]);
+
+  useEffect(() => {
+    if (!submittedQuery || historyQuery.isLoading || resultSource === "fresh") {
+      return;
+    }
+
+    if (matchedHistoryRun) {
+      if (selectedRunId !== matchedHistoryRun.run_id || resultSource !== "history") {
+        setSelectedRunId(matchedHistoryRun.run_id);
+        setResultSource("history");
+      }
+      return;
+    }
+
+    if (selectedRunId !== null || resultSource !== null) {
+      setSelectedRunId(null);
+      setResultSource(null);
+    }
+  }, [
+    historyQuery.isLoading,
+    matchedHistoryRun,
+    resultSource,
+    selectedRunId,
+    submittedQuery,
+  ]);
+
+  useEffect(() => {
+    if (!detail?.patches.length) {
+      setSelectedPatchId(null);
+      return;
+    }
+
+    if (selectedPatchId && detail.patches.some((patch) => patch.patch_id === selectedPatchId)) {
+      return;
+    }
+
+    const firstAvailablePatch = detail.patches.find((patch) => patch.content_available);
+    setSelectedPatchId(firstAvailablePatch?.patch_id ?? null);
+  }, [detail, selectedPatchId]);
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!/^CVE-\d{4}-\d{4,}$/.test(query.trim())) {
+    const normalizedQuery = normalizeCveQuery(queryInput);
+    if (!CVE_ID_PATTERN.test(normalizedQuery)) {
       setValidationMessage("请输入合法的 CVE 编号，例如 CVE-2024-3094");
       return;
     }
 
     setValidationMessage(null);
-    createRun.mutate(query.trim(), {
-      onSuccess: (run) => {
-        setActiveRunId(run.run_id);
+    setSelectedRunId(null);
+    setResultSource(null);
+    setSelectedPatchId(null);
+    setSearchParams({ q: normalizedQuery });
+  }
+
+  function handleStartRun() {
+    if (!CVE_ID_PATTERN.test(submittedQuery)) {
+      return;
+    }
+
+    createRun.mutate(submittedQuery, {
+      onSuccess: (createdRun) => {
+        setSelectedPatchId(null);
+        setSelectedRunId(createdRun.run_id);
+        setResultSource("fresh");
       },
     });
   }
 
+  const loadingResult =
+    Boolean(submittedQuery) &&
+    (historyQuery.isLoading || (Boolean(selectedRunId) && detailQuery.isLoading && !detail));
+  const isRefreshing = Boolean(detail) && detailQuery.isFetching && !detailQuery.isLoading;
+  const canStartRun =
+    Boolean(submittedQuery) && CVE_ID_PATTERN.test(submittedQuery) && !createRun.isPending;
+
   return (
     <AppShell
-      eyebrow="CVE 场景"
-      title="CVE 检索工作台"
-      description="输入一个 CVE 编号，先看结论，再在详情页里继续阅读证据与 Diff。"
-      actions={
-        detail ? (
-          <div className="action-row">
-            <Link className="action-link action-link-obsidian" to={`/cve/runs/${detail.run_id}`}>
-              查看详情
-            </Link>
-          </div>
-        ) : null
-      }
+      eyebrow="Patch 检索"
+      title="Patch 检索"
+      description="以漏洞编号作为入口，优先回看历史 Patch 结果；只有在你主动确认时，才发起一次新的检索。"
     >
-      <section className="cve-workbench-grid">
-        <form className="cve-panel cve-panel-featured" onSubmit={handleSubmit}>
-          <div className="cve-panel-header">
-            <p className="card-label">输入区</p>
-            <h2>开始一次补丁检索</h2>
-          </div>
-          <label className="cve-field" htmlFor="cve-id-input">
-            <span className="cve-field-label">CVE 编号</span>
-            <input
-              id="cve-id-input"
-              className="cve-input"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="CVE-2024-3094"
-            />
-          </label>
-          {validationMessage ? <p className="cve-error-copy">{validationMessage}</p> : null}
-          <div className="action-row">
-            <button className="action-link action-link-obsidian" disabled={createRun.isPending} type="submit">
-              {createRun.isPending ? "创建中…" : "开始检索"}
-            </button>
-          </div>
-        </form>
-
-        <section className="cve-panel">
-          <div className="cve-panel-header">
-            <p className="card-label">运行状态</p>
-            <h2>当前阶段与最近进展</h2>
-          </div>
-          <p className={`status-pill status-pill-${detail?.status ?? "queued"}`}>{detail?.status ?? "idle"}</p>
-          <p className="card-copy">当前阶段：{detail ? getCvePhaseLabel(detail.phase) : "尚未开始"}</p>
-          <div className="cve-progress-copy">
-            {detail?.recent_progress?.length ? (
-              detail.recent_progress.map((item) => (
-                <article key={`${item.step}-${item.detail ?? "none"}`} className="cve-inline-progress">
-                  <strong>{item.label}</strong>
-                  <span>{item.detail ?? "无明细"}</span>
-                </article>
-              ))
-            ) : (
-              <p className="card-copy">创建 run 后，这里会滚动展示最近 1 到 3 条关键进展。</p>
-            )}
-          </div>
-        </section>
-
-        <section className="cve-panel cve-verdict-card">
-          <div className="cve-panel-header">
-            <p className="card-label">结论摘要</p>
-            <h2>{detail?.summary.patch_found ? "已命中补丁" : "等待结论形成"}</h2>
-          </div>
+      <section className="cve-panel cve-panel-featured patch-query-panel">
+        <form className="cve-panel-header" onSubmit={handleSubmit}>
+          <p className="card-label">查询入口</p>
+          <h2>先看历史，再决定是否重新检索</h2>
           <p className="card-copy">
-            主证据：{detail?.summary.primary_patch_url ?? "运行完成后会在这里显示最可信的 patch URL"}
+            当前页面统一以 <strong>Patch 结果中心</strong> 作为主视图。
+            输入使用 <strong>漏洞编号</strong> 作为检索入口，但会优先展示已有历史结果。
           </p>
-          <p className="card-copy">
-            停止原因：{getCveStopReasonLabel(detail?.stop_reason ?? null, detail?.status ?? "running")}
-          </p>
-          {detail ? (
-            <div className="action-row">
-              <Link className="action-link action-link-obsidian" to={`/cve/runs/${detail.run_id}`}>
-                查看详情
-              </Link>
+          <div className="patch-query-row">
+            <label className="cve-field" htmlFor="patch-query-input">
+              <span className="cve-field-label">漏洞编号</span>
+              <input
+                id="patch-query-input"
+                className="cve-input"
+                value={queryInput}
+                onChange={(event) => setQueryInput(event.target.value)}
+                placeholder="CVE-2024-3094"
+              />
+            </label>
+            <div className="action-row patch-query-actions">
+              <button className="action-link action-link-obsidian" type="submit">
+                查看历史结果
+              </button>
             </div>
-          ) : null}
-        </section>
-
-        <CVERunHistoryList runs={historyQuery.data ?? []} />
+          </div>
+          {validationMessage ? <p className="cve-error-copy">{validationMessage}</p> : null}
+        </form>
       </section>
+
+      <PatchLookupResultPage
+        query={submittedQuery}
+        detail={detail}
+        historyRuns={historyQuery.data ?? []}
+        resultSource={resultSource}
+        loadingResult={loadingResult}
+        isRefreshing={isRefreshing}
+        canStartRun={canStartRun}
+        onStartRun={handleStartRun}
+        selectedPatchId={selectedPatchId}
+        onSelectPatch={setSelectedPatchId}
+        patchContent={patchContentQuery.data?.content ?? null}
+        patchLoading={patchContentQuery.isLoading}
+        patchErrorMessage={
+          patchContentQuery.error instanceof Error ? patchContentQuery.error.message : null
+        }
+      />
     </AppShell>
   );
 }

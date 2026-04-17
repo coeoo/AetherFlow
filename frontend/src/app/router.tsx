@@ -12,8 +12,8 @@ import { TaskCenterPage } from "../routes/TaskCenterPage";
 
 export const routes: RouteObject[] = [
   { path: "/", element: <HomePage /> },
-  { path: "/cve", element: <CVELookupPage /> },
-  { path: "/cve/runs/:runId", element: <CVERunDetailPage /> },
+  { path: "/patch", element: <CVELookupPage /> },
+  { path: "/patch/runs/:runId", element: <CVERunDetailPage /> },
   { path: "/announcements", element: <AnnouncementWorkbenchPage /> },
   { path: "/announcements/sources", element: <AnnouncementSourcesPage /> },
   { path: "/announcements/runs/:runId", element: <AnnouncementRunDetailPage /> },

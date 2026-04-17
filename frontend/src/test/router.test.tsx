@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { within } from "@testing-library/react";
 
 import { AppProviders } from "../app/providers";
 import { routes } from "../app/router";
@@ -47,9 +48,9 @@ beforeEach(() => {
             scenes: [
               {
                 scene_name: "cve",
-                title: "CVE 补丁检索",
+                title: "Patch 检索",
                 description: "输入一个 CVE 编号，快速得到补丁线索、证据和 Diff。",
-                path: "/cve",
+                path: "/patch",
                 recent_status: "CVE-2024-3094 · running",
               },
               {
@@ -187,8 +188,8 @@ afterEach(() => {
 
 test.each([
   ["/", "平台首页"],
-  ["/cve", "CVE 检索工作台"],
-  ["/cve/runs/run-001", "CVE 运行详情"],
+  ["/patch", "Patch 检索"],
+  ["/patch/runs/run-001", "Patch 运行详情"],
   ["/announcements", "安全公告工作台"],
   ["/announcements?tab=monitoring", "安全公告工作台"],
   ["/announcements/sources", "监控源管理"],
@@ -203,13 +204,31 @@ test.each([
   expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
 });
 
+test("renders Patch 检索 in primary navigation and hides old CVE workbench naming", async () => {
+  renderPath("/patch");
+
+  expect(await screen.findByRole("link", { name: "Patch 检索" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "CVE 补丁检索" })).not.toBeInTheDocument();
+});
+
+test("renders ae_UI style shell with top search and scene sidebar", async () => {
+  renderPath("/patch");
+
+  expect(await screen.findByRole("searchbox", { name: "搜索参数" })).toBeInTheDocument();
+  const sceneNavigation = screen.getByRole("navigation", { name: "场景导航" });
+  expect(within(sceneNavigation).getByRole("link", { name: "首页总览" })).toBeInTheDocument();
+  expect(within(sceneNavigation).getByRole("link", { name: "Patch 检索工作区" })).toBeInTheDocument();
+  expect(within(sceneNavigation).getByRole("link", { name: "安全公告提取工作区" })).toBeInTheDocument();
+});
+
 test("keeps utility navigation aligned to 投递中心 and 系统 only", async () => {
   renderPath("/");
 
-  expect(await screen.findByRole("link", { name: "投递中心" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "系统" })).toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: "任务中心" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: "系统状态" })).not.toBeInTheDocument();
+  const utilityNavigation = await screen.findByRole("navigation", { name: "工具导航" });
+  expect(within(utilityNavigation).getByRole("link", { name: "投递中心" })).toBeInTheDocument();
+  expect(within(utilityNavigation).getByRole("link", { name: "系统" })).toBeInTheDocument();
+  expect(within(utilityNavigation).queryByRole("link", { name: "任务中心" })).not.toBeInTheDocument();
+  expect(within(utilityNavigation).queryByRole("link", { name: "系统状态" })).not.toBeInTheDocument();
 });
 
 test("renders the monitoring workbench content for /announcements?tab=monitoring", async () => {

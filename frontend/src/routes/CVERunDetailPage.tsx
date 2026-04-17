@@ -19,13 +19,13 @@ export function CVERunDetailPage() {
   if (detailQuery.isLoading) {
     return (
       <AppShell
-        eyebrow="CVE 结果页"
-        title="CVE 运行详情"
+        eyebrow="Patch 检索"
+        title="Patch 运行详情"
         description={`正在加载 run_id = ${runId} 的证据页内容。`}
         actions={
           <div className="action-row">
-            <Link className="action-link action-link-muted" to="/cve">
-              返回工作台
+            <Link className="action-link action-link-muted" to="/patch">
+              返回 Patch 检索
             </Link>
           </div>
         }
@@ -40,13 +40,13 @@ export function CVERunDetailPage() {
   if (!detail) {
     return (
       <AppShell
-        eyebrow="CVE 结果页"
-        title="CVE 运行详情"
+        eyebrow="Patch 检索"
+        title="Patch 运行详情"
         description={`run_id = ${runId} 的详情暂不可用。`}
         actions={
           <div className="action-row">
-            <Link className="action-link action-link-muted" to="/cve">
-              返回工作台
+            <Link className="action-link action-link-muted" to="/patch">
+              返回 Patch 检索
             </Link>
           </div>
         }
@@ -60,13 +60,13 @@ export function CVERunDetailPage() {
 
   return (
     <AppShell
-      eyebrow="CVE 结果页"
-      title="CVE 运行详情"
+      eyebrow="Patch 检索"
+      title="Patch 运行详情"
       description={`当前正在阅读 run_id = ${runId} 的补丁结论、探索证据与 Diff 内容。`}
       actions={
         <div className="action-row">
-          <Link className="action-link action-link-muted" to="/cve">
-            返回工作台
+          <Link className="action-link action-link-muted" to="/patch">
+            返回 Patch 检索
           </Link>
         </div>
       }
