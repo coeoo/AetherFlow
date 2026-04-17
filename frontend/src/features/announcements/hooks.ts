@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   createAnnouncementDeliveries,
+  getAnnouncementMonitorRunDetail,
+  getAnnouncementMonitorRuns,
   createAnnouncementRun,
   getAnnouncementRunDetail,
   getAnnouncementSources,
@@ -27,6 +29,21 @@ export function useAnnouncementRunDetail(runId: string | null) {
       }
       return 1500;
     },
+  });
+}
+
+export function useAnnouncementMonitorRuns() {
+  return useQuery({
+    queryKey: ["announcements", "monitor-runs"],
+    queryFn: getAnnouncementMonitorRuns,
+  });
+}
+
+export function useAnnouncementMonitorRunDetail(fetchId: string | null) {
+  return useQuery({
+    queryKey: ["announcements", "monitor-runs", fetchId],
+    queryFn: () => getAnnouncementMonitorRunDetail(fetchId!),
+    enabled: Boolean(fetchId),
   });
 }
 

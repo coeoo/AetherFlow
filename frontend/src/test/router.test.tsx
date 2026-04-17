@@ -154,13 +154,29 @@ test("keeps utility navigation aligned to 投递中心 and 系统 only", async (
 });
 
 test("renders the monitoring workbench content for /announcements?tab=monitoring", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/announcements/monitor-runs")) {
+        return {
+          ok: true,
+          json: async () => ({
+            code: 0,
+            message: "success",
+            data: [],
+          }),
+        } as Response;
+      }
+      throw new Error(`未预期的请求: ${url}`);
+    }),
+  );
+
   renderPath("/announcements?tab=monitoring");
 
-  expect(await screen.findByText("监控批次视图已接入")).toBeInTheDocument();
-  expect(
-    screen.getAllByText("当前工作台正在复用监控批次占位模块，后续可平滑拆分为独立监控页。"),
-  ).toHaveLength(2);
-  expect(screen.getByText("当前监控源")).toBeInTheDocument();
+  expect(await screen.findByText("最近批次")).toBeInTheDocument();
+  expect(await screen.findByText("当前还没有监控批次记录。")).toBeInTheDocument();
+  expect(screen.getByText("批次详情")).toBeInTheDocument();
 });
 
 test("exposes a real #delivery anchor in announcement run detail", async () => {
