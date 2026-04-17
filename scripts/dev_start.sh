@@ -43,6 +43,8 @@ ensure_default_runtime_dependencies
 
 if session_exists; then
     echo "tmux 会话已存在：${AETHERFLOW_DEV_TMUX_SESSION}"
+    echo "附着会话：bash scripts/dev_attach.sh"
+    echo "查看状态：bash scripts/dev_status.sh"
     exit 0
 fi
 
@@ -73,12 +75,21 @@ fi
 tmux select-window -t "${AETHERFLOW_DEV_TMUX_SESSION}:postgres"
 trap - ERR
 
-echo "tmux_session=${AETHERFLOW_DEV_TMUX_SESSION}"
-echo "postgres=running"
-echo "api=running"
-echo "frontend=running"
+echo "本地开发会话已创建。"
+echo "tmux 会话: ${AETHERFLOW_DEV_TMUX_SESSION}"
+echo "API 地址: $(api_url)"
+echo "前端地址: $(frontend_url)"
+echo "附着会话: bash scripts/dev_attach.sh"
+echo "查看状态: bash scripts/dev_status.sh"
+echo
+print_window_list
+echo
 if [ "$with_worker" -eq 1 ]; then
-    echo "worker=running"
+    print_service_state_lines "enabled"
+    echo
+    print_status_key_values "enabled"
 else
-    echo "worker=disabled"
+    print_service_state_lines "disabled"
+    echo
+    print_status_key_values "disabled"
 fi

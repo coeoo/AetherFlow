@@ -7,6 +7,8 @@ readonly AETHERFLOW_DEV_DEFAULT_DATABASE_URL="postgresql+psycopg://postgres:post
 AETHERFLOW_DEV_TMUX_SESSION="${AETHERFLOW_DEV_TMUX_SESSION:-aetherflow-dev}"
 AETHERFLOW_DEV_API_HOST="${AETHERFLOW_DEV_API_HOST:-127.0.0.1}"
 AETHERFLOW_DEV_API_PORT="${AETHERFLOW_DEV_API_PORT:-18080}"
+AETHERFLOW_DEV_FRONTEND_HOST="${AETHERFLOW_DEV_FRONTEND_HOST:-127.0.0.1}"
+AETHERFLOW_DEV_FRONTEND_PORT="${AETHERFLOW_DEV_FRONTEND_PORT:-5173}"
 AETHERFLOW_DEV_DATABASE_URL="${AETHERFLOW_DEV_DATABASE_URL:-$AETHERFLOW_DEV_DEFAULT_DATABASE_URL}"
 AETHERFLOW_DEV_API_BASE_URL="${AETHERFLOW_DEV_API_BASE_URL:-http://${AETHERFLOW_DEV_API_HOST}:${AETHERFLOW_DEV_API_PORT}}"
 
@@ -83,9 +85,10 @@ frontend_cmd() {
     fi
 
     printf \
-        "export VITE_API_BASE_URL=%q && exec npm --prefix frontend run dev -- --host %q" \
+        "export VITE_DEV_PROXY_TARGET=%q && exec npm --prefix frontend run dev -- --host %q --port %q" \
         "$AETHERFLOW_DEV_API_BASE_URL" \
-        "$AETHERFLOW_DEV_API_HOST"
+        "$AETHERFLOW_DEV_FRONTEND_HOST" \
+        "$AETHERFLOW_DEV_FRONTEND_PORT"
 }
 
 worker_cmd() {
@@ -173,4 +176,82 @@ service_state() {
     fi
 
     printf "%s" "stopped"
+}
+
+api_url() {
+    printf "http://%s:%s" "$AETHERFLOW_DEV_API_HOST" "$AETHERFLOW_DEV_API_PORT"
+}
+
+frontend_url() {
+    printf "http://%s:%s" "$AETHERFLOW_DEV_FRONTEND_HOST" "$AETHERFLOW_DEV_FRONTEND_PORT"
+}
+
+print_service_state_lines() {
+    local worker_mode="${1:-auto}"
+
+    echo "当前 tmux 窗口状态："
+    echo "  - postgres: $(service_state postgres)"
+    echo "  - api: $(service_state api)"
+    echo "  - frontend: $(service_state frontend)"
+
+    if [ "$worker_mode" = "enabled" ]; then
+        echo "  - worker: $(service_state worker)"
+        return
+    fi
+
+    if [ "$worker_mode" = "disabled" ]; then
+        echo "  - worker: disabled"
+        return
+    fi
+
+    echo "  - worker: $(service_state worker)"
+}
+
+list_tmux_windows() {
+    if ! session_exists; then
+        return
+    fi
+
+    tmux list-windows -t "$AETHERFLOW_DEV_TMUX_SESSION" -F "#W" 2>/dev/null
+}
+
+print_window_list() {
+    if ! session_exists; then
+        echo "窗口列表:"
+        echo "  - 无"
+        return
+    fi
+
+    echo "窗口列表:"
+    while IFS= read -r window_name; do
+        [ -n "$window_name" ] || continue
+        echo "  - $window_name"
+    done < <(list_tmux_windows)
+}
+
+print_address_summary() {
+    echo "地址汇总:"
+    echo "  - API: $(api_url)"
+    echo "  - Frontend: $(frontend_url)"
+}
+
+print_status_key_values() {
+    local worker_mode="${1:-auto}"
+
+    if session_exists; then
+        echo "tmux_session=running"
+    else
+        echo "tmux_session=stopped"
+    fi
+
+    echo "postgres=$(service_state postgres)"
+    echo "api=$(service_state api)"
+    echo "frontend=$(service_state frontend)"
+
+    if [ "$worker_mode" = "disabled" ]; then
+        echo "worker=disabled"
+        return
+    fi
+
+    echo "worker=$(service_state worker)"
 }

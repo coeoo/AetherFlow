@@ -36,10 +36,52 @@ export type CVEPatch = {
   download_url: string | null;
 };
 
+export type CVEFixFamily = {
+  family_key: string;
+  title: string;
+  source_url: string;
+  source_host: string;
+  discovery_rule: string;
+  patch_count: number;
+  downloaded_patch_count: number;
+  primary_patch_id: string;
+  patch_ids: string[];
+  patch_types: string[];
+  evidence_source_count: number;
+  related_source_hosts: string[];
+  evidence_sources: CVEFixFamilyEvidenceSource[];
+};
+
+export type CVEFixFamilyEvidenceSource = {
+  source_url: string;
+  source_host: string;
+  discovery_rule: string;
+  source_kind: string;
+  order: number;
+};
+
 export type CVERunSummary = {
   patch_found?: boolean;
   patch_count?: number;
   primary_patch_url?: string;
+  primary_family_source_url?: string;
+  primary_family_source_host?: string;
+  primary_family_evidence_source_count?: number;
+  primary_family_related_source_hosts?: string[];
+  llm_fallback_triggered?: boolean;
+  llm_trigger_reason?: string;
+  llm_invocation_status?: string;
+  llm_skip_reason?: string;
+  llm_decision?: string;
+  llm_selected_candidate_key?: string;
+  llm_selected_candidate_url?: string;
+  llm_confidence_band?: string;
+  llm_reason_summary?: string;
+  llm_model?: string;
+  llm_provider?: string;
+  llm_verdict_source?: string;
+  llm_input_candidate_count?: number;
+  llm_input_source_count?: number;
   error?: string;
 };
 
@@ -61,6 +103,7 @@ export type CVERunDetail = {
   stop_reason: string | null;
   summary: CVERunSummary;
   progress: CVERunProgress;
+  fix_families: CVEFixFamily[];
   recent_progress: CVERunRecentProgress[];
   source_traces: CVESourceTrace[];
   patches: CVEPatch[];

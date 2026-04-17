@@ -19,6 +19,18 @@ const PHASE_LABELS: Record<string, string> = {
   finalize_run: "收敛结果",
 };
 
+const PATCH_TYPE_LABELS: Record<string, string> = {
+  patch: "Patch",
+  diff: "Diff",
+  debdiff: "Debdiff",
+  github_commit_patch: "GitHub Commit Patch",
+  github_pull_patch: "GitHub PR Patch",
+  gitlab_commit_patch: "GitLab Commit Patch",
+  gitlab_merge_request_patch: "GitLab MR Patch",
+  kernel_commit_patch: "Kernel Commit Patch",
+  bugzilla_attachment_patch: "Bugzilla Attachment Patch",
+};
+
 const STOP_REASON_ADVICE: Record<string, string> = {
   no_seed_references: "建议先检查当前 CVE 是否存在可用参考链接，再确认是否需要补充其他来源。",
   fetch_failed: "建议先检查目标页面是否仍可访问，再确认是否需要补抓或更换来源。",
@@ -40,6 +52,10 @@ export function getCveStopReasonLabel(stopReason: string | null, status: string)
 
 export function getCvePhaseLabel(phase: string) {
   return PHASE_LABELS[phase] ?? phase;
+}
+
+export function getCvePatchTypeLabel(patchType: string) {
+  return PATCH_TYPE_LABELS[patchType] ?? patchType;
 }
 
 export function getCveFailureAdvice(stopReason: string | null) {
@@ -67,4 +83,48 @@ export function formatCveRunCreatedAt(createdAt: string) {
     minute: "2-digit",
     hour12: false,
   }).format(date);
+}
+
+export function getCveHistorySourceSummary(summary: {
+  primary_family_source_host?: string;
+  primary_family_evidence_source_count?: number;
+} | null | undefined) {
+  const sourceHost = summary?.primary_family_source_host?.trim();
+  if (!sourceHost) {
+    return null;
+  }
+
+  const evidenceSourceCount = summary?.primary_family_evidence_source_count ?? 0;
+  if (evidenceSourceCount > 1) {
+    return `来源：${sourceHost} 等 ${evidenceSourceCount} 个关联来源`;
+  }
+
+  return `来源：${sourceHost}`;
+}
+
+export function getCveLlmFallbackCopy(summary: {
+  llm_fallback_triggered?: boolean;
+  llm_invocation_status?: string;
+  llm_decision?: string;
+  llm_reason_summary?: string;
+} | null | undefined) {
+  if (!summary?.llm_fallback_triggered) {
+    return null;
+  }
+
+  if (summary.llm_invocation_status !== "succeeded") {
+    return summary.llm_reason_summary ?? "已触发受限 LLM fallback，但本次未形成可用建议。";
+  }
+
+  if (summary.llm_reason_summary?.trim()) {
+    return summary.llm_reason_summary;
+  }
+
+  if (summary.llm_decision === "select_candidate") {
+    return "受限 LLM 建议优先人工复核现有候选。";
+  }
+  if (summary.llm_decision === "needs_human_review") {
+    return "受限 LLM 认为当前证据不足，建议人工复核现有来源链路。";
+  }
+  return "受限 LLM 未给出可采纳建议，当前仍以规则链结论为准。";
 }

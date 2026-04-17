@@ -1,72 +1,80 @@
 from __future__ import annotations
 
-import httpx
+from urllib.parse import urldefrag
 
+from app.cve.seed_sources import resolve_all_seed_sources
 from app.cve.source_trace import record_source_fetch
 
 
-def _build_nvd_cve_url(cve_id: str) -> str:
-    return f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={cve_id}"
+def _merge_seed_references(source_results) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for result in source_results:
+        for reference in result.references:
+            normalized = urldefrag(reference).url
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            merged.append(normalized)
+    return merged
+
+
+def _select_status_code(source_results) -> int | None:
+    for result in source_results:
+        if result.status == "success" and result.status_code is not None:
+            return result.status_code
+    for result in source_results:
+        if result.status_code is not None:
+            return result.status_code
+    return None
+
+
+def _build_request_snapshot(cve_id: str, source_results) -> dict[str, object]:
+    return {
+        "cve_id": cve_id,
+        "sources": [result.source for result in source_results],
+        "request_urls": {
+            result.source: result.request_url for result in source_results
+        },
+    }
+
+
+def _build_response_meta(references: list[str], source_results) -> dict[str, object]:
+    return {
+        "status_code": _select_status_code(source_results),
+        "reference_count": len(references),
+        "source_results": [
+            {
+                "source": result.source,
+                "status": result.status,
+                "status_code": result.status_code,
+                "reference_count": result.reference_count,
+                "error_kind": result.error_kind,
+                "error_message": result.error_message,
+            }
+            for result in source_results
+        ],
+    }
 
 def resolve_seed_references(session, *, run, cve_id: str) -> list[str]:
-    request_url = _build_nvd_cve_url(cve_id)
-    request_snapshot = {"cve_id": cve_id, "url": request_url}
-    response: httpx.Response | None = None
+    source_results = resolve_all_seed_sources(cve_id)
+    request_snapshot = _build_request_snapshot(cve_id, source_results)
+    references = _merge_seed_references(source_results)
+    response_meta = _build_response_meta(references, source_results)
+    all_failed = all(result.status == "failed" for result in source_results)
 
-    try:
-        response = httpx.get(request_url, timeout=10.0)
-        response.raise_for_status()
-        payload = response.json()
+    record_source_fetch(
+        session,
+        run=run,
+        source_type="cve_seed_resolve",
+        source_ref=cve_id,
+        status="failed" if all_failed else "succeeded",
+        request_snapshot=request_snapshot,
+        response_meta=response_meta,
+        error_message="所有 seed 来源都失败，无法解析参考链接。" if all_failed else None,
+    )
 
-        vulnerabilities = payload.get("vulnerabilities") or []
-        if not vulnerabilities:
-            record_source_fetch(
-                session,
-                run=run,
-                source_type="cve_seed_resolve",
-                source_ref=cve_id,
-                status="succeeded",
-                request_snapshot=request_snapshot,
-                response_meta={
-                    "status_code": response.status_code,
-                    "reference_count": 0,
-                },
-            )
-            return []
+    if all_failed:
+        raise RuntimeError("所有 seed 来源都失败，无法解析参考链接。")
 
-        cve = vulnerabilities[0].get("cve") or {}
-        references = cve.get("references") or []
-        resolved: list[str] = []
-        for reference in references:
-            url = reference.get("url")
-            if isinstance(url, str) and url:
-                resolved.append(url)
-
-        record_source_fetch(
-            session,
-            run=run,
-            source_type="cve_seed_resolve",
-            source_ref=cve_id,
-            status="succeeded",
-            request_snapshot=request_snapshot,
-            response_meta={
-                "status_code": response.status_code,
-                "reference_count": len(resolved),
-            },
-        )
-        return resolved
-    except Exception as exc:
-        response_meta: dict[str, object] = {}
-        if response is not None:
-            response_meta["status_code"] = response.status_code
-        record_source_fetch(
-            session,
-            run=run,
-            source_type="cve_seed_resolve",
-            source_ref=cve_id,
-            status="failed",
-            request_snapshot=request_snapshot,
-            response_meta=response_meta,
-            error_message=str(exc),
-        )
-        raise
+    return references

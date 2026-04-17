@@ -38,6 +38,14 @@ def test_phase2_settings_include_runtime_defaults() -> None:
     assert settings.artifact_root == str((root_dir / "backend/.runtime/artifacts").resolve())
     assert settings.runtime_heartbeat_interval_seconds == 10
     assert settings.runtime_heartbeat_stale_seconds == 30
+    assert settings.cve_llm_fallback_enabled is False
+    assert settings.cve_llm_fallback_max_candidates == 8
+    assert settings.cve_llm_fallback_max_sources == 12
+    assert settings.cve_llm_fallback_max_source_chars == 2400
+    assert settings.llm_base_url == ""
+    assert settings.llm_api_key == ""
+    assert settings.llm_default_model == ""
+    assert settings.llm_timeout_seconds == 20
 
 
 def test_default_artifact_root_is_stable_across_cwd(monkeypatch) -> None:

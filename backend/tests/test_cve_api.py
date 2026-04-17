@@ -81,6 +81,10 @@ def test_get_cve_runs_returns_recent_history_sorted_desc(client, db_session) -> 
         "patch_found": True,
         "patch_count": 1,
         "primary_patch_url": "https://example.com/fix.patch",
+        "primary_family_source_url": "https://www.openwall.com/lists/oss-security/2024/03/29/4",
+        "primary_family_source_host": "www.openwall.com",
+        "primary_family_evidence_source_count": 3,
+        "primary_family_related_source_hosts": ["www.openwall.com"],
     }
     newer_run.created_at = older_run.created_at + timedelta(minutes=5)
     db_session.commit()
@@ -99,6 +103,10 @@ def test_get_cve_runs_returns_recent_history_sorted_desc(client, db_session) -> 
                 "patch_found": True,
                 "patch_count": 1,
                 "primary_patch_url": "https://example.com/fix.patch",
+                "primary_family_source_url": "https://www.openwall.com/lists/oss-security/2024/03/29/4",
+                "primary_family_source_host": "www.openwall.com",
+                "primary_family_evidence_source_count": 3,
+                "primary_family_related_source_hosts": ["www.openwall.com"],
             },
             "created_at": "2026-04-13T08:05:00+00:00",
         },
@@ -153,8 +161,54 @@ def test_get_cve_run_returns_detail_payload_with_progress_traces_and_patches(
                 source_type="cve_seed_resolve",
                 source_ref=run.cve_id,
                 status="succeeded",
-                request_snapshot_json={"cve_id": run.cve_id},
-                response_meta_json={"reference_count": 2},
+                request_snapshot_json={
+                    "cve_id": run.cve_id,
+                    "sources": ["cve_official", "osv", "github_advisory", "nvd"],
+                    "request_urls": {
+                        "cve_official": f"https://cveawg.mitre.org/api/cve/{run.cve_id}",
+                        "osv": f"https://api.osv.dev/v1/vulns/{run.cve_id}",
+                        "github_advisory": f"https://api.github.com/advisories?cve_id={run.cve_id}&per_page=20",
+                        "nvd": f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={run.cve_id}",
+                    },
+                },
+                response_meta_json={
+                    "status_code": 200,
+                    "reference_count": 2,
+                    "source_results": [
+                        {
+                            "source": "cve_official",
+                            "status": "success",
+                            "status_code": 200,
+                            "reference_count": 2,
+                            "error_kind": None,
+                            "error_message": None,
+                        },
+                        {
+                            "source": "osv",
+                            "status": "not_found",
+                            "status_code": 404,
+                            "reference_count": 0,
+                            "error_kind": None,
+                            "error_message": None,
+                        },
+                        {
+                            "source": "github_advisory",
+                            "status": "not_found",
+                            "status_code": 200,
+                            "reference_count": 0,
+                            "error_kind": None,
+                            "error_message": None,
+                        },
+                        {
+                            "source": "nvd",
+                            "status": "not_found",
+                            "status_code": 200,
+                            "reference_count": 0,
+                            "error_kind": None,
+                            "error_message": None,
+                        },
+                    ],
+                },
             ),
             SourceFetchRecord(
                 scene_name="cve",
@@ -220,6 +274,40 @@ def test_get_cve_run_returns_detail_payload_with_progress_traces_and_patches(
     assert len(body["data"]["source_traces"]) == 3
     traces_by_step = {item["step"]: item for item in body["data"]["source_traces"]}
     assert traces_by_step["cve_page_fetch"]["url"] == "https://example.com/advisory"
+    assert traces_by_step["cve_seed_resolve"]["response_meta"]["source_results"] == [
+        {
+            "source": "cve_official",
+            "status": "success",
+            "status_code": 200,
+            "reference_count": 2,
+            "error_kind": None,
+            "error_message": None,
+        },
+        {
+            "source": "osv",
+            "status": "not_found",
+            "status_code": 404,
+            "reference_count": 0,
+            "error_kind": None,
+            "error_message": None,
+        },
+        {
+            "source": "github_advisory",
+            "status": "not_found",
+            "status_code": 200,
+            "reference_count": 0,
+            "error_kind": None,
+            "error_message": None,
+        },
+        {
+            "source": "nvd",
+            "status": "not_found",
+            "status_code": 200,
+            "reference_count": 0,
+            "error_kind": None,
+            "error_message": None,
+        },
+    ]
     assert body["data"]["patches"] == [
         {
             "patch_id": str(patch.patch_id),
@@ -231,6 +319,31 @@ def test_get_cve_run_returns_detail_payload_with_progress_traces_and_patches(
             "content_available": True,
             "content_type": "text/x-patch",
             "download_url": "https://example.com/fix.patch",
+        }
+    ]
+    assert body["data"]["fix_families"] == [
+        {
+            "family_key": "family:https://example.com/fix.patch",
+            "title": "example.com",
+            "source_url": "https://example.com/fix.patch",
+            "source_host": "example.com",
+            "discovery_rule": "unknown",
+            "patch_count": 1,
+            "downloaded_patch_count": 1,
+            "primary_patch_id": str(patch.patch_id),
+            "patch_ids": [str(patch.patch_id)],
+            "patch_types": ["patch"],
+            "evidence_source_count": 1,
+            "related_source_hosts": ["example.com"],
+            "evidence_sources": [
+                {
+                    "source_url": "https://example.com/fix.patch",
+                    "source_host": "example.com",
+                    "discovery_rule": "unknown",
+                    "source_kind": "candidate",
+                    "order": 0,
+                }
+            ],
         }
     ]
 
@@ -300,6 +413,52 @@ def test_get_cve_run_failed_detail_uses_failed_phase_for_progress(client, db_ses
         "completed_steps": 2,
         "total_steps": 6,
         "terminal": True,
+    }
+
+
+def test_get_cve_run_detail_returns_llm_fallback_summary_fields(client, db_session) -> None:
+    run = create_cve_run(db_session, cve_id="CVE-2024-3094")
+    run.status = "failed"
+    run.phase = "download_patches"
+    run.stop_reason = "patch_download_failed"
+    run.summary_json = {
+        "patch_found": False,
+        "patch_count": 0,
+        "llm_fallback_triggered": True,
+        "llm_trigger_reason": "patch_download_failed",
+        "llm_invocation_status": "succeeded",
+        "llm_decision": "select_candidate",
+        "llm_selected_candidate_key": "https://example.com/fix.patch",
+        "llm_selected_candidate_url": "https://example.com/fix.patch",
+        "llm_confidence_band": "low",
+        "llm_reason_summary": "建议优先人工复核该候选。",
+        "llm_model": "demo-model",
+        "llm_provider": "openai_compatible",
+        "llm_verdict_source": "llm_fallback",
+        "llm_input_candidate_count": 1,
+        "llm_input_source_count": 1,
+    }
+    db_session.commit()
+
+    response = client.get(f"/api/v1/cve/runs/{run.run_id}")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["summary"] == {
+        "patch_found": False,
+        "patch_count": 0,
+        "llm_fallback_triggered": True,
+        "llm_trigger_reason": "patch_download_failed",
+        "llm_invocation_status": "succeeded",
+        "llm_decision": "select_candidate",
+        "llm_selected_candidate_key": "https://example.com/fix.patch",
+        "llm_selected_candidate_url": "https://example.com/fix.patch",
+        "llm_confidence_band": "low",
+        "llm_reason_summary": "建议优先人工复核该候选。",
+        "llm_model": "demo-model",
+        "llm_provider": "openai_compatible",
+        "llm_verdict_source": "llm_fallback",
+        "llm_input_candidate_count": 1,
+        "llm_input_source_count": 1,
     }
 
 

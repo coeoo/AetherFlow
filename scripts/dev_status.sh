@@ -24,13 +24,19 @@ fi
 
 require_tmux
 
+echo "本地开发会话状态"
 if session_exists; then
-    echo "tmux_session=running"
+    echo "tmux 会话: running (${AETHERFLOW_DEV_TMUX_SESSION})"
 else
-    echo "tmux_session=stopped"
+    echo "tmux 会话: stopped (${AETHERFLOW_DEV_TMUX_SESSION})"
 fi
 
-echo "postgres=$(service_state postgres)"
-echo "api=$(service_state api)"
-echo "frontend=$(service_state frontend)"
-echo "worker=$(service_state worker)"
+echo
+print_service_state_lines
+echo
+print_window_list
+echo
+print_address_summary
+echo "  - 附着会话: bash scripts/dev_attach.sh"
+echo
+print_status_key_values

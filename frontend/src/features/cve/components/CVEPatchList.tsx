@@ -1,3 +1,4 @@
+import { getCvePatchTypeLabel } from "../presentation";
 import type { CVEPatch } from "../types";
 
 type Props = {
@@ -20,7 +21,7 @@ export function CVEPatchList({ patches, selectedPatchId, onSelect }: Props) {
             className="cve-patch-item"
           >
             <div className="cve-trace-title-row">
-              <strong>{patch.patch_type.toUpperCase()}</strong>
+              <strong>{getCvePatchTypeLabel(patch.patch_type)}</strong>
               <span className={`cve-status-chip cve-status-chip-${patch.download_status}`}>{patch.download_status}</span>
             </div>
             <p className="card-copy">{patch.candidate_url}</p>

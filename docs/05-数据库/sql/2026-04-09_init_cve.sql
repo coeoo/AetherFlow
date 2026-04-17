@@ -1,3 +1,9 @@
+-- 历史说明：
+-- 1. 本文件创建于 2026-04-09，属于早期 CVE schema 草案。
+-- 2. 当前仓库真实已落地的迁移与 ORM 以 backend/alembic 和 backend/app/models 为准。
+-- 3. 下方 cve_fix_families / family_id 结构仅代表历史扩展设想，不代表当前数据库事实。
+-- 4. 当前已落地的 CVE 数据边界仍是 cve_runs + cve_patch_artifacts + source_fetch_records。
+
 CREATE TABLE IF NOT EXISTS cve_runs (
     run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     job_id UUID NOT NULL UNIQUE REFERENCES task_jobs(job_id) ON DELETE CASCADE,

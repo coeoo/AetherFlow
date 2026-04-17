@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 
 import { createCveRun, getCveRunDetail, getCveRunHistory, getPatchContent } from "./api";
 import type { CVERunListItem } from "./types";
@@ -28,8 +29,14 @@ export function useCveRunHistory() {
   });
 }
 
-export function useCveRunDetail(runId: string | null) {
-  return useQuery({
+type UseCveRunDetailOptions = {
+  refreshHistoryOnTerminal?: boolean;
+};
+
+export function useCveRunDetail(runId: string | null, options?: UseCveRunDetailOptions) {
+  const queryClient = useQueryClient();
+  const hasRefreshedTerminalHistoryRef = useRef(false);
+  const detailQuery = useQuery({
     queryKey: ["cve", "run", runId],
     queryFn: () => getCveRunDetail(runId!),
     enabled: Boolean(runId),
@@ -41,6 +48,24 @@ export function useCveRunDetail(runId: string | null) {
       return 1500;
     },
   });
+
+  useEffect(() => {
+    const shouldRefreshHistory = options?.refreshHistoryOnTerminal ?? false;
+    const detail = detailQuery.data;
+    if (!shouldRefreshHistory || !runId || !detail?.progress.terminal) {
+      hasRefreshedTerminalHistoryRef.current = false;
+      return;
+    }
+    if (hasRefreshedTerminalHistoryRef.current) {
+      return;
+    }
+    hasRefreshedTerminalHistoryRef.current = true;
+    void queryClient.invalidateQueries({
+      queryKey: ["cve", "runs"],
+    });
+  }, [detailQuery.data, options?.refreshHistoryOnTerminal, queryClient, runId]);
+
+  return detailQuery;
 }
 
 export function usePatchContent(runId: string | null, patchId: string | null) {

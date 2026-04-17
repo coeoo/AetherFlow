@@ -52,16 +52,22 @@ def download_patch_candidate(
     session: Session,
     *,
     run,
-    candidate: dict[str, str],
+    candidate: dict[str, object],
 ) -> CVEPatchArtifact:
-    candidate_url = candidate["candidate_url"]
-    patch_type = candidate["patch_type"]
+    candidate_url = str(candidate["candidate_url"])
+    patch_type = str(candidate["patch_type"])
     download_url = _resolve_download_url(candidate_url, patch_type)
     response: httpx.Response | None = None
     request_snapshot = {
         "candidate_url": candidate_url,
         "download_url": download_url,
         "patch_type": patch_type,
+        "discovered_from_url": candidate.get("discovered_from_url"),
+        "discovered_from_host": candidate.get("discovered_from_host"),
+        "discovery_rule": candidate.get("discovery_rule"),
+        "canonical_candidate_key": candidate.get("canonical_candidate_key"),
+        "discovery_sources": candidate.get("discovery_sources"),
+        "evidence_source_count": candidate.get("evidence_source_count"),
     }
 
     try:
@@ -98,6 +104,12 @@ def download_patch_candidate(
                 "status_code": response.status_code,
                 "content_type": content_type,
                 "download_url": download_url,
+                "discovered_from_url": candidate.get("discovered_from_url"),
+                "discovered_from_host": candidate.get("discovered_from_host"),
+                "discovery_rule": candidate.get("discovery_rule"),
+                "canonical_candidate_key": candidate.get("canonical_candidate_key"),
+                "discovery_sources": candidate.get("discovery_sources"),
+                "evidence_source_count": candidate.get("evidence_source_count"),
             },
         )
         record_source_fetch(
@@ -118,6 +130,12 @@ def download_patch_candidate(
         patch_meta = {
             "error": str(exc),
             "download_url": download_url,
+            "discovered_from_url": candidate.get("discovered_from_url"),
+            "discovered_from_host": candidate.get("discovered_from_host"),
+            "discovery_rule": candidate.get("discovery_rule"),
+            "canonical_candidate_key": candidate.get("canonical_candidate_key"),
+            "discovery_sources": candidate.get("discovery_sources"),
+            "evidence_source_count": candidate.get("evidence_source_count"),
         }
         if response is not None:
             patch_meta["content_type"] = response.headers.get("content-type", "")

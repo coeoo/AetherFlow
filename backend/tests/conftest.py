@@ -29,6 +29,7 @@ def test_database_url() -> str:
 
 
 def reset_database(database_url: str) -> None:
+    _reset_cached_db_factories(database_url)
     engine = create_engine_from_url(database_url)
     try:
         with engine.begin() as connection:
@@ -38,6 +39,17 @@ def reset_database(database_url: str) -> None:
         Base.metadata.create_all(engine)
     finally:
         engine.dispose()
+        _reset_cached_db_factories(database_url)
+
+
+def _reset_cached_db_factories(database_url: str) -> None:
+    # 测试会反复重建 public schema，清掉缓存的 engine/session factory 可以避免跨用例复用旧连接状态。
+    try:
+        create_engine_from_url(database_url).dispose()
+    except Exception:
+        pass
+    create_session_factory.cache_clear()
+    create_engine_from_url.cache_clear()
 
 
 @pytest.fixture()

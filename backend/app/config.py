@@ -24,6 +24,14 @@ def _load_int_setting(name: str, default: int) -> int:
     return int(raw_value)
 
 
+def _load_bool_setting(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    normalized = raw_value.strip().lower()
+    return normalized in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = "AetherFlow API"
@@ -32,6 +40,14 @@ class Settings:
     worker_name: str = "aetherflow-worker"
     runtime_heartbeat_interval_seconds: int = 10
     runtime_heartbeat_stale_seconds: int = 30
+    cve_llm_fallback_enabled: bool = False
+    cve_llm_fallback_max_candidates: int = 8
+    cve_llm_fallback_max_sources: int = 12
+    cve_llm_fallback_max_source_chars: int = 2400
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_default_model: str = ""
+    llm_timeout_seconds: int = 20
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "artifact_root", _resolve_artifact_root(self.artifact_root))
@@ -51,4 +67,24 @@ def load_settings() -> Settings:
             "AETHERFLOW_RUNTIME_HEARTBEAT_STALE_SECONDS",
             30,
         ),
+        cve_llm_fallback_enabled=_load_bool_setting(
+            "AETHERFLOW_CVE_LLM_FALLBACK_ENABLED",
+            False,
+        ),
+        cve_llm_fallback_max_candidates=_load_int_setting(
+            "AETHERFLOW_CVE_LLM_FALLBACK_MAX_CANDIDATES",
+            8,
+        ),
+        cve_llm_fallback_max_sources=_load_int_setting(
+            "AETHERFLOW_CVE_LLM_FALLBACK_MAX_SOURCES",
+            12,
+        ),
+        cve_llm_fallback_max_source_chars=_load_int_setting(
+            "AETHERFLOW_CVE_LLM_FALLBACK_MAX_SOURCE_CHARS",
+            2400,
+        ),
+        llm_base_url=os.getenv("LLM_BASE_URL", "").strip(),
+        llm_api_key=os.getenv("LLM_API_KEY", "").strip(),
+        llm_default_model=os.getenv("LLM_DEFAULT_MODEL", "").strip(),
+        llm_timeout_seconds=_load_int_setting("LLM_TIMEOUT_SECONDS", 20),
     )
