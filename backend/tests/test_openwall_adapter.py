@@ -1,9 +1,16 @@
+from datetime import UTC, datetime, timedelta
+
 from app.announcements.openwall_adapter import OpenwallAdapter
+
+
+def _fixture_day_path() -> str:
+    return (datetime.now(UTC) - timedelta(days=1)).strftime("%Y/%m/%d")
 
 
 def test_openwall_adapter_extracts_non_reply_messages_from_daily_index(
     monkeypatch,
 ) -> None:
+    day_path = _fixture_day_path()
     daily_index_html = """
     <html>
       <body>
@@ -32,9 +39,9 @@ def test_openwall_adapter_extracts_non_reply_messages_from_daily_index(
     """
 
     pages = {
-        "https://www.openwall.com/lists/oss-security/2026/04/15/": daily_index_html,
-        "https://www.openwall.com/lists/oss-security/2026/04/15/1": message_html,
-        "https://www.openwall.com/lists/oss-security/2026/04/15/3": message_html.replace(
+        f"https://www.openwall.com/lists/oss-security/{day_path}/": daily_index_html,
+        f"https://www.openwall.com/lists/oss-security/{day_path}/1": message_html,
+        f"https://www.openwall.com/lists/oss-security/{day_path}/3": message_html.replace(
             "OpenSSL advisory",
             "Kernel update",
         ),
@@ -58,6 +65,7 @@ def test_openwall_adapter_extracts_non_reply_messages_from_daily_index(
 def test_openwall_adapter_fetches_message_body_and_returns_standard_document(
     monkeypatch,
 ) -> None:
+    day_path = _fixture_day_path()
     daily_index_html = """
     <html>
       <body>
@@ -83,8 +91,8 @@ def test_openwall_adapter_fetches_message_body_and_returns_standard_document(
     """
 
     pages = {
-        "https://www.openwall.com/lists/oss-security/2026/04/15/": daily_index_html,
-        "https://www.openwall.com/lists/oss-security/2026/04/15/42": message_html,
+        f"https://www.openwall.com/lists/oss-security/{day_path}/": daily_index_html,
+        f"https://www.openwall.com/lists/oss-security/{day_path}/42": message_html,
     }
     monkeypatch.setattr(
         "app.announcements.openwall_adapter._fetch_text",
@@ -98,8 +106,8 @@ def test_openwall_adapter_fetches_message_body_and_returns_standard_document(
     assert document["source_name"] == "Openwall"
     assert document["source_type"] == "openwall"
     assert document["title"] == "OpenSSL advisory"
-    assert document["source_url"] == "https://www.openwall.com/lists/oss-security/2026/04/15/42"
-    assert document["source_item_key"] == "https://www.openwall.com/lists/oss-security/2026/04/15/42"
+    assert document["source_url"] == f"https://www.openwall.com/lists/oss-security/{day_path}/42"
+    assert document["source_item_key"] == f"https://www.openwall.com/lists/oss-security/{day_path}/42"
     assert "Linux distributions are affected." in document["raw_content"]
     assert len(document["content_dedup_hash"]) == 64
 
@@ -107,6 +115,7 @@ def test_openwall_adapter_fetches_message_body_and_returns_standard_document(
 def test_openwall_adapter_builds_stable_source_item_key_from_message_url(
     monkeypatch,
 ) -> None:
+    day_path = _fixture_day_path()
     daily_index_html = """
     <html>
       <body>
@@ -124,8 +133,8 @@ def test_openwall_adapter_builds_stable_source_item_key_from_message_url(
     """
 
     pages = {
-        "https://www.openwall.com/lists/oss-security/2026/04/15/": daily_index_html,
-        "https://www.openwall.com/lists/oss-security/2026/04/15/42": message_html,
+        f"https://www.openwall.com/lists/oss-security/{day_path}/": daily_index_html,
+        f"https://www.openwall.com/lists/oss-security/{day_path}/42": message_html,
     }
     monkeypatch.setattr(
         "app.announcements.openwall_adapter._fetch_text",
