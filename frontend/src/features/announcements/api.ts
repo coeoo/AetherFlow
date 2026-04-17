@@ -1,5 +1,7 @@
 import type {
   AnnouncementCreateDeliveriesResult,
+  AnnouncementMonitorRunDetail,
+  AnnouncementMonitorRunSummary,
   AnnouncementRunDetail,
   AnnouncementRunListItem,
   AnnouncementRunNowResult,
@@ -41,6 +43,14 @@ export function createAnnouncementRun(sourceUrl: string) {
 
 export function getAnnouncementRunDetail(runId: string) {
   return requestJson<AnnouncementRunDetail>(`/api/v1/announcements/runs/${runId}`);
+}
+
+export function getAnnouncementMonitorRuns() {
+  return requestJson<AnnouncementMonitorRunSummary[]>("/api/v1/announcements/monitor-runs");
+}
+
+export function getAnnouncementMonitorRunDetail(fetchId: string) {
+  return requestJson<AnnouncementMonitorRunDetail>(`/api/v1/announcements/monitor-runs/${fetchId}`);
 }
 
 export function createAnnouncementDeliveries(runId: string, targetIds: string[]) {

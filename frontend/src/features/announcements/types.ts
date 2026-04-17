@@ -82,6 +82,35 @@ export type AnnouncementRunDetail = {
   delivery: AnnouncementDeliveryPanel | null;
 };
 
+export type AnnouncementMonitorTriggeredRun = {
+  run_id: string;
+  entry_mode: string;
+  status: string;
+  stage: string;
+  title_hint: string | null;
+  source_url: string | null;
+  summary: AnnouncementRunSummary;
+  created_at: string;
+};
+
+export type AnnouncementMonitorRunSummary = {
+  fetch_id: string;
+  source_id: string | null;
+  source_name: string;
+  source_type: string;
+  status: string;
+  discovered_count: number;
+  new_count: number;
+  extraction_run_count: number;
+  created_at: string;
+};
+
+export type AnnouncementMonitorRunDetail = AnnouncementMonitorRunSummary & {
+  error_message: string | null;
+  request_snapshot: Record<string, unknown>;
+  triggered_runs: AnnouncementMonitorTriggeredRun[];
+};
+
 export type AnnouncementSource = {
   source_id: string;
   name: string;

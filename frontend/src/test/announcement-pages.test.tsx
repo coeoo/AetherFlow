@@ -179,6 +179,95 @@ test("announcement sources page loads source list and exposes run-now action", a
   );
 });
 
+test("announcement monitoring tab renders monitor batches and linked runs", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+
+    if (url.endsWith("/api/v1/announcements/monitor-runs") && !init?.method) {
+      return mockJsonResponse({
+        code: 0,
+        message: "success",
+        data: [
+          {
+            fetch_id: "fetch-001",
+            source_id: "source-001",
+            source_name: "Openwall OSS Security",
+            source_type: "openwall",
+            status: "succeeded",
+            discovered_count: 3,
+            new_count: 2,
+            extraction_run_count: 2,
+            created_at: "2026-04-15T10:00:00+00:00",
+          },
+        ],
+      });
+    }
+
+    if (url.endsWith("/api/v1/announcements/monitor-runs/fetch-001") && !init?.method) {
+      return mockJsonResponse({
+        code: 0,
+        message: "success",
+        data: {
+          fetch_id: "fetch-001",
+          source_id: "source-001",
+          source_name: "Openwall OSS Security",
+          source_type: "openwall",
+          status: "succeeded",
+          discovered_count: 3,
+          new_count: 2,
+          extraction_run_count: 2,
+          created_at: "2026-04-15T10:00:00+00:00",
+          error_message: null,
+          request_snapshot: {
+            source_id: "source-001",
+            source_type: "openwall",
+          },
+          triggered_runs: [
+            {
+              run_id: "run-001",
+              entry_mode: "monitor_source",
+              status: "succeeded",
+              stage: "finalize_run",
+              title_hint: "OpenSSL advisory",
+              source_url: "https://example.com/openssl",
+              summary: {
+                linux_related: true,
+                confidence: 0.91,
+              },
+              created_at: "2026-04-15T10:02:00+00:00",
+            },
+            {
+              run_id: "run-002",
+              entry_mode: "monitor_source",
+              status: "queued",
+              stage: "fetch_source",
+              title_hint: "Kernel advisory",
+              source_url: "https://example.com/kernel",
+              summary: {},
+              created_at: "2026-04-15T10:03:00+00:00",
+            },
+          ],
+        },
+      });
+    }
+
+    throw new Error(`未预期的请求: ${url}`);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderPath("/announcements?tab=monitoring");
+
+  expect(await screen.findByText("Openwall OSS Security")).toBeInTheDocument();
+  expect(screen.getByText("发现 3 · 新增 2 · 提取 2")).toBeInTheDocument();
+  expect(await screen.findByText("OpenSSL advisory")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "查看 run 详情 OpenSSL advisory" })).toHaveAttribute(
+    "href",
+    "/announcements/runs/run-001",
+  );
+  expect(screen.getByText("Kernel advisory")).toBeInTheDocument();
+});
+
 test("announcement detail page renders package summary from api payload", async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);

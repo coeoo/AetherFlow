@@ -7,6 +7,7 @@ from app.models import (
     AnnouncementSource,
     DeliveryRecord,
     DeliveryTarget,
+    SourceFetchRecord,
     TaskJob,
 )
 
@@ -155,6 +156,186 @@ def test_post_run_now_creates_monitor_job_for_source(client, db_session) -> None
     assert job.job_type == "announcement_monitor_fetch"
     assert job.trigger_kind == "manual"
     assert job.payload_json["source_id"] == str(source.source_id)
+
+
+def test_get_monitor_runs_returns_batch_summaries(client, db_session) -> None:
+    source = AnnouncementSource(
+        name="Openwall OSS Security",
+        source_type="openwall",
+        enabled=True,
+        schedule_cron="0 */2 * * *",
+        config_json={"days_back": 3, "max_documents": 5},
+        delivery_policy_json={},
+    )
+    db_session.add(source)
+    db_session.flush()
+
+    fetch_record = SourceFetchRecord(
+        scene_name="announcement",
+        source_id=source.source_id,
+        source_type="announcement_monitor_fetch",
+        source_ref=source.name,
+        status="succeeded",
+        request_snapshot_json={
+            "source_id": str(source.source_id),
+            "source_type": source.source_type,
+        },
+        response_meta_json={
+            "discovered_count": 3,
+            "new_count": 2,
+        },
+    )
+    db_session.add(fetch_record)
+    db_session.flush()
+
+    for index in range(2):
+        job = TaskJob(
+            scene_name="announcement",
+            job_type="announcement_manual_extract",
+            trigger_kind="monitor",
+            status="queued",
+            payload_json={"source_url": f"https://example.com/advisory-{index}"},
+        )
+        db_session.add(job)
+        db_session.flush()
+        run = AnnouncementRun(
+            job_id=job.job_id,
+            entry_mode="monitor_source",
+            source_id=source.source_id,
+            trigger_fetch_id=fetch_record.fetch_id,
+            status="queued",
+            stage="fetch_source",
+            title_hint=f"OpenSSL advisory {index}",
+            input_snapshot_json={"source_url": f"https://example.com/advisory-{index}"},
+            summary_json={},
+        )
+        db_session.add(run)
+
+    db_session.commit()
+
+    response = client.get("/api/v1/announcements/monitor-runs")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 0
+    assert body["data"] == [
+        {
+            "fetch_id": str(fetch_record.fetch_id),
+            "source_id": str(source.source_id),
+            "source_name": "Openwall OSS Security",
+            "source_type": "openwall",
+            "status": "succeeded",
+            "discovered_count": 3,
+            "new_count": 2,
+            "extraction_run_count": 2,
+            "created_at": fetch_record.created_at.isoformat(),
+        }
+    ]
+
+
+def test_get_monitor_run_detail_returns_batch_and_triggered_runs(client, db_session) -> None:
+    source = AnnouncementSource(
+        name="Openwall OSS Security",
+        source_type="openwall",
+        enabled=True,
+        schedule_cron="0 */2 * * *",
+        config_json={"days_back": 3, "max_documents": 5},
+        delivery_policy_json={},
+    )
+    db_session.add(source)
+    db_session.flush()
+
+    fetch_record = SourceFetchRecord(
+        scene_name="announcement",
+        source_id=source.source_id,
+        source_type="announcement_monitor_fetch",
+        source_ref=source.name,
+        status="failed",
+        request_snapshot_json={
+            "source_id": str(source.source_id),
+            "source_type": source.source_type,
+        },
+        response_meta_json={
+            "discovered_count": 2,
+            "new_count": 1,
+        },
+        error_message="上游源响应超时",
+    )
+    db_session.add(fetch_record)
+    db_session.flush()
+
+    job = TaskJob(
+        scene_name="announcement",
+        job_type="announcement_manual_extract",
+        trigger_kind="monitor",
+        status="succeeded",
+        payload_json={"source_url": "https://example.com/advisory"},
+    )
+    db_session.add(job)
+    db_session.flush()
+
+    run = AnnouncementRun(
+        job_id=job.job_id,
+        entry_mode="monitor_source",
+        source_id=source.source_id,
+        trigger_fetch_id=fetch_record.fetch_id,
+        status="succeeded",
+        stage="finalize_run",
+        title_hint="OpenSSL advisory",
+        input_snapshot_json={
+            "source_url": "https://example.com/advisory",
+            "source_name": "Openwall",
+        },
+        summary_json={
+            "linux_related": True,
+            "confidence": 0.9,
+        },
+    )
+    db_session.add(run)
+    db_session.commit()
+
+    response = client.get(f"/api/v1/announcements/monitor-runs/{fetch_record.fetch_id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 0
+    assert body["data"] == {
+        "fetch_id": str(fetch_record.fetch_id),
+        "source_id": str(source.source_id),
+        "source_name": "Openwall OSS Security",
+        "source_type": "openwall",
+        "status": "failed",
+        "discovered_count": 2,
+        "new_count": 1,
+        "extraction_run_count": 1,
+        "created_at": fetch_record.created_at.isoformat(),
+        "error_message": "上游源响应超时",
+        "request_snapshot": {
+            "source_id": str(source.source_id),
+            "source_type": "openwall",
+        },
+        "triggered_runs": [
+            {
+                "run_id": str(run.run_id),
+                "entry_mode": "monitor_source",
+                "status": "succeeded",
+                "stage": "finalize_run",
+                "title_hint": "OpenSSL advisory",
+                "source_url": "https://example.com/advisory",
+                "summary": {
+                    "linux_related": True,
+                    "confidence": 0.9,
+                },
+                "created_at": run.created_at.isoformat(),
+            }
+        ],
+    }
+
+
+def test_get_monitor_run_detail_returns_404_for_missing_batch(client) -> None:
+    response = client.get(f"/api/v1/announcements/monitor-runs/{uuid.uuid4()}")
+
+    assert response.status_code == 404
 
 
 def test_get_announcement_run_returns_delivery_panel_with_matched_targets_and_records(

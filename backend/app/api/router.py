@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from app.api.v1.announcements.monitor_runs import router as announcement_monitor_runs_router
 from app.api.v1.announcements.runs import router as announcement_runs_router
 from app.api.v1.announcements.sources import router as announcement_sources_router
 
@@ -10,6 +11,7 @@ from app.api.v1.platform.home import router as platform_home_router
 from app.api.v1.platform.tasks import router as platform_tasks_router
 
 api_router = APIRouter()
+api_router.include_router(announcement_monitor_runs_router)
 api_router.include_router(announcement_runs_router)
 api_router.include_router(announcement_sources_router)
 api_router.include_router(cve_router)
