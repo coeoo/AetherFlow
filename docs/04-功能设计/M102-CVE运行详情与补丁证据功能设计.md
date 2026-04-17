@@ -77,6 +77,7 @@ flowchart TD
 | Diff 查看 | 在线查看补丁内容 | P0 | ✅ 已完成 |
 | Trace 时间线 | 展示页面探索过程 | P0 | ✅ 已完成 |
 | 失败态进度 | 展示真实失败阶段与完成步数 | P0 | ✅ 已完成 |
+| 受限 LLM fallback 提示 | 仅在详情页展示建议层与审计提示 | P1 | 🚧 待实现 |
 
 ---
 
@@ -138,6 +139,25 @@ flowchart TD
 | patches | array | 是 | 补丁记录 |
 | source_traces | array | 是 | 页面探索证据 |
 
+补充说明：
+
+- `summary` 当前除规则链摘要外，还预留承载第一版 LLM fallback 审计字段
+- 第一版建议字段最小集合为：
+  - `llm_fallback_triggered`
+  - `llm_trigger_reason`
+  - `llm_invocation_status`
+  - `llm_decision`
+  - `llm_confidence_band`
+  - `llm_reason_summary`
+  - `llm_model`
+  - `llm_provider`
+  - `llm_verdict_source`
+  - `llm_input_candidate_count`
+  - `llm_input_source_count`
+  - `llm_selected_candidate_key`
+  - `llm_selected_candidate_url`
+- 上述字段只表达“受限建议层”的结论，不改写 `patch_found`、`patch_count`、`primary_patch_url` 或 run 的成败终态
+
 #### CVEFixFamilyView
 | 字段名 | 类型 | 必填 | 说明 |
 |--------|------|------|------|
@@ -183,6 +203,7 @@ flowchart TD
 - `patches` 已按 `candidate_url` 去重，并返回 `duplicate_count`
 - `source_traces` 中的 `cve_seed_resolve` 会暴露 `response_meta.source_results`
 - 前端应通过展示层把新增 `patch_type` 转成可读标签
+- 当 `summary.llm_fallback_triggered = true` 时，详情页可以展示轻量建议与审计提示，但不得把该建议渲染成新的主结论
 
 ### 接口2：获取补丁内容
 **接口路径**：`GET /api/v1/cve/runs/{run_id}/patch-content?patch_id=...`
@@ -263,6 +284,12 @@ detail_ready
 
 ### 规则11：family 必须保留多来源共指的最小审计信息
 **规则描述**：当前详情页不做 graph runtime，但 `fix_families` 必须能表达同一 fix 被多个来源共同指向的最小来源列表，用于解释规则链路为何收敛到该 patch。
+
+### 规则12：LLM fallback 在详情页中只属于建议层
+**规则描述**：详情页可以展示“受限 LLM 建议优先人工复核哪个已有候选”或“建议人工复核现有来源链路”，但不得把该建议表现为新的主 patch 结论。
+
+### 规则13：详情页必须区分规则结论与 LLM 建议来源
+**规则描述**：当存在 LLM fallback 时，页面必须通过来源标记或文案明确其属于 `llm_fallback`，避免用户误以为规则链已经下载成功补丁。
 
 ---
 

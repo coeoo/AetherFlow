@@ -50,6 +50,7 @@ flowchart TD
 - stop reason
 - 下一步建议
 - 失败时显示错误摘要
+- 存在 `summary.llm_fallback_triggered` 时，额外展示受限 LLM 建议提示与最小审计信息
 
 ### 区块2：Fix Family Summary
 
@@ -125,6 +126,7 @@ stateDiagram-v2
 - run 不存在：展示空态并允许返回工作台。
 - diff 加载失败：局部提示，不影响主页面其他区块。
 - 运行失败：Hero 需要明确展示停止原因、错误摘要和建议先看的失败步骤。
+- 存在 LLM fallback 时：Hero 只展示“建议人工复核”的辅助提示，不改写主结论标题和主证据卡片。
 
 ---
 
@@ -171,6 +173,7 @@ stateDiagram-v2
 - 详情页信息重心是结论优先，当前只实现最小 family summary，不实现 graph 级关系图。
 - Family Summary 需要显示关联来源数量，并允许用户直接阅读额外来源 URL。
 - 不把原始 trace JSON 作为默认展示方式。
+- LLM fallback 属于受限建议层，必须明确标记来源，不得和规则链结论混排成同一层级。
 
 ---
 

@@ -30,7 +30,9 @@
 - 当前已接入官方优先多源 seed 与非 NVD 规则增强后的真实运行结果。
 - 当前已补上 active run 终态后的历史列表同步刷新，避免工作台顶部和最近运行区块状态错位。
 - 当前仍以 CVE 补丁获取 fast-first 主线为优先，后续再继续扩展更深证据能力。
-- 后续扩展仍沿用 graph-ready 方向，但本轮仍不包含复用运行、graph/fix family 和 LLM fallback。
+- 后续扩展仍沿用 graph-ready 方向，但当前工作台首屏仍不包含复用运行、graph 视图或 LLM fallback 展示。
+- 当前工作台只同步 `summary.primary_family_*` 这组 host 级摘要，不承担完整 fix family 视图。
+- 即将进入的 CVE LLM fallback C1 只落在详情页建议层，不进入最近运行列表。
 
 ---
 
@@ -93,6 +95,7 @@ graph TD
 | 最近运行列表 | 展示最近几次 run 与主证据摘要 | P1 | ✅ 已完成 |
 | 跳转详情 | 进入详细证据页 | P1 | ✅ 已完成 |
 | 新 patch 类型文案 | 用可读标签展示新增补丁类型 | P1 | ✅ 已完成 |
+| LLM fallback 详情入口约束 | 工作台不展示 LLM 建议，只保留详情页入口 | P1 | ✅ 已确认边界 |
 
 ---
 
@@ -158,6 +161,7 @@ graph TD
   - `primary_family_source_host`
   - `primary_family_evidence_source_count`
   - `primary_family_related_source_hosts`
+- 后续 `summary` 可以包含 `llm_*` 审计字段，但工作台最近运行列表第一版不消费，也不展示 LLM 状态
 - 工作台最近运行列表只消费这组字段中的 host 级摘要，不展示完整来源 URL 列表
 
 ---
@@ -268,6 +272,9 @@ idle
 
 ### 规则8：工作台最近运行列表只展示主 family 的 host 级摘要
 **规则描述**：列表项可以提示“该结论有多少关联来源共同指向”，但只展示 host 级摘要，不展示完整 URL 列表；完整来源仍留给详情页。
+
+### 规则9：CVE LLM fallback 第一版不进入工作台最近运行列表
+**规则描述**：即使 `summary_json` 中存在 `llm_fallback_triggered`、`llm_decision` 等字段，工作台首屏和最近运行列表也不新增 LLM 标签、状态或提示；这些信息只留在详情页。
 
 ---
 

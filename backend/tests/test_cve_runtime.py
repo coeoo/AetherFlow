@@ -737,3 +737,252 @@ def test_execute_cve_run_deduplicates_patch_candidates_across_pages(
     db_session.commit()
 
     assert seen_candidates == ["https://example.com/fix.patch"]
+
+
+def test_execute_cve_run_does_not_trigger_llm_fallback_when_disabled(
+    db_session, monkeypatch
+) -> None:
+    run = create_cve_run(db_session, cve_id="CVE-2024-3094")
+    db_session.commit()
+    fallback_called = False
+
+    monkeypatch.delenv("AETHERFLOW_CVE_LLM_FALLBACK_ENABLED", raising=False)
+    monkeypatch.setattr(
+        "app.cve.runtime.resolve_seed_references",
+        lambda session, *, run, cve_id: ["https://example.com/advisory"],
+    )
+    monkeypatch.setattr(
+        "app.cve.runtime.plan_frontier",
+        lambda seed_references: seed_references,
+    )
+    monkeypatch.setattr(
+        "app.cve.runtime.fetch_page",
+        lambda session, *, run, url: {"url": url, "content": "no patch here"},
+    )
+    monkeypatch.setattr("app.cve.runtime.analyze_page", lambda snapshot: [])
+
+    def _unexpected_fallback(*args, **kwargs):
+        nonlocal fallback_called
+        fallback_called = True
+        return {
+            "llm_fallback_triggered": True,
+        }
+
+    monkeypatch.setattr("app.cve.runtime.maybe_run_cve_llm_fallback", _unexpected_fallback)
+
+    execute_cve_run(db_session, run_id=run.run_id)
+    db_session.commit()
+
+    reloaded_run = db_session.get(CVERun, run.run_id)
+    assert reloaded_run is not None
+    assert reloaded_run.stop_reason == "no_patch_candidates"
+    assert reloaded_run.summary_json == {
+        "patch_found": False,
+        "patch_count": 0,
+    }
+    assert fallback_called is False
+
+
+def test_execute_cve_run_triggers_llm_fallback_for_no_patch_candidates(
+    db_session, monkeypatch
+) -> None:
+    run = create_cve_run(db_session, cve_id="CVE-2024-3094")
+    db_session.commit()
+
+    monkeypatch.setenv("AETHERFLOW_CVE_LLM_FALLBACK_ENABLED", "true")
+    monkeypatch.setattr(
+        "app.cve.runtime.resolve_seed_references",
+        lambda session, *, run, cve_id: ["https://example.com/advisory"],
+    )
+    monkeypatch.setattr(
+        "app.cve.runtime.plan_frontier",
+        lambda seed_references: seed_references,
+    )
+    monkeypatch.setattr(
+        "app.cve.runtime.fetch_page",
+        lambda session, *, run, url: {
+            "url": url,
+            "content": "vendor advisory without explicit patch link",
+        },
+    )
+    monkeypatch.setattr("app.cve.runtime.analyze_page", lambda snapshot: [])
+
+    monkeypatch.setattr(
+        "app.cve.runtime.maybe_run_cve_llm_fallback",
+        lambda *args, **kwargs: {
+            "llm_fallback_triggered": True,
+            "llm_trigger_reason": "no_patch_candidates",
+            "llm_invocation_status": "succeeded",
+            "llm_decision": "needs_human_review",
+            "llm_confidence_band": "low",
+            "llm_reason_summary": "规则链没有形成候选，建议人工复核现有来源页。",
+            "llm_model": "demo-model",
+            "llm_provider": "openai_compatible",
+            "llm_verdict_source": "llm_fallback",
+            "llm_input_candidate_count": 0,
+            "llm_input_source_count": 2,
+        },
+    )
+
+    execute_cve_run(db_session, run_id=run.run_id)
+    db_session.commit()
+
+    reloaded_run = db_session.get(CVERun, run.run_id)
+    assert reloaded_run is not None
+    assert reloaded_run.status == "failed"
+    assert reloaded_run.stop_reason == "no_patch_candidates"
+    assert reloaded_run.summary_json == {
+        "patch_found": False,
+        "patch_count": 0,
+        "llm_fallback_triggered": True,
+        "llm_trigger_reason": "no_patch_candidates",
+        "llm_invocation_status": "succeeded",
+        "llm_decision": "needs_human_review",
+        "llm_confidence_band": "low",
+        "llm_reason_summary": "规则链没有形成候选，建议人工复核现有来源页。",
+        "llm_model": "demo-model",
+        "llm_provider": "openai_compatible",
+        "llm_verdict_source": "llm_fallback",
+        "llm_input_candidate_count": 0,
+        "llm_input_source_count": 2,
+    }
+
+
+def test_execute_cve_run_persists_skipped_llm_fallback_audit_when_provider_config_missing(
+    db_session, monkeypatch
+) -> None:
+    run = create_cve_run(db_session, cve_id="CVE-2024-3094")
+    db_session.commit()
+
+    monkeypatch.setenv("AETHERFLOW_CVE_LLM_FALLBACK_ENABLED", "true")
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_DEFAULT_MODEL", raising=False)
+    monkeypatch.setattr(
+        "app.cve.runtime.resolve_seed_references",
+        lambda session, *, run, cve_id: ["https://example.com/advisory"],
+    )
+    monkeypatch.setattr(
+        "app.cve.runtime.plan_frontier",
+        lambda seed_references: seed_references,
+    )
+    monkeypatch.setattr(
+        "app.cve.runtime.fetch_page",
+        lambda session, *, run, url: {
+            "url": url,
+            "content": "vendor advisory without explicit patch link",
+        },
+    )
+    monkeypatch.setattr("app.cve.runtime.analyze_page", lambda snapshot: [])
+
+    execute_cve_run(db_session, run_id=run.run_id)
+    db_session.commit()
+
+    reloaded_run = db_session.get(CVERun, run.run_id)
+    assert reloaded_run is not None
+    assert reloaded_run.status == "failed"
+    assert reloaded_run.stop_reason == "no_patch_candidates"
+    assert reloaded_run.summary_json == {
+        "patch_found": False,
+        "patch_count": 0,
+        "llm_fallback_triggered": True,
+        "llm_trigger_reason": "no_patch_candidates",
+        "llm_invocation_status": "skipped",
+        "llm_skip_reason": "missing_provider_config",
+        "llm_reason_summary": "LLM fallback 已开启，但缺少必需的模型配置，已跳过。",
+        "llm_model": "",
+        "llm_provider": "openai_compatible",
+        "llm_verdict_source": "llm_fallback",
+        "llm_input_candidate_count": 0,
+        "llm_input_source_count": 2,
+    }
+
+
+def test_execute_cve_run_triggers_llm_fallback_for_patch_download_failed(
+    db_session, monkeypatch
+) -> None:
+    run = create_cve_run(db_session, cve_id="CVE-2024-3094")
+    db_session.commit()
+
+    monkeypatch.setenv("AETHERFLOW_CVE_LLM_FALLBACK_ENABLED", "true")
+    monkeypatch.setattr(
+        "app.cve.runtime.resolve_seed_references",
+        lambda session, *, run, cve_id: ["https://example.com/advisory"],
+    )
+    monkeypatch.setattr(
+        "app.cve.runtime.plan_frontier",
+        lambda seed_references: seed_references,
+    )
+    monkeypatch.setattr(
+        "app.cve.runtime.fetch_page",
+        lambda session, *, run, url: {
+            "url": url,
+            "content": "patch: https://example.com/fix.patch",
+        },
+    )
+    monkeypatch.setattr(
+        "app.cve.runtime.analyze_page",
+        lambda snapshot: [
+            {
+                "candidate_url": "https://example.com/fix.patch",
+                "patch_type": "patch",
+            }
+        ],
+    )
+
+    def _failed_download(session, *, run, candidate):
+        patch = CVEPatchArtifact(
+            run_id=run.run_id,
+            candidate_url=candidate["candidate_url"],
+            patch_type=candidate["patch_type"],
+            download_status="failed",
+            patch_meta_json={"error": "403 forbidden"},
+        )
+        session.add(patch)
+        session.flush()
+        return patch
+
+    monkeypatch.setattr("app.cve.runtime.download_patch_candidate", _failed_download)
+    monkeypatch.setattr(
+        "app.cve.runtime.maybe_run_cve_llm_fallback",
+        lambda *args, **kwargs: {
+            "llm_fallback_triggered": True,
+            "llm_trigger_reason": "patch_download_failed",
+            "llm_invocation_status": "succeeded",
+            "llm_decision": "select_candidate",
+            "llm_selected_candidate_key": "https://example.com/fix.patch",
+            "llm_selected_candidate_url": "https://example.com/fix.patch",
+            "llm_confidence_band": "low",
+            "llm_reason_summary": "现有候选里这个 patch 最值得人工复核。",
+            "llm_model": "demo-model",
+            "llm_provider": "openai_compatible",
+            "llm_verdict_source": "llm_fallback",
+            "llm_input_candidate_count": 1,
+            "llm_input_source_count": 1,
+        },
+    )
+
+    execute_cve_run(db_session, run_id=run.run_id)
+    db_session.commit()
+
+    reloaded_run = db_session.get(CVERun, run.run_id)
+    assert reloaded_run is not None
+    assert reloaded_run.status == "failed"
+    assert reloaded_run.stop_reason == "patch_download_failed"
+    assert reloaded_run.summary_json == {
+        "patch_found": False,
+        "patch_count": 0,
+        "llm_fallback_triggered": True,
+        "llm_trigger_reason": "patch_download_failed",
+        "llm_invocation_status": "succeeded",
+        "llm_decision": "select_candidate",
+        "llm_selected_candidate_key": "https://example.com/fix.patch",
+        "llm_selected_candidate_url": "https://example.com/fix.patch",
+        "llm_confidence_band": "low",
+        "llm_reason_summary": "现有候选里这个 patch 最值得人工复核。",
+        "llm_model": "demo-model",
+        "llm_provider": "openai_compatible",
+        "llm_verdict_source": "llm_fallback",
+        "llm_input_candidate_count": 1,
+        "llm_input_source_count": 1,
+    }

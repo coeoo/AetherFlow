@@ -68,6 +68,20 @@ export type CVERunSummary = {
   primary_family_source_host?: string;
   primary_family_evidence_source_count?: number;
   primary_family_related_source_hosts?: string[];
+  llm_fallback_triggered?: boolean;
+  llm_trigger_reason?: string;
+  llm_invocation_status?: string;
+  llm_skip_reason?: string;
+  llm_decision?: string;
+  llm_selected_candidate_key?: string;
+  llm_selected_candidate_url?: string;
+  llm_confidence_band?: string;
+  llm_reason_summary?: string;
+  llm_model?: string;
+  llm_provider?: string;
+  llm_verdict_source?: string;
+  llm_input_candidate_count?: number;
+  llm_input_source_count?: number;
   error?: string;
 };
 

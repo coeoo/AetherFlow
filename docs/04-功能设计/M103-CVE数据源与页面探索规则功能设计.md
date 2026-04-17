@@ -68,7 +68,7 @@ flowchart TD
 | 平台状态对齐 | run 与 job/attempt 终态对齐 | P0 | ✅ 已完成 |
 | 多源聚合 | `cve_official`、OSV、GitHub Advisory、NVD 已落地 | P0 | ✅ 已完成 |
 | Trace 落表与 frontier 治理 | `source_fetch_records` 已接入 seed/page/download，frontier 已支持高信号优先与单页失败局部容错 | P1 | ✅ 已完成 |
-| 受限 LLM 兜底 | 在规则不足时从候选中做有限选择 | P2 | ⚪ 未开始 |
+| 受限 LLM 兜底 | 在规则失败或证据不足时做候选选择型建议 | P2 | 🚧 设计已确认，待实现 C1 |
 
 ---
 
@@ -135,6 +135,9 @@ flowchart TD
 ### 规则2：LLM 只能做候选选择，不能编造新 URL
 **规则描述**：作为后续扩展保留；当前第一轮未实现。
 
+### 规则2.1：C1 第一版只做建议层，不自动补下载
+**规则描述**：受限 LLM fallback 的输出只允许写入 `run.summary_json` 作为建议与审计字段，不自动触发再次下载，也不把 run 改写成成功。
+
 ### 规则3：停止原因必须明确
 **规则描述**：无论成功还是失败，都必须留下 `stop_reason`。
 
@@ -161,6 +164,18 @@ flowchart TD
 
 ### 规则11：当前 `fix_families` 只属于详情聚合视图，不代表已落地 family 持久化或 graph runtime
 **规则描述**：当前已实现的是基于 `patch_meta_json` 的 family 视图聚合；`cve_fix_families` 表、graph node / edge 结构和 family 持久化模型都不属于当前代码事实。
+
+### 规则12：C1 fallback 只允许在两个保守触发点后置触发
+**规则描述**：第一版只考虑 `no_patch_candidates` 和 `patch_download_failed` 两类收口；不在成功路径、系统异常路径或 `fetch_failed` 这类证据过薄路径中触发。
+
+### 规则13：规则已成功下载补丁时，LLM 不得介入覆盖
+**规则描述**：只要规则链已经拿到 `downloaded` patch，或 `summary.primary_patch_url` 已形成，LLM fallback 必须跳过。
+
+### 规则14：C1 的 `no_patch_candidates` 触发只允许给出人工复核建议
+**规则描述**：当规则链没有形成任何候选集合时，LLM 不得返回 `select_candidate`；只允许返回 `needs_human_review` 或 `abstain`。
+
+### 规则15：C1 的 `patch_download_failed` 触发只允许在现有 candidate key 白名单内选择
+**规则描述**：LLM 只能返回运行时提供的 `canonical_candidate_key`，不能生成新 URL，也不能返回未知 key；URL 必须由运行时根据白名单 key 反查得到。
 
 ---
 
@@ -208,6 +223,16 @@ flowchart TD
 - 不能停留在 `running`
 - Worker 必须同步把平台 `task_job` / `task_attempt` 标记为失败
 
+### 异常4：LLM fallback 调用失败或输出非法
+**触发条件**：provider 超时、接口异常、结构化输出非法、返回未知 candidate key
+
+**错误提示**：只在 `summary.llm_invocation_status` 和详情页审计提示中体现
+
+**处理方案**：
+- 主链仍按原始 `stop_reason` 收口
+- 不允许因为 fallback 失败改变 run 的终态
+- 第一版只记录最小审计字段，不扩表
+
 ---
 
 ## 🔐 权限控制
@@ -234,9 +259,10 @@ flowchart TD
 
 ### 注意事项
 - 不把主链塞回旧 pipeline/stages 目录
-- 当前主线不引入 graph run、fix family 持久化或 LLM fallback
+- 当前主线不引入 graph run、fix family 持久化或开放式 LLM 代理
 - 文档和实现都必须保持“官方记录优先、多源补充、规则优先”的口径
 - 测试环境重建 public schema 时，需要避免复用旧缓存连接状态
+- C1 fallback 默认关闭，关闭时行为必须完全回退当前基线
 
 ---
 
@@ -260,7 +286,13 @@ flowchart TD
 - [x] 多源 seed 聚合已落地
 - [x] Debian BTS、Bugzilla、Openwall regression fixture 已离线固化
 - [x] `fetch_failed` 只在“无其他可继续消费页面且无 direct candidate”时出现
-- [ ] LLM 兜底（后续）
+- [ ] 开关关闭时不触发 fallback
+- [ ] `no_patch_candidates` 时可触发建议层 fallback
+- [ ] `patch_download_failed` 时可触发候选选择型 fallback
+- [ ] 已有成功 patch 时不触发 fallback
+- [ ] LLM 返回未知 candidate key 时忽略
+- [ ] LLM 返回非法结构时忽略
+- [ ] provider 异常时维持原有 stop reason 与终态
 
 ---
 
@@ -273,7 +305,7 @@ flowchart TD
 | 开发 | 非 NVD 规则匹配与单页 Bugzilla 提取 | 2天 | AI | ✅ |
 | 开发 | direct seed candidate 优先消费与页面抓取局部容错 | 1天 | AI | ✅ |
 | 测试 | 回归样例、异常路径与状态对齐补强 | 1.5天 | AI | ✅ |
-| 下一步 | graph/fix family/LLM fallback 评估 | 1天 | - | ⚪ |
+| 下一步 | 受限 LLM fallback C1 落地 | 1天 | AI | 🚧 |
 
 ---
 

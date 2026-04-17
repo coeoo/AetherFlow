@@ -1,5 +1,10 @@
 import type { CVERunDetail } from "../types";
-import { getCveFailureAdvice, getCvePhaseLabel, getCveStopReasonLabel } from "../presentation";
+import {
+  getCveFailureAdvice,
+  getCveLlmFallbackCopy,
+  getCvePhaseLabel,
+  getCveStopReasonLabel,
+} from "../presentation";
 
 type Props = {
   detail: CVERunDetail;
@@ -17,6 +22,7 @@ function getVerdictLabel(detail: CVERunDetail) {
 
 export function CVEVerdictHero({ detail }: Props) {
   const failureAdvice = detail.status === "failed" ? getCveFailureAdvice(detail.stop_reason) : null;
+  const llmFallbackCopy = getCveLlmFallbackCopy(detail.summary);
 
   return (
     <section className="cve-verdict-hero">
@@ -27,6 +33,19 @@ export function CVEVerdictHero({ detail }: Props) {
           当前运行处于 <strong>{getCvePhaseLabel(detail.phase)}</strong>，{detail.summary.patch_count ?? 0} 条 patch 候选已进入结果面。
         </p>
         {failureAdvice ? <p className="card-copy cve-guidance-copy">{failureAdvice}</p> : null}
+        {llmFallbackCopy ? (
+          <div className="cve-guidance-copy">
+            <p className="card-label">受限 LLM 建议</p>
+            <p className="card-copy">{llmFallbackCopy}</p>
+            {detail.summary.llm_selected_candidate_url ? (
+              <p className="card-copy">建议候选：{detail.summary.llm_selected_candidate_url}</p>
+            ) : null}
+            <p className="card-copy">
+              来源：{detail.summary.llm_verdict_source ?? "llm_fallback"} · 模型：
+              {detail.summary.llm_model ?? "unknown"}
+            </p>
+          </div>
+        ) : null}
         {detail.summary.error ? <p className="cve-error-copy">错误摘要：{detail.summary.error}</p> : null}
       </div>
       <div className="cve-verdict-meta">

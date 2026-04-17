@@ -8,6 +8,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.config import load_settings
+from app.cve.llm_fallback import maybe_run_cve_llm_fallback
 from app.cve.page_analyzer import analyze_page
 from app.cve.page_fetcher import fetch_page
 from app.cve.patch_downloader import download_patch_candidate
@@ -88,10 +90,21 @@ def _build_failure_summary(*, error: str | None = None) -> dict[str, object]:
     return summary
 
 
+def _merge_failure_summary(
+    summary: dict[str, object],
+    *,
+    fallback_summary: dict[str, object] | None = None,
+) -> dict[str, object]:
+    if fallback_summary:
+        summary.update(fallback_summary)
+    return summary
+
+
 def execute_cve_run(session: Session, *, run_id: UUID) -> None:
     run = session.get(CVERun, run_id)
     if run is None:
         raise ValueError(f"CVE run 不存在: {run_id}")
+    settings = load_settings()
     try:
         _update_phase(run, "resolve_seeds")
         session.flush()
@@ -138,10 +151,24 @@ def execute_cve_run(session: Session, *, run_id: UUID) -> None:
                 stop_reason = "fetch_failed"
             else:
                 stop_reason = "no_patch_candidates"
+            fallback_summary = None
+            if settings.cve_llm_fallback_enabled and stop_reason == "no_patch_candidates":
+                fallback_summary = maybe_run_cve_llm_fallback(
+                    settings,
+                    trigger_reason="no_patch_candidates",
+                    cve_id=run.cve_id,
+                    seed_references=seed_references,
+                    snapshots=snapshots,
+                    patch_candidates=patch_candidates,
+                    patches=[],
+                )
             _finalize_failure(
                 run,
                 stop_reason=stop_reason,
-                summary=_build_failure_summary(),
+                summary=_merge_failure_summary(
+                    _build_failure_summary(),
+                    fallback_summary=fallback_summary,
+                ),
             )
             return
 
@@ -153,10 +180,24 @@ def execute_cve_run(session: Session, *, run_id: UUID) -> None:
         ]
         downloaded = [patch for patch in patches if patch.download_status == "downloaded"]
         if not downloaded:
+            fallback_summary = None
+            if settings.cve_llm_fallback_enabled:
+                fallback_summary = maybe_run_cve_llm_fallback(
+                    settings,
+                    trigger_reason="patch_download_failed",
+                    cve_id=run.cve_id,
+                    seed_references=seed_references,
+                    snapshots=snapshots,
+                    patch_candidates=patch_candidates,
+                    patches=patches,
+                )
             _finalize_failure(
                 run,
                 stop_reason="patch_download_failed",
-                summary=_build_failure_summary(),
+                summary=_merge_failure_summary(
+                    _build_failure_summary(),
+                    fallback_summary=fallback_summary,
+                ),
             )
             return
 

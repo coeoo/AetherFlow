@@ -101,3 +101,30 @@ export function getCveHistorySourceSummary(summary: {
 
   return `来源：${sourceHost}`;
 }
+
+export function getCveLlmFallbackCopy(summary: {
+  llm_fallback_triggered?: boolean;
+  llm_invocation_status?: string;
+  llm_decision?: string;
+  llm_reason_summary?: string;
+} | null | undefined) {
+  if (!summary?.llm_fallback_triggered) {
+    return null;
+  }
+
+  if (summary.llm_invocation_status !== "succeeded") {
+    return summary.llm_reason_summary ?? "已触发受限 LLM fallback，但本次未形成可用建议。";
+  }
+
+  if (summary.llm_reason_summary?.trim()) {
+    return summary.llm_reason_summary;
+  }
+
+  if (summary.llm_decision === "select_candidate") {
+    return "受限 LLM 建议优先人工复核现有候选。";
+  }
+  if (summary.llm_decision === "needs_human_review") {
+    return "受限 LLM 认为当前证据不足，建议人工复核现有来源链路。";
+  }
+  return "受限 LLM 未给出可采纳建议，当前仍以规则链结论为准。";
+}

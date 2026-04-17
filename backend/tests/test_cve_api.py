@@ -416,6 +416,52 @@ def test_get_cve_run_failed_detail_uses_failed_phase_for_progress(client, db_ses
     }
 
 
+def test_get_cve_run_detail_returns_llm_fallback_summary_fields(client, db_session) -> None:
+    run = create_cve_run(db_session, cve_id="CVE-2024-3094")
+    run.status = "failed"
+    run.phase = "download_patches"
+    run.stop_reason = "patch_download_failed"
+    run.summary_json = {
+        "patch_found": False,
+        "patch_count": 0,
+        "llm_fallback_triggered": True,
+        "llm_trigger_reason": "patch_download_failed",
+        "llm_invocation_status": "succeeded",
+        "llm_decision": "select_candidate",
+        "llm_selected_candidate_key": "https://example.com/fix.patch",
+        "llm_selected_candidate_url": "https://example.com/fix.patch",
+        "llm_confidence_band": "low",
+        "llm_reason_summary": "建议优先人工复核该候选。",
+        "llm_model": "demo-model",
+        "llm_provider": "openai_compatible",
+        "llm_verdict_source": "llm_fallback",
+        "llm_input_candidate_count": 1,
+        "llm_input_source_count": 1,
+    }
+    db_session.commit()
+
+    response = client.get(f"/api/v1/cve/runs/{run.run_id}")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["summary"] == {
+        "patch_found": False,
+        "patch_count": 0,
+        "llm_fallback_triggered": True,
+        "llm_trigger_reason": "patch_download_failed",
+        "llm_invocation_status": "succeeded",
+        "llm_decision": "select_candidate",
+        "llm_selected_candidate_key": "https://example.com/fix.patch",
+        "llm_selected_candidate_url": "https://example.com/fix.patch",
+        "llm_confidence_band": "low",
+        "llm_reason_summary": "建议优先人工复核该候选。",
+        "llm_model": "demo-model",
+        "llm_provider": "openai_compatible",
+        "llm_verdict_source": "llm_fallback",
+        "llm_input_candidate_count": 1,
+        "llm_input_source_count": 1,
+    }
+
+
 def test_get_patch_content_returns_404_when_artifact_is_missing(
     client, db_session
 ) -> None:
