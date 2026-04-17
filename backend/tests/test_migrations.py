@@ -1,6 +1,7 @@
 import os
 import subprocess
 from pathlib import Path
+import sys
 
 from sqlalchemy import create_engine, inspect, text
 
@@ -10,7 +11,7 @@ from app import models  # noqa: F401
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 BACKEND_DIR = ROOT_DIR / "backend"
-ALEMBIC_BIN = ROOT_DIR / ".venv/bin/alembic"
+PYTHON_BIN = Path(sys.executable)
 
 
 def reset_public_schema(database_url: str) -> None:
@@ -28,7 +29,7 @@ def test_alembic_upgrade_head(test_database_url: str) -> None:
 
     env = os.environ | {"DATABASE_URL": test_database_url}
     result = subprocess.run(
-        [str(ALEMBIC_BIN), "upgrade", "head"],
+        [str(PYTHON_BIN), "-m", "alembic", "upgrade", "head"],
         cwd=BACKEND_DIR,
         env=env,
         capture_output=True,
@@ -65,6 +66,7 @@ def test_alembic_upgrade_head(test_database_url: str) -> None:
 def test_platform_metadata_matches_bootstrap_contract() -> None:
     task_jobs = Base.metadata.tables["task_jobs"]
     task_attempts = Base.metadata.tables["task_attempts"]
+    delivery_records = Base.metadata.tables["delivery_records"]
 
     check_constraint_names = {constraint.name for constraint in task_jobs.constraints}
     assert "ck_task_jobs_scene_name" in check_constraint_names
@@ -78,3 +80,48 @@ def test_platform_metadata_matches_bootstrap_contract() -> None:
 
     unique_constraint_names = {constraint.name for constraint in task_attempts.constraints}
     assert "uq_task_attempts_job_attempt_no" in unique_constraint_names
+
+    assert "delivery_kind" in delivery_records.c
+    assert "scheduled_at" in delivery_records.c
+    assert "updated_at" in delivery_records.c
+
+
+def test_alembic_incremental_upgrade_adds_delivery_record_columns(test_database_url: str) -> None:
+    reset_public_schema(test_database_url)
+
+    env = os.environ | {"DATABASE_URL": test_database_url}
+    upgrade_base = subprocess.run(
+        [str(PYTHON_BIN), "-m", "alembic", "upgrade", "20260415_0003"],
+        cwd=BACKEND_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert upgrade_base.returncode == 0, upgrade_base.stderr
+
+    engine = create_engine(test_database_url, future=True)
+    try:
+        base_columns = {column["name"] for column in inspect(engine).get_columns("delivery_records")}
+    finally:
+        engine.dispose()
+
+    assert "delivery_kind" not in base_columns
+    assert "scheduled_at" not in base_columns
+    assert "updated_at" not in base_columns
+
+    upgrade_head = subprocess.run(
+        [str(PYTHON_BIN), "-m", "alembic", "upgrade", "head"],
+        cwd=BACKEND_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert upgrade_head.returncode == 0, upgrade_head.stderr
+
+    engine = create_engine(test_database_url, future=True)
+    try:
+        upgraded_columns = {column["name"] for column in inspect(engine).get_columns("delivery_records")}
+    finally:
+        engine.dispose()
+
+    assert {"delivery_kind", "scheduled_at", "updated_at"}.issubset(upgraded_columns)

@@ -42,10 +42,14 @@ export type AnnouncementDeliveryRecord = {
   target_id: string | null;
   target_name: string;
   channel_type: string | null;
+  delivery_kind: string;
   status: string;
   error_message: string | null;
+  scheduled_at: string | null;
+  sent_at: string | null;
   created_at: string;
   payload_summary: Record<string, unknown>;
+  response_snapshot: Record<string, unknown>;
 };
 
 export type AnnouncementDeliveryPanel = {
@@ -132,9 +136,12 @@ export type AnnouncementCreateDeliveriesResult = {
   run_id: string;
   created_count: number;
   records: Array<{
+    record_id: string;
     target_id: string;
     target_name: string;
+    delivery_kind: string;
     status: string;
+    scheduled_at: string | null;
   }>;
 };
 

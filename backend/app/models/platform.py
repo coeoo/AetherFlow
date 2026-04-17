@@ -153,6 +153,11 @@ class DeliveryRecord(Base):
     scene_name: Mapped[str] = mapped_column(String(32))
     source_ref_type: Mapped[str | None] = mapped_column(String(64))
     source_ref_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    delivery_kind: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=text("'production'"),
+    )
     status: Mapped[str] = mapped_column(String(32))
     payload_summary_json: Mapped[dict[str, object]] = mapped_column(
         JSONB,
@@ -165,8 +170,14 @@ class DeliveryRecord(Base):
         server_default=text("'{}'::jsonb"),
     )
     error_message: Mapped[str | None] = mapped_column(Text)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=text("NOW()"),

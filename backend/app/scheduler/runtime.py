@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.config import Settings
 from app.db.session import create_session_factory
+from app.platform.delivery_service import process_scheduled_delivery_records
 from app.platform.runtime_heartbeats import build_instance_name, upsert_runtime_heartbeat
 
 
@@ -19,3 +20,4 @@ def run_scheduler_once(
         role="scheduler",
         instance_name=build_instance_name("scheduler", instance_name),
     )
+    process_scheduled_delivery_records(session_factory)

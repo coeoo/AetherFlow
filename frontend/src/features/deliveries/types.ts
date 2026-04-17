@@ -6,16 +6,21 @@ export type DeliveryRecordView = {
   target_id: string | null;
   target_name: string;
   channel_type: string | null;
+  delivery_kind: string;
   status: string;
   error_message: string | null;
+  scheduled_at: string | null;
+  sent_at: string | null;
   created_at: string;
   payload_summary: Record<string, unknown>;
+  response_snapshot: Record<string, unknown>;
 };
 
 export type DeliveryRecordFilters = {
   scene_name: string | null;
   status: string | null;
   channel_type: string | null;
+  delivery_kind: string | null;
 };
 
 export type DeliveryTargetView = {
@@ -36,6 +41,11 @@ export type CreateDeliveryTargetInput = {
 
 export type UpdateDeliveryTargetInput = Partial<CreateDeliveryTargetInput> & {
   target_id: string;
+};
+
+export type ScheduleDeliveryRecordInput = {
+  record_id: string;
+  scheduled_at: string;
 };
 
 export type ApiEnvelope<T> = {
