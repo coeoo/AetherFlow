@@ -1,4 +1,7 @@
 import uuid
+from datetime import UTC, datetime, timedelta
+
+import httpx
 
 from app.models import (
     AnnouncementDocument,
@@ -9,6 +12,8 @@ from app.models import (
     DeliveryTarget,
     TaskJob,
 )
+from app.config import load_settings
+from app.scheduler.runtime import run_scheduler_once
 
 
 def test_post_announcement_runs_creates_manual_url_run_and_task_job(
@@ -239,7 +244,8 @@ def test_get_announcement_run_returns_delivery_panel_with_matched_targets_and_re
         scene_name="announcement",
         source_ref_type="announcement_run",
         source_ref_id=run.run_id,
-        status="prepared",
+        status="queued",
+        delivery_kind="production",
         payload_summary_json={"title": "OpenSSL advisory"},
         response_snapshot_json={"mode": "platform_only"},
     )
@@ -271,10 +277,14 @@ def test_get_announcement_run_returns_delivery_panel_with_matched_targets_and_re
             "target_id": str(target.target_id),
             "target_name": "安全响应群",
             "channel_type": "wecom",
-            "status": "prepared",
+            "delivery_kind": "production",
+            "status": "queued",
             "error_message": None,
+            "scheduled_at": None,
+            "sent_at": None,
             "created_at": record.created_at.isoformat(),
             "payload_summary": {"title": "OpenSSL advisory"},
+            "response_snapshot": {"mode": "platform_only"},
         }
     ]
 
@@ -361,7 +371,10 @@ def test_post_announcement_run_deliveries_creates_prepared_records_for_matched_t
         {
             "target_id": str(target.target_id),
             "target_name": "安全响应群",
-            "status": "prepared",
+            "record_id": body["data"]["records"][0]["record_id"],
+            "delivery_kind": "production",
+            "status": "queued",
+            "scheduled_at": None,
         }
     ]
 
@@ -375,6 +388,8 @@ def test_post_announcement_run_deliveries_creates_prepared_records_for_matched_t
         .all()
     )
     assert len(records) == 1
+    assert records[0].status == "queued"
+    assert records[0].delivery_kind == "production"
     assert records[0].payload_summary_json["title"] == "OpenSSL advisory"
 
     second_response = client.post(f"/api/v1/announcements/runs/{run.run_id}/deliveries", json={})
@@ -397,7 +412,8 @@ def test_get_platform_delivery_records_returns_announcement_records(client, db_s
         scene_name="announcement",
         source_ref_type="announcement_run",
         source_ref_id=uuid.uuid4(),
-        status="prepared",
+        status="queued",
+        delivery_kind="production",
         payload_summary_json={"title": "OpenSSL advisory"},
         response_snapshot_json={"mode": "platform_only"},
     )
@@ -418,10 +434,14 @@ def test_get_platform_delivery_records_returns_announcement_records(client, db_s
             "target_id": str(target.target_id),
             "target_name": "安全响应群",
             "channel_type": "wecom",
-            "status": "prepared",
+            "delivery_kind": "production",
+            "status": "queued",
             "error_message": None,
+            "scheduled_at": None,
+            "sent_at": None,
             "created_at": record.created_at.isoformat(),
             "payload_summary": {"title": "OpenSSL advisory"},
+            "response_snapshot": {"mode": "platform_only"},
         }
     ]
 
@@ -441,7 +461,8 @@ def test_get_platform_delivery_records_filters_by_status(client, db_session) -> 
         scene_name="announcement",
         source_ref_type="announcement_run",
         source_ref_id=uuid.uuid4(),
-        status="prepared",
+        status="queued",
+        delivery_kind="production",
         payload_summary_json={"title": "OpenSSL advisory"},
         response_snapshot_json={"mode": "platform_only"},
     )
@@ -457,12 +478,12 @@ def test_get_platform_delivery_records_filters_by_status(client, db_session) -> 
     db_session.add_all([prepared_record, skipped_record])
     db_session.commit()
 
-    response = client.get("/api/v1/platform/delivery-records?scene_name=announcement&status=prepared")
+    response = client.get("/api/v1/platform/delivery-records?scene_name=announcement&status=queued")
 
     assert response.status_code == 200
     body = response.json()
     assert body["code"] == 0
-    assert [item["status"] for item in body["data"]] == ["prepared"]
+    assert [item["status"] for item in body["data"]] == ["queued"]
     assert [item["payload_summary"]["title"] for item in body["data"]] == ["OpenSSL advisory"]
 
 
@@ -487,7 +508,8 @@ def test_get_platform_delivery_records_filters_by_channel_type(client, db_sessio
         scene_name="announcement",
         source_ref_type="announcement_run",
         source_ref_id=uuid.uuid4(),
-        status="prepared",
+        status="queued",
+        delivery_kind="production",
         payload_summary_json={"title": "OpenSSL advisory"},
         response_snapshot_json={"mode": "platform_only"},
     )
@@ -496,7 +518,8 @@ def test_get_platform_delivery_records_filters_by_channel_type(client, db_sessio
         scene_name="announcement",
         source_ref_type="announcement_run",
         source_ref_id=uuid.uuid4(),
-        status="prepared",
+        status="queued",
+        delivery_kind="production",
         payload_summary_json={"title": "Kernel advisory"},
         response_snapshot_json={"mode": "platform_only"},
     )
@@ -512,6 +535,47 @@ def test_get_platform_delivery_records_filters_by_channel_type(client, db_sessio
     assert body["code"] == 0
     assert [item["channel_type"] for item in body["data"]] == ["email"]
     assert [item["payload_summary"]["title"] for item in body["data"]] == ["Kernel advisory"]
+
+
+def test_get_platform_delivery_records_filters_by_delivery_kind(client, db_session) -> None:
+    target = DeliveryTarget(
+        name="安全响应群",
+        channel_type="wecom",
+        enabled=True,
+        config_json={"webhook_url": "https://example.com/wecom"},
+    )
+    db_session.add(target)
+    db_session.flush()
+
+    production_record = DeliveryRecord(
+        target_id=target.target_id,
+        scene_name="announcement",
+        source_ref_type="announcement_run",
+        source_ref_id=uuid.uuid4(),
+        status="queued",
+        delivery_kind="production",
+        payload_summary_json={"title": "OpenSSL advisory"},
+        response_snapshot_json={"mode": "platform_only"},
+    )
+    test_record = DeliveryRecord(
+        target_id=target.target_id,
+        scene_name="platform",
+        source_ref_type="delivery_target",
+        source_ref_id=target.target_id,
+        status="failed",
+        delivery_kind="test",
+        payload_summary_json={"title": "平台测试发送"},
+        response_snapshot_json={"mode": "test"},
+    )
+    db_session.add_all([production_record, test_record])
+    db_session.commit()
+
+    response = client.get("/api/v1/platform/delivery-records?delivery_kind=test")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["delivery_kind"] for item in body["data"]] == ["test"]
+    assert [item["payload_summary"]["title"] for item in body["data"]] == ["平台测试发送"]
 
 
 def test_get_platform_delivery_targets_returns_target_views(client, db_session) -> None:
@@ -655,3 +719,223 @@ def test_patch_platform_delivery_target_updates_editable_fields(client, db_sessi
         "recipients": ["team@example.com"],
         "scene_names": ["announcement"],
     }
+
+
+def test_post_platform_delivery_target_test_creates_sent_test_record(
+    client, db_session, monkeypatch
+) -> None:
+    target = DeliveryTarget(
+        name="Webhook 通知组",
+        channel_type="webhook",
+        enabled=True,
+        config_json={"url": "https://example.com/hooks/aetherflow"},
+    )
+    db_session.add(target)
+    db_session.commit()
+
+    def _fake_http_post(url: str, **kwargs) -> httpx.Response:
+        request = httpx.Request("POST", url)
+        assert kwargs["json"]["delivery_kind"] == "test"
+        assert kwargs["json"]["title"] == "平台测试发送"
+        return httpx.Response(200, json={"ok": True}, request=request)
+
+    monkeypatch.setattr("httpx.post", _fake_http_post)
+
+    response = client.post(f"/api/v1/platform/delivery-targets/{target.target_id}/test", json={})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["target_id"] == str(target.target_id)
+    assert body["data"]["delivery_kind"] == "test"
+    assert body["data"]["status"] == "sent"
+    assert body["data"]["sent_at"] is not None
+
+    db_session.expire_all()
+    records = (
+        db_session.query(DeliveryRecord)
+        .filter(DeliveryRecord.target_id == target.target_id)
+        .order_by(DeliveryRecord.created_at.desc())
+        .all()
+    )
+    assert len(records) == 1
+    assert records[0].delivery_kind == "test"
+    assert records[0].status == "sent"
+
+
+def test_post_platform_delivery_record_send_executes_queued_record(
+    client, db_session, monkeypatch
+) -> None:
+    target = DeliveryTarget(
+        name="Webhook 通知组",
+        channel_type="webhook",
+        enabled=True,
+        config_json={"url": "https://example.com/hooks/aetherflow"},
+    )
+    db_session.add(target)
+    db_session.flush()
+
+    record = DeliveryRecord(
+        target_id=target.target_id,
+        scene_name="announcement",
+        source_ref_type="announcement_run",
+        source_ref_id=uuid.uuid4(),
+        status="queued",
+        delivery_kind="production",
+        payload_summary_json={"title": "OpenSSL advisory"},
+        response_snapshot_json={"mode": "platform_only"},
+    )
+    db_session.add(record)
+    db_session.commit()
+
+    def _fake_http_post(url: str, **kwargs) -> httpx.Response:
+        request = httpx.Request("POST", url)
+        assert kwargs["json"]["delivery_kind"] == "production"
+        assert kwargs["json"]["title"] == "OpenSSL advisory"
+        return httpx.Response(200, json={"delivered": True}, request=request)
+
+    monkeypatch.setattr("httpx.post", _fake_http_post)
+
+    response = client.post(f"/api/v1/platform/delivery-records/{record.record_id}/send")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["record_id"] == str(record.record_id)
+    assert body["data"]["status"] == "sent"
+    assert body["data"]["delivery_kind"] == "production"
+    assert body["data"]["sent_at"] is not None
+
+    db_session.expire_all()
+    reloaded_record = db_session.get(DeliveryRecord, record.record_id)
+    assert reloaded_record is not None
+    assert reloaded_record.status == "sent"
+    assert reloaded_record.sent_at is not None
+
+
+def test_post_platform_delivery_record_retry_retries_failed_record(
+    client, db_session, monkeypatch
+) -> None:
+    target = DeliveryTarget(
+        name="Webhook 通知组",
+        channel_type="webhook",
+        enabled=True,
+        config_json={"url": "https://example.com/hooks/aetherflow"},
+    )
+    db_session.add(target)
+    db_session.flush()
+
+    record = DeliveryRecord(
+        target_id=target.target_id,
+        scene_name="announcement",
+        source_ref_type="announcement_run",
+        source_ref_id=uuid.uuid4(),
+        status="failed",
+        delivery_kind="production",
+        payload_summary_json={"title": "OpenSSL advisory"},
+        response_snapshot_json={"status_code": 500},
+        error_message="首次发送失败",
+    )
+    db_session.add(record)
+    db_session.commit()
+
+    def _fake_http_post(url: str, **kwargs) -> httpx.Response:
+        request = httpx.Request("POST", url)
+        return httpx.Response(200, json={"delivered": True}, request=request)
+
+    monkeypatch.setattr("httpx.post", _fake_http_post)
+
+    response = client.post(f"/api/v1/platform/delivery-records/{record.record_id}/retry")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["status"] == "sent"
+    assert body["data"]["error_message"] is None
+
+    db_session.expire_all()
+    reloaded_record = db_session.get(DeliveryRecord, record.record_id)
+    assert reloaded_record is not None
+    assert reloaded_record.status == "sent"
+    assert reloaded_record.error_message is None
+
+
+def test_post_platform_delivery_record_schedule_sets_scheduled_at(client, db_session) -> None:
+    target = DeliveryTarget(
+        name="安全响应群",
+        channel_type="wecom",
+        enabled=True,
+        config_json={"webhook_url": "https://example.com/wecom"},
+    )
+    db_session.add(target)
+    db_session.flush()
+
+    record = DeliveryRecord(
+        target_id=target.target_id,
+        scene_name="announcement",
+        source_ref_type="announcement_run",
+        source_ref_id=uuid.uuid4(),
+        status="queued",
+        delivery_kind="production",
+        payload_summary_json={"title": "OpenSSL advisory"},
+        response_snapshot_json={"mode": "platform_only"},
+    )
+    db_session.add(record)
+    db_session.commit()
+
+    scheduled_at = "2026-04-18T09:30:00+08:00"
+    response = client.post(
+        f"/api/v1/platform/delivery-records/{record.record_id}/schedule",
+        json={"scheduled_at": scheduled_at},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["status"] == "queued"
+    assert body["data"]["scheduled_at"] == "2026-04-18T01:30:00+00:00"
+
+    db_session.expire_all()
+    reloaded_record = db_session.get(DeliveryRecord, record.record_id)
+    assert reloaded_record is not None
+    assert reloaded_record.scheduled_at is not None
+    assert reloaded_record.scheduled_at.isoformat() == "2026-04-18T01:30:00+00:00"
+
+
+def test_scheduler_once_processes_due_delivery_records(
+    db_session, test_database_url, monkeypatch
+) -> None:
+    target = DeliveryTarget(
+        name="Webhook 通知组",
+        channel_type="webhook",
+        enabled=True,
+        config_json={"url": "https://example.com/hooks/aetherflow"},
+    )
+    db_session.add(target)
+    db_session.flush()
+
+    record = DeliveryRecord(
+        target_id=target.target_id,
+        scene_name="announcement",
+        source_ref_type="announcement_run",
+        source_ref_id=uuid.uuid4(),
+        status="queued",
+        delivery_kind="production",
+        scheduled_at=datetime.now(UTC) - timedelta(minutes=5),
+        payload_summary_json={"title": "OpenSSL advisory"},
+        response_snapshot_json={"mode": "platform_only"},
+    )
+    db_session.add(record)
+    db_session.commit()
+
+    def _fake_http_post(url: str, **kwargs) -> httpx.Response:
+        request = httpx.Request("POST", url)
+        return httpx.Response(200, json={"delivered": True}, request=request)
+
+    monkeypatch.setattr("httpx.post", _fake_http_post)
+    monkeypatch.setenv("DATABASE_URL", test_database_url)
+    monkeypatch.delenv("AETHERFLOW_DATABASE_URL", raising=False)
+
+    run_scheduler_once(load_settings(), instance_name="delivery-scheduler-test")
+
+    db_session.expire_all()
+    reloaded_record = db_session.get(DeliveryRecord, record.record_id)
+    assert reloaded_record is not None
+    assert reloaded_record.status == "sent"
+    assert reloaded_record.sent_at is not None

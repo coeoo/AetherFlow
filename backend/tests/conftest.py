@@ -3,6 +3,10 @@ from pathlib import Path
 import sys
 import uuid
 
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -13,10 +17,6 @@ from app.db.base import Base
 from app.db.session import create_engine_from_url, create_session_factory
 from app.main import create_app
 from app.models import CVERun, TaskJob
-
-BACKEND_DIR = Path(__file__).resolve().parents[1]
-if str(BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_DIR))
 
 
 @pytest.fixture(scope="session")
