@@ -4,6 +4,7 @@ import type {
   DeliveryRecordFilters,
   DeliveryRecordView,
   DeliveryTargetView,
+  ScheduleDeliveryRecordInput,
   UpdateDeliveryTargetInput,
 } from "./types";
 
@@ -40,6 +41,9 @@ export function getFilteredDeliveryRecords(filters: DeliveryRecordFilters) {
   if (filters.channel_type) {
     query.set("channel_type", filters.channel_type);
   }
+  if (filters.delivery_kind) {
+    query.set("delivery_kind", filters.delivery_kind);
+  }
   return requestJson<DeliveryRecordView[]>(`/api/v1/platform/delivery-records?${query.toString()}`);
 }
 
@@ -59,5 +63,33 @@ export function updateDeliveryTarget(input: UpdateDeliveryTargetInput) {
   return requestJson<DeliveryTargetView>(`/api/v1/platform/delivery-targets/${input.target_id}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
+  });
+}
+
+export function testDeliveryTarget(targetId: string) {
+  return requestJson<DeliveryRecordView>(`/api/v1/platform/delivery-targets/${targetId}/test`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function sendDeliveryRecord(recordId: string) {
+  return requestJson<DeliveryRecordView>(`/api/v1/platform/delivery-records/${recordId}/send`, {
+    method: "POST",
+  });
+}
+
+export function retryDeliveryRecord(recordId: string) {
+  return requestJson<DeliveryRecordView>(`/api/v1/platform/delivery-records/${recordId}/retry`, {
+    method: "POST",
+  });
+}
+
+export function scheduleDeliveryRecord(input: ScheduleDeliveryRecordInput) {
+  return requestJson<DeliveryRecordView>(`/api/v1/platform/delivery-records/${input.record_id}/schedule`, {
+    method: "POST",
+    body: JSON.stringify({
+      scheduled_at: input.scheduled_at,
+    }),
   });
 }

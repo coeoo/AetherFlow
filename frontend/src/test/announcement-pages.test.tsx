@@ -179,6 +179,95 @@ test("announcement sources page loads source list and exposes run-now action", a
   );
 });
 
+test("announcement monitoring tab renders monitor batches and linked runs", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+
+    if (url.endsWith("/api/v1/announcements/monitor-runs") && !init?.method) {
+      return mockJsonResponse({
+        code: 0,
+        message: "success",
+        data: [
+          {
+            fetch_id: "fetch-001",
+            source_id: "source-001",
+            source_name: "Openwall OSS Security",
+            source_type: "openwall",
+            status: "succeeded",
+            discovered_count: 3,
+            new_count: 2,
+            extraction_run_count: 2,
+            created_at: "2026-04-15T10:00:00+00:00",
+          },
+        ],
+      });
+    }
+
+    if (url.endsWith("/api/v1/announcements/monitor-runs/fetch-001") && !init?.method) {
+      return mockJsonResponse({
+        code: 0,
+        message: "success",
+        data: {
+          fetch_id: "fetch-001",
+          source_id: "source-001",
+          source_name: "Openwall OSS Security",
+          source_type: "openwall",
+          status: "succeeded",
+          discovered_count: 3,
+          new_count: 2,
+          extraction_run_count: 2,
+          created_at: "2026-04-15T10:00:00+00:00",
+          error_message: null,
+          request_snapshot: {
+            source_id: "source-001",
+            source_type: "openwall",
+          },
+          triggered_runs: [
+            {
+              run_id: "run-001",
+              entry_mode: "monitor_source",
+              status: "succeeded",
+              stage: "finalize_run",
+              title_hint: "OpenSSL advisory",
+              source_url: "https://example.com/openssl",
+              summary: {
+                linux_related: true,
+                confidence: 0.91,
+              },
+              created_at: "2026-04-15T10:02:00+00:00",
+            },
+            {
+              run_id: "run-002",
+              entry_mode: "monitor_source",
+              status: "queued",
+              stage: "fetch_source",
+              title_hint: "Kernel advisory",
+              source_url: "https://example.com/kernel",
+              summary: {},
+              created_at: "2026-04-15T10:03:00+00:00",
+            },
+          ],
+        },
+      });
+    }
+
+    throw new Error(`未预期的请求: ${url}`);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderPath("/announcements?tab=monitoring");
+
+  expect(await screen.findByText("Openwall OSS Security")).toBeInTheDocument();
+  expect(screen.getByText("发现 3 · 新增 2 · 提取 2")).toBeInTheDocument();
+  expect(await screen.findByText("OpenSSL advisory")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "查看 run 详情 OpenSSL advisory" })).toHaveAttribute(
+    "href",
+    "/announcements/runs/run-001",
+  );
+  expect(screen.getByText("Kernel advisory")).toBeInTheDocument();
+});
+
 test("announcement detail page renders package summary from api payload", async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -253,9 +342,12 @@ test("announcement detail page renders package summary from api payload", async 
           created_count: 1,
           records: [
             {
+              record_id: "record-002",
               target_id: "target-002",
               target_name: "邮件通知组",
-              status: "prepared",
+              delivery_kind: "production",
+              status: "queued",
+              scheduled_at: null,
             },
           ],
         },
@@ -305,11 +397,11 @@ test("delivery center target tab supports creating and editing targets", async (
       channel_type: "wecom",
       enabled: true,
       config_json: {
-        webhook_url: "https://example.com/webhook",
+        webhook_url: "<已隐藏: https://example.com>",
         scene_names: ["announcement"],
       },
       config_summary: {
-        webhook_url: "https://example.com/webhook",
+        webhook_url: "<已隐藏: https://example.com>",
         scene_names: ["announcement"],
       },
     },
@@ -396,6 +488,11 @@ test("delivery center target tab supports creating and editing targets", async (
     "href",
     "/deliveries?tab=records",
   );
+  fireEvent.click(screen.getByRole("button", { name: "编辑目标" }));
+  const configTextarea = screen.getByLabelText("配置 JSON") as HTMLTextAreaElement;
+  expect(configTextarea.value).toContain("<已隐藏: https://example.com>");
+  expect(configTextarea.value).not.toContain("https://example.com/webhook");
+  fireEvent.click(screen.getByRole("button", { name: "取消编辑" }));
 
   fireEvent.click(screen.getByRole("button", { name: "新建目标" }));
   fireEvent.change(screen.getByLabelText("目标名称"), {
@@ -477,8 +574,135 @@ test("delivery center target tab supports creating and editing targets", async (
   );
 });
 
-test("delivery center records tab keeps filters in url and queries by scene status channel", async () => {
+test("delivery center target tab supports test send", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/api/v1/platform/delivery-targets")) {
+      if (url.endsWith("/test") && init?.method === "POST") {
+        return mockJsonResponse({
+          code: 0,
+          message: "success",
+          data: {
+            record_id: "record-test-001",
+            scene_name: "platform",
+            source_ref_type: "delivery_target",
+            source_ref_id: "target-001",
+            target_id: "target-001",
+            target_name: "安全响应群",
+            channel_type: "wecom",
+            delivery_kind: "test",
+            status: "sent",
+            error_message: null,
+            scheduled_at: null,
+            sent_at: "2026-04-15T10:00:00+00:00",
+            created_at: "2026-04-15T10:00:00+00:00",
+            payload_summary: {
+              title: "平台测试发送",
+            },
+            response_snapshot: {
+              status_code: 200,
+            },
+          },
+        });
+      }
+
+      return mockJsonResponse({
+        code: 0,
+        message: "success",
+        data: [
+          {
+            target_id: "target-001",
+            name: "安全响应群",
+            channel_type: "wecom",
+            enabled: true,
+            config_json: {
+              webhook_url: "<已隐藏: https://example.com>",
+              scene_names: ["announcement"],
+            },
+            config_summary: {
+              webhook_url: "<已隐藏: https://example.com>",
+              scene_names: ["announcement"],
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.includes("/api/v1/platform/delivery-records")) {
+      return mockJsonResponse({
+        code: 0,
+        message: "success",
+        data: [],
+      });
+    }
+
+    throw new Error(`未预期的请求: ${url}`);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderPath("/deliveries");
+
+  expect(await screen.findByText("安全响应群")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "测试发送" }));
+
+  expect(await screen.findByText("测试发送成功")).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringContaining("/api/v1/platform/delivery-targets/target-001/test"),
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  );
+});
+
+test("delivery center target tab disables test send for disabled target", async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/api/v1/platform/delivery-targets")) {
+      return mockJsonResponse({
+        code: 0,
+        message: "success",
+        data: [
+          {
+            target_id: "target-002",
+            name: "禁用通知组",
+            channel_type: "webhook",
+            enabled: false,
+            config_json: {
+              url: "<已隐藏: https://example.com>",
+              scene_names: ["announcement"],
+            },
+            config_summary: {
+              url: "<已隐藏: https://example.com>",
+              scene_names: ["announcement"],
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.includes("/api/v1/platform/delivery-records")) {
+      return mockJsonResponse({
+        code: 0,
+        message: "success",
+        data: [],
+      });
+    }
+
+    throw new Error(`未预期的请求: ${url}`);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderPath("/deliveries");
+
+  expect(await screen.findByText("禁用通知组")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "测试发送" })).toBeDisabled();
+});
+
+test("delivery center records tab keeps filters in url and supports send retry schedule", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.includes("/api/v1/platform/delivery-targets")) {
       return mockJsonResponse({
@@ -489,9 +713,94 @@ test("delivery center records tab keeps filters in url and queries by scene stat
     }
 
     if (url.includes("/api/v1/platform/delivery-records")) {
+      if (url.endsWith("/record-queued/send") && init?.method === "POST") {
+        return mockJsonResponse({
+          code: 0,
+          message: "success",
+          data: {
+            record_id: "record-queued",
+            scene_name: "announcement",
+            source_ref_type: "announcement_run",
+            source_ref_id: "run-001",
+            target_id: "target-001",
+            target_name: "安全响应群",
+            channel_type: "wecom",
+            delivery_kind: "production",
+            status: "sent",
+            error_message: null,
+            scheduled_at: null,
+            sent_at: "2026-04-15T10:30:00+00:00",
+            created_at: "2026-04-15T10:00:00+00:00",
+            payload_summary: {
+              title: "OpenSSL advisory",
+            },
+            response_snapshot: {
+              status_code: 200,
+            },
+          },
+        });
+      }
+
+      if (url.endsWith("/record-failed/retry") && init?.method === "POST") {
+        return mockJsonResponse({
+          code: 0,
+          message: "success",
+          data: {
+            record_id: "record-failed",
+            scene_name: "announcement",
+            source_ref_type: "announcement_run",
+            source_ref_id: "run-002",
+            target_id: "target-001",
+            target_name: "安全响应群",
+            channel_type: "wecom",
+            delivery_kind: "production",
+            status: "sent",
+            error_message: null,
+            scheduled_at: null,
+            sent_at: "2026-04-15T10:40:00+00:00",
+            created_at: "2026-04-15T10:10:00+00:00",
+            payload_summary: {
+              title: "Kernel advisory",
+            },
+            response_snapshot: {
+              status_code: 200,
+            },
+          },
+        });
+      }
+
+      if (url.endsWith("/record-queued/schedule") && init?.method === "POST") {
+        return mockJsonResponse({
+          code: 0,
+          message: "success",
+          data: {
+            record_id: "record-queued",
+            scene_name: "announcement",
+            source_ref_type: "announcement_run",
+            source_ref_id: "run-001",
+            target_id: "target-001",
+            target_name: "安全响应群",
+            channel_type: "wecom",
+            delivery_kind: "production",
+            status: "queued",
+            error_message: null,
+            scheduled_at: "2026-04-18T01:30:00+00:00",
+            sent_at: null,
+            created_at: "2026-04-15T10:00:00+00:00",
+            payload_summary: {
+              title: "OpenSSL advisory",
+            },
+            response_snapshot: {
+              mode: "platform_only",
+            },
+          },
+        });
+      }
+
       if (
         url.includes("scene_name=announcement") &&
-        url.includes("status=prepared") &&
+        url.includes("status=queued") &&
+        url.includes("delivery_kind=production") &&
         url.includes("channel_type=wecom")
       ) {
         return mockJsonResponse({
@@ -499,18 +808,24 @@ test("delivery center records tab keeps filters in url and queries by scene stat
           message: "success",
           data: [
             {
-              record_id: "record-001",
+              record_id: "record-queued",
               scene_name: "announcement",
               source_ref_type: "announcement_run",
               source_ref_id: "run-001",
               target_id: "target-001",
               target_name: "安全响应群",
               channel_type: "wecom",
-              status: "prepared",
+              delivery_kind: "production",
+              status: "queued",
               error_message: null,
+              scheduled_at: null,
+              sent_at: null,
               created_at: "2026-04-15T10:00:00+00:00",
               payload_summary: {
                 title: "OpenSSL advisory",
+              },
+              response_snapshot: {
+                mode: "platform_only",
               },
             },
           ],
@@ -522,18 +837,45 @@ test("delivery center records tab keeps filters in url and queries by scene stat
         message: "success",
         data: [
           {
-            record_id: "record-001",
+            record_id: "record-queued",
             scene_name: "announcement",
             source_ref_type: "announcement_run",
             source_ref_id: "run-001",
             target_id: "target-001",
             target_name: "安全响应群",
             channel_type: "wecom",
-            status: "prepared",
+            delivery_kind: "production",
+            status: "queued",
             error_message: null,
+            scheduled_at: null,
+            sent_at: null,
             created_at: "2026-04-15T10:00:00+00:00",
             payload_summary: {
               title: "OpenSSL advisory",
+            },
+            response_snapshot: {
+              mode: "platform_only",
+            },
+          },
+          {
+            record_id: "record-failed",
+            scene_name: "announcement",
+            source_ref_type: "announcement_run",
+            source_ref_id: "run-002",
+            target_id: "target-001",
+            target_name: "安全响应群",
+            channel_type: "wecom",
+            delivery_kind: "production",
+            status: "failed",
+            error_message: "请求超时",
+            scheduled_at: null,
+            sent_at: null,
+            created_at: "2026-04-15T10:10:00+00:00",
+            payload_summary: {
+              title: "Kernel advisory",
+            },
+            response_snapshot: {
+              status_code: 504,
             },
           },
         ],
@@ -545,18 +887,36 @@ test("delivery center records tab keeps filters in url and queries by scene stat
 
   vi.stubGlobal("fetch", fetchMock);
 
-  renderPath("/deliveries?tab=records&scene_name=announcement&status=prepared&channel_type=wecom");
+  renderPath(
+    "/deliveries?tab=records&scene_name=announcement&channel_type=wecom&delivery_kind=production",
+  );
 
   expect(await screen.findByText("OpenSSL advisory")).toBeInTheDocument();
-  expect(screen.getByText(/安全响应群 · announcement · prepared/)).toBeInTheDocument();
+  expect(screen.getByText(/安全响应群 · announcement · queued/)).toBeInTheDocument();
   expect(screen.getByLabelText("场景筛选")).toHaveValue("announcement");
-  expect(screen.getByLabelText("状态筛选")).toHaveValue("prepared");
+  expect(screen.getByLabelText("状态筛选")).toHaveValue("");
   expect(screen.getByLabelText("渠道筛选")).toHaveValue("wecom");
+  expect(screen.getByLabelText("投递类型筛选")).toHaveValue("production");
   expect(screen.getByRole("link", { name: "目标管理" })).toHaveAttribute(
     "href",
     "/deliveries",
   );
 
+  fireEvent.click(screen.getByRole("button", { name: "立即发送" }));
+  expect(await screen.findByText("发送成功")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("计划发送时间 record-queued"), {
+    target: { value: "2026-04-18T09:30:00+08:00" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "保存计划发送" }));
+  expect(await screen.findByText("计划发送时间已更新")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "重试" }));
+  expect(await screen.findByText("重试成功")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("状态筛选"), {
+    target: { value: "queued" },
+  });
   fireEvent.change(screen.getByLabelText("渠道筛选"), {
     target: { value: "email" },
   });
@@ -565,9 +925,31 @@ test("delivery center records tab keeps filters in url and queries by scene stat
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining(
-        "/api/v1/platform/delivery-records?scene_name=announcement&status=prepared&channel_type=email",
+        "/api/v1/platform/delivery-records?scene_name=announcement&status=queued&channel_type=email&delivery_kind=production",
       ),
       expect.anything(),
     );
   });
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringContaining("/api/v1/platform/delivery-records/record-queued/send"),
+    expect.objectContaining({
+      method: "POST",
+    }),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringContaining("/api/v1/platform/delivery-records/record-failed/retry"),
+    expect.objectContaining({
+      method: "POST",
+    }),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringContaining("/api/v1/platform/delivery-records/record-queued/schedule"),
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        scheduled_at: "2026-04-18T09:30:00+08:00",
+      }),
+    }),
+  );
 });

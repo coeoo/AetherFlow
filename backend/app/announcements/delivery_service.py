@@ -103,9 +103,16 @@ def create_announcement_delivery_records(
         if existing_record is not None:
             serialized_records.append(
                 {
+                    "record_id": str(existing_record.record_id),
                     "target_id": str(target["target_id"]),
                     "target_name": target["name"],
+                    "delivery_kind": getattr(existing_record, "delivery_kind", "production"),
                     "status": existing_record.status,
+                    "scheduled_at": (
+                        existing_record.scheduled_at.isoformat()
+                        if existing_record.scheduled_at is not None
+                        else None
+                    ),
                 }
             )
             continue
@@ -115,7 +122,8 @@ def create_announcement_delivery_records(
             scene_name="announcement",
             source_ref_type="announcement_run",
             source_ref_id=run_id,
-            status="prepared",
+            delivery_kind="production",
+            status="queued",
             payload_summary_json={
                 "title": document.title if document is not None else (run.title_hint or "未命名安全公告"),
                 "source_name": document.source_name if document is not None else None,
@@ -134,9 +142,12 @@ def create_announcement_delivery_records(
         created_count += 1
         serialized_records.append(
             {
+                "record_id": str(record.record_id),
                 "target_id": str(target["target_id"]),
                 "target_name": target["name"],
+                "delivery_kind": record.delivery_kind,
                 "status": record.status,
+                "scheduled_at": None,
             }
         )
 
@@ -350,10 +361,14 @@ def _serialize_delivery_record(
         "target_id": str(record.target_id) if record.target_id is not None else None,
         "target_name": target.name if target is not None else "未绑定目标",
         "channel_type": target.channel_type if target is not None else None,
+        "delivery_kind": getattr(record, "delivery_kind", "production"),
         "status": record.status,
         "error_message": record.error_message,
+        "scheduled_at": record.scheduled_at.isoformat() if record.scheduled_at is not None else None,
+        "sent_at": record.sent_at.isoformat() if record.sent_at is not None else None,
         "created_at": record.created_at.isoformat(),
         "payload_summary": dict(record.payload_summary_json or {}),
+        "response_snapshot": dict(record.response_snapshot_json or {}),
     }
 
 

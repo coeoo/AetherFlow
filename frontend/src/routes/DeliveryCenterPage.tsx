@@ -5,7 +5,11 @@ import { AppShell } from "../components/layout/AppShell";
 import {
   useCreateDeliveryTarget,
   useDeliveryRecords,
+  useRetryDeliveryRecord,
+  useScheduleDeliveryRecord,
+  useSendDeliveryRecord,
   useDeliveryTargets,
+  useTestDeliveryTarget,
   useUpdateDeliveryTarget,
 } from "../features/deliveries/hooks";
 import type { DeliveryRecordFilters, DeliveryTargetView } from "../features/deliveries/types";
@@ -36,10 +40,15 @@ export function DeliveryCenterPage() {
           scene_name: "announcement",
           status: null,
           channel_type: null,
+          delivery_kind: "production",
         },
   );
   const createTarget = useCreateDeliveryTarget();
   const updateTarget = useUpdateDeliveryTarget();
+  const testTarget = useTestDeliveryTarget();
+  const sendRecord = useSendDeliveryRecord();
+  const retryRecord = useRetryDeliveryRecord();
+  const scheduleRecord = useScheduleDeliveryRecord();
   const targets = targetsQuery.data ?? [];
   const records = recordsQuery.data ?? [];
 
@@ -48,6 +57,9 @@ export function DeliveryCenterPage() {
   const [recordFilters, setRecordFilters] = useState<DeliveryRecordFilters>(urlRecordFilters);
   const [formError, setFormError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [recordActionMessage, setRecordActionMessage] = useState<string | null>(null);
+  const [recordActionError, setRecordActionError] = useState<string | null>(null);
+  const [scheduleInputs, setScheduleInputs] = useState<Record<string, string>>({});
 
   const isEditing = editingTargetId !== null;
   const isSaving = createTarget.isPending || updateTarget.isPending;
@@ -159,7 +171,7 @@ export function DeliveryCenterPage() {
             <h2>{activeTab === "records" ? "公告记录已接入" : "目标视图已接入"}</h2>
           </div>
           <p className="card-copy">
-            当前页先把投递中心拆成目标管理与投递记录两个真实视图，后续再补测试发送和重试动作。
+            当前页聚焦平台执行层，支持目标测试发送、手动发送、计划发送和失败重试。
           </p>
           <div className="action-row">
             <Link
@@ -284,12 +296,33 @@ export function DeliveryCenterPage() {
                     >
                       {target.enabled ? "停用目标" : "启用目标"}
                     </button>
+                    <button
+                      className="action-link action-link-muted"
+                      disabled={testTarget.isPending || !target.enabled}
+                      type="button"
+                      onClick={async () => {
+                        setRecordActionMessage(null);
+                        setRecordActionError(null);
+                        try {
+                          await testTarget.mutateAsync(target.target_id);
+                          setRecordActionMessage("测试发送成功");
+                        } catch (error) {
+                          setRecordActionError(
+                            error instanceof Error ? error.message : "测试发送失败",
+                          );
+                        }
+                      }}
+                    >
+                      测试发送
+                    </button>
                   </div>
                 </article>
               ))}
+              {recordActionError ? <p className="card-copy">{recordActionError}</p> : null}
+              {recordActionMessage ? <p className="card-copy">{recordActionMessage}</p> : null}
             </>
           ) : (
-            <p className="card-copy">目标列表保留在 `targets` 视图，后续补启停开关、测试发送和编辑抽屉。</p>
+            <p className="card-copy">目标列表保留在 `targets` 视图，可在这里直接做测试发送和目标维护。</p>
           )}
         </section>
 
@@ -330,9 +363,10 @@ export function DeliveryCenterPage() {
                     }
                   >
                     <option value="">全部状态</option>
-                    <option value="prepared">prepared</option>
+                    <option value="queued">queued</option>
+                    <option value="sending">sending</option>
                     <option value="skipped">skipped</option>
-                    <option value="succeeded">succeeded</option>
+                    <option value="sent">sent</option>
                     <option value="failed">failed</option>
                   </select>
                 </label>
@@ -354,6 +388,23 @@ export function DeliveryCenterPage() {
                     <option value="webhook">webhook</option>
                   </select>
                 </label>
+                <label className="stack-xs">
+                  <span>投递类型筛选</span>
+                  <select
+                    aria-label="投递类型筛选"
+                    value={recordFilters.delivery_kind ?? ""}
+                    onChange={(event) =>
+                      setRecordFilters((current) => ({
+                        ...current,
+                        delivery_kind: event.target.value || null,
+                      }))
+                    }
+                  >
+                    <option value="">全部类型</option>
+                    <option value="production">production</option>
+                    <option value="test">test</option>
+                  </select>
+                </label>
                 <div className="action-row">
                   <button className="action-link action-link-obsidian" type="submit">
                     应用筛选
@@ -366,6 +417,7 @@ export function DeliveryCenterPage() {
                         scene_name: null,
                         status: null,
                         channel_type: null,
+                        delivery_kind: null,
                       };
                       setRecordFilters(clearedFilters);
                       setSearchParams(buildRecordSearchParams(clearedFilters));
@@ -376,6 +428,8 @@ export function DeliveryCenterPage() {
                 </div>
               </form>
               {recordsQuery.isLoading ? <p className="card-copy">正在加载投递记录…</p> : null}
+              {recordActionError ? <p className="card-copy">{recordActionError}</p> : null}
+              {recordActionMessage ? <p className="card-copy">{recordActionMessage}</p> : null}
               {!recordsQuery.isLoading && !records.length ? (
                 <p className="card-copy">当前还没有投递记录。</p>
               ) : null}
@@ -385,6 +439,98 @@ export function DeliveryCenterPage() {
                   <span>
                     {record.target_name} · {record.scene_name} · {record.status}
                   </span>
+                  <span>
+                    {record.delivery_kind}
+                    {record.scheduled_at ? ` · 计划发送 ${record.scheduled_at}` : ""}
+                    {record.error_message ? ` · ${record.error_message}` : ""}
+                  </span>
+                  <label className="stack-xs">
+                    <span>计划发送时间</span>
+                    <input
+                      aria-label={`计划发送时间 ${record.record_id}`}
+                      type="text"
+                      value={scheduleInputs[record.record_id] ?? ""}
+                      onChange={(event) =>
+                        setScheduleInputs((current) => ({
+                          ...current,
+                          [record.record_id]: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <div className="action-row">
+                    {record.status === "queued" ? (
+                      <>
+                        <button
+                          className="action-link action-link-muted"
+                          disabled={sendRecord.isPending}
+                          type="button"
+                          onClick={async () => {
+                            setRecordActionMessage(null);
+                            setRecordActionError(null);
+                            try {
+                              await sendRecord.mutateAsync(record.record_id);
+                              setRecordActionMessage("发送成功");
+                            } catch (error) {
+                              setRecordActionError(
+                                error instanceof Error ? error.message : "发送失败",
+                              );
+                            }
+                          }}
+                        >
+                          立即发送
+                        </button>
+                        <button
+                          className="action-link action-link-muted"
+                          disabled={scheduleRecord.isPending}
+                          type="button"
+                          onClick={async () => {
+                            const scheduledAt = scheduleInputs[record.record_id]?.trim() ?? "";
+                            if (!scheduledAt) {
+                              setRecordActionError("计划发送时间不能为空");
+                              return;
+                            }
+                            setRecordActionMessage(null);
+                            setRecordActionError(null);
+                            try {
+                              await scheduleRecord.mutateAsync({
+                                record_id: record.record_id,
+                                scheduled_at: scheduledAt,
+                              });
+                              setRecordActionMessage("计划发送时间已更新");
+                            } catch (error) {
+                              setRecordActionError(
+                                error instanceof Error ? error.message : "设置计划发送失败",
+                              );
+                            }
+                          }}
+                        >
+                          保存计划发送
+                        </button>
+                      </>
+                    ) : null}
+                    {record.status === "failed" ? (
+                      <button
+                        className="action-link action-link-muted"
+                        disabled={retryRecord.isPending}
+                        type="button"
+                        onClick={async () => {
+                          setRecordActionMessage(null);
+                          setRecordActionError(null);
+                          try {
+                            await retryRecord.mutateAsync(record.record_id);
+                            setRecordActionMessage("重试成功");
+                          } catch (error) {
+                            setRecordActionError(
+                              error instanceof Error ? error.message : "重试失败",
+                            );
+                          }
+                        }}
+                      >
+                        重试
+                      </button>
+                    ) : null}
+                  </div>
                 </article>
               ))}
             </>
@@ -411,6 +557,7 @@ function getRecordFiltersFromSearchParams(searchParams: URLSearchParams): Delive
     scene_name: searchParams.get("scene_name"),
     status: searchParams.get("status"),
     channel_type: searchParams.get("channel_type"),
+    delivery_kind: searchParams.get("delivery_kind"),
   };
 }
 
@@ -424,6 +571,9 @@ function buildRecordSearchParams(filters: DeliveryRecordFilters): URLSearchParam
   }
   if (filters.channel_type) {
     nextSearchParams.set("channel_type", filters.channel_type);
+  }
+  if (filters.delivery_kind) {
+    nextSearchParams.set("delivery_kind", filters.delivery_kind);
   }
   return nextSearchParams;
 }
