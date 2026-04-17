@@ -6,11 +6,15 @@ from app.api.v1.cve.runs import router as cve_router
 from app.api.v1.platform.artifacts import router as artifacts_router
 from app.api.v1.platform.deliveries import router as platform_deliveries_router
 from app.api.v1.platform.health import router as platform_router
+from app.api.v1.platform.home import router as platform_home_router
+from app.api.v1.platform.tasks import router as platform_tasks_router
 
 api_router = APIRouter()
 api_router.include_router(announcement_runs_router)
 api_router.include_router(announcement_sources_router)
 api_router.include_router(cve_router)
 api_router.include_router(platform_router)
+api_router.include_router(platform_home_router)
+api_router.include_router(platform_tasks_router)
 api_router.include_router(platform_deliveries_router)
 api_router.include_router(artifacts_router)

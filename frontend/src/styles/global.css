@@ -227,6 +227,21 @@ select {
   font-weight: 700;
 }
 
+.status-pill-healthy {
+  color: #10311f;
+  background: rgba(212, 236, 224, 0.96);
+}
+
+.status-pill-degraded {
+  color: #5b4408;
+  background: rgba(247, 232, 188, 0.98);
+}
+
+.status-pill-down {
+  color: #5a1616;
+  background: rgba(248, 221, 221, 0.98);
+}
+
 .status-pill-succeeded {
   color: #10311f;
   background: rgba(212, 236, 224, 0.96);
@@ -254,6 +269,56 @@ select {
   border-radius: 28px;
   background: rgba(255, 255, 255, 0.84);
   box-shadow: 0 18px 40px rgba(49, 67, 88, 0.09);
+}
+
+.health-status-list,
+.health-note-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.health-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(169, 182, 199, 0.24);
+}
+
+.health-note-item {
+  padding-left: 16px;
+  color: #476078;
+  line-height: 1.65;
+  position: relative;
+}
+
+.health-note-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.78em;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #2a5f91;
+  transform: translateY(-50%);
+}
+
+.summary-inline-item {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(169, 182, 199, 0.24);
+}
+
+.task-filter-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .cve-panel-featured,
