@@ -298,7 +298,7 @@ export function DeliveryCenterPage() {
                     </button>
                     <button
                       className="action-link action-link-muted"
-                      disabled={testTarget.isPending}
+                      disabled={testTarget.isPending || !target.enabled}
                       type="button"
                       onClick={async () => {
                         setRecordActionMessage(null);

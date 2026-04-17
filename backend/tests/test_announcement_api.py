@@ -760,6 +760,59 @@ def test_post_platform_delivery_target_test_creates_sent_test_record(
     assert len(records) == 1
     assert records[0].delivery_kind == "test"
     assert records[0].status == "sent"
+    assert body["data"]["response_snapshot"] == {
+        "channel_type": "webhook",
+        "status_code": 200,
+        "target_summary": "https://example.com/hooks/aetherflow",
+    }
+
+
+def test_post_platform_delivery_target_test_rejects_disabled_target(client, db_session) -> None:
+    target = DeliveryTarget(
+        name="禁用 Webhook 通知组",
+        channel_type="webhook",
+        enabled=False,
+        config_json={"url": "https://example.com/hooks/aetherflow"},
+    )
+    db_session.add(target)
+    db_session.commit()
+
+    response = client.post(f"/api/v1/platform/delivery-targets/{target.target_id}/test", json={})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "禁用目标不允许测试发送"
+
+
+def test_post_platform_delivery_target_rejects_insecure_or_private_url(client) -> None:
+    insecure_response = client.post(
+        "/api/v1/platform/delivery-targets",
+        json={
+            "name": "不安全 Webhook",
+            "channel_type": "webhook",
+            "enabled": True,
+            "config_json": {
+                "url": "http://127.0.0.1/internal",
+            },
+        },
+    )
+
+    assert insecure_response.status_code == 400
+    assert insecure_response.json()["detail"] == "投递目标地址必须使用 https"
+
+    private_response = client.post(
+        "/api/v1/platform/delivery-targets",
+        json={
+            "name": "内网 Webhook",
+            "channel_type": "webhook",
+            "enabled": True,
+            "config_json": {
+                "url": "https://127.0.0.1/internal",
+            },
+        },
+    )
+
+    assert private_response.status_code == 400
+    assert private_response.json()["detail"] == "投递目标地址不允许指向本机、内网或保留地址"
 
 
 def test_post_platform_delivery_record_send_executes_queued_record(
@@ -803,6 +856,11 @@ def test_post_platform_delivery_record_send_executes_queued_record(
     assert body["data"]["status"] == "sent"
     assert body["data"]["delivery_kind"] == "production"
     assert body["data"]["sent_at"] is not None
+    assert body["data"]["response_snapshot"] == {
+        "channel_type": "webhook",
+        "status_code": 200,
+        "target_summary": "https://example.com/hooks/aetherflow",
+    }
 
     db_session.expire_all()
     reloaded_record = db_session.get(DeliveryRecord, record.record_id)

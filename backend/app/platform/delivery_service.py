@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import ipaddress
+import socket
+from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
@@ -29,11 +32,15 @@ def create_delivery_target(
     enabled: bool,
     config_json: dict[str, object] | None,
 ) -> dict[str, object]:
+    normalized_channel_type = _normalize_delivery_channel_type(channel_type)
     target = DeliveryTarget(
         name=_normalize_delivery_target_name(name),
-        channel_type=_normalize_delivery_channel_type(channel_type),
+        channel_type=normalized_channel_type,
         enabled=enabled,
-        config_json=_normalize_delivery_target_config(config_json),
+        config_json=_normalize_delivery_target_config(
+            config_json,
+            channel_type=normalized_channel_type,
+        ),
     )
     session.add(target)
     session.flush()
@@ -60,7 +67,10 @@ def update_delivery_target(
     if enabled is not None:
         target.enabled = enabled
     if config_json is not None:
-        target.config_json = _normalize_delivery_target_config(config_json)
+        target.config_json = _normalize_delivery_target_config(
+            config_json,
+            channel_type=target.channel_type,
+        )
     target.updated_at = _utcnow()
     session.flush()
     return _serialize_delivery_target(target)
@@ -100,6 +110,8 @@ def create_test_delivery_record(
     target = session.get(DeliveryTarget, UUID(str(target_id)))
     if target is None:
         raise LookupError("投递目标不存在")
+    if not target.enabled:
+        raise ValueError("禁用目标不允许测试发送")
 
     summary = {
         "title": "平台测试发送",
@@ -119,7 +131,7 @@ def create_test_delivery_record(
     )
     session.add(record)
     session.flush()
-    return _execute_delivery_record(session, record=record, allow_disabled_target=True, clear_schedule=True)
+    return _execute_delivery_record(session, record=record, allow_disabled_target=False, clear_schedule=True)
 
 
 def send_delivery_record_now(session: Session, *, record_id: UUID | str) -> dict[str, object]:
@@ -250,12 +262,13 @@ def _execute_delivery_record(
     try:
         response_snapshot = _send_delivery(target=target, record=record)
     except Exception as exc:
+        failure_message = _build_failure_message(exc)
         record.status = "failed"
         record.sent_at = None
-        record.error_message = str(exc)
+        record.error_message = failure_message
         record.response_snapshot_json = {
             "channel_type": target.channel_type,
-            "message": str(exc),
+            "message": failure_message,
         }
         record.updated_at = _utcnow()
         session.flush()
@@ -280,18 +293,11 @@ def _send_delivery(
     response = httpx.post(delivery_url, json=payload, timeout=10.0)
     response.raise_for_status()
 
-    snapshot: dict[str, object] = {
+    return {
         "channel_type": target.channel_type,
-        "delivery_url": delivery_url,
         "status_code": response.status_code,
+        "target_summary": _summarize_delivery_url(delivery_url),
     }
-    try:
-        snapshot["response_body"] = response.json()
-    except ValueError:
-        response_text = response.text.strip()
-        if response_text:
-            snapshot["response_body"] = response_text[:500]
-    return snapshot
 
 
 def _build_channel_payload(record: DeliveryRecord) -> dict[str, object]:
@@ -328,7 +334,71 @@ def _resolve_delivery_url(target: DeliveryTarget) -> str:
     resolved_url = str(url).strip() if url is not None else ""
     if not resolved_url:
         raise ValueError("投递目标缺少可用发送地址")
+    _validate_delivery_url(resolved_url)
     return resolved_url
+
+
+def _validate_delivery_url(raw_url: str) -> None:
+    parsed = urlparse(raw_url)
+    if parsed.scheme.lower() != "https":
+        raise ValueError("投递目标地址必须使用 https")
+
+    if parsed.username or parsed.password:
+        raise ValueError("投递目标地址不允许包含认证信息")
+
+    hostname = (parsed.hostname or "").strip().lower()
+    if not hostname:
+        raise ValueError("投递目标地址缺少有效 host")
+
+    if hostname in {"localhost"} or hostname.endswith(".localhost"):
+        raise ValueError("投递目标地址不允许指向本机、内网或保留地址")
+
+    resolved_ips = _resolve_host_ips(hostname)
+    if not resolved_ips:
+        raise ValueError("投递目标地址无法解析到有效公网地址")
+
+    for resolved_ip in resolved_ips:
+        ip = ipaddress.ip_address(resolved_ip)
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            raise ValueError("投递目标地址不允许指向本机、内网或保留地址")
+
+
+def _resolve_host_ips(hostname: str) -> set[str]:
+    try:
+        infos = socket.getaddrinfo(hostname, 443, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        return set()
+
+    resolved_ips: set[str] = set()
+    for info in infos:
+        sockaddr = info[4]
+        if not sockaddr:
+            continue
+        resolved_ips.add(str(sockaddr[0]))
+    return resolved_ips
+
+
+def _summarize_delivery_url(raw_url: str) -> str:
+    parsed = urlparse(raw_url)
+    path = parsed.path or ""
+    if path == "/":
+        path = ""
+    return f"{parsed.scheme.lower()}://{parsed.hostname or ''}{path}"
+
+
+def _build_failure_message(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return "投递请求返回非成功状态码"
+    if isinstance(exc, httpx.RequestError):
+        return "投递请求失败，请检查目标配置或网络连通性"
+    return str(exc)
 
 
 def _delivery_record_query() -> Select:
@@ -389,10 +459,35 @@ def _normalize_delivery_channel_type(channel_type: str) -> str:
 
 def _normalize_delivery_target_config(
     config_json: dict[str, object] | None,
+    *,
+    channel_type: str,
 ) -> dict[str, object]:
-    if config_json is None:
-        return {}
-    return dict(config_json)
+    normalized_config = dict(config_json or {})
+    delivery_url = _extract_delivery_url(normalized_config, channel_type=channel_type)
+    if delivery_url is not None:
+        _validate_delivery_url(delivery_url)
+    return normalized_config
+
+
+def _extract_delivery_url(
+    config_json: dict[str, object],
+    *,
+    channel_type: str,
+) -> str | None:
+    if channel_type == "wecom":
+        candidate = config_json.get("webhook_url") or config_json.get("url")
+    elif channel_type == "webhook":
+        candidate = config_json.get("url") or config_json.get("webhook_url")
+    else:
+        candidate = (
+            config_json.get("endpoint_url")
+            or config_json.get("url")
+            or config_json.get("webhook_url")
+        )
+
+    if candidate is None:
+        return None
+    return str(candidate).strip()
 
 
 def _normalize_datetime(value: datetime) -> datetime:

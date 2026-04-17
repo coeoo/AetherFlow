@@ -562,6 +562,51 @@ test("delivery center target tab supports test send", async () => {
   );
 });
 
+test("delivery center target tab disables test send for disabled target", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/api/v1/platform/delivery-targets")) {
+      return mockJsonResponse({
+        code: 0,
+        message: "success",
+        data: [
+          {
+            target_id: "target-002",
+            name: "禁用通知组",
+            channel_type: "webhook",
+            enabled: false,
+            config_json: {
+              url: "https://example.com/webhook",
+              scene_names: ["announcement"],
+            },
+            config_summary: {
+              url: "https://example.com/webhook",
+              scene_names: ["announcement"],
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.includes("/api/v1/platform/delivery-records")) {
+      return mockJsonResponse({
+        code: 0,
+        message: "success",
+        data: [],
+      });
+    }
+
+    throw new Error(`未预期的请求: ${url}`);
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderPath("/deliveries");
+
+  expect(await screen.findByText("禁用通知组")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "测试发送" })).toBeDisabled();
+});
+
 test("delivery center records tab keeps filters in url and supports send retry schedule", async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);

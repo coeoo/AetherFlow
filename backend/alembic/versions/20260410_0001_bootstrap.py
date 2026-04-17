@@ -138,12 +138,6 @@ def upgrade() -> None:
         sa.Column("scene_name", sa.String(length=32), nullable=False),
         sa.Column("source_ref_type", sa.String(length=64), nullable=True),
         sa.Column("source_ref_id", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column(
-            "delivery_kind",
-            sa.String(length=32),
-            nullable=False,
-            server_default=sa.text("'production'"),
-        ),
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column(
             "payload_summary_json",
@@ -158,16 +152,9 @@ def upgrade() -> None:
             server_default=sa.text("'{}'::jsonb"),
         ),
         sa.Column("error_message", sa.Text(), nullable=True),
-        sa.Column("scheduled_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "created_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-            server_default=sa.text("NOW()"),
-        ),
-        sa.Column(
-            "updated_at",
             sa.DateTime(timezone=True),
             nullable=False,
             server_default=sa.text("NOW()"),
