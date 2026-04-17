@@ -308,11 +308,11 @@ test("delivery center target tab supports creating and editing targets", async (
       channel_type: "wecom",
       enabled: true,
       config_json: {
-        webhook_url: "https://example.com/webhook",
+        webhook_url: "<已隐藏: https://example.com>",
         scene_names: ["announcement"],
       },
       config_summary: {
-        webhook_url: "https://example.com/webhook",
+        webhook_url: "<已隐藏: https://example.com>",
         scene_names: ["announcement"],
       },
     },
@@ -399,6 +399,11 @@ test("delivery center target tab supports creating and editing targets", async (
     "href",
     "/deliveries?tab=records",
   );
+  fireEvent.click(screen.getByRole("button", { name: "编辑目标" }));
+  const configTextarea = screen.getByLabelText("配置 JSON") as HTMLTextAreaElement;
+  expect(configTextarea.value).toContain("<已隐藏: https://example.com>");
+  expect(configTextarea.value).not.toContain("https://example.com/webhook");
+  fireEvent.click(screen.getByRole("button", { name: "取消编辑" }));
 
   fireEvent.click(screen.getByRole("button", { name: "新建目标" }));
   fireEvent.change(screen.getByLabelText("目标名称"), {
@@ -522,11 +527,11 @@ test("delivery center target tab supports test send", async () => {
             channel_type: "wecom",
             enabled: true,
             config_json: {
-              webhook_url: "https://example.com/webhook",
+              webhook_url: "<已隐藏: https://example.com>",
               scene_names: ["announcement"],
             },
             config_summary: {
-              webhook_url: "https://example.com/webhook",
+              webhook_url: "<已隐藏: https://example.com>",
               scene_names: ["announcement"],
             },
           },
@@ -576,11 +581,11 @@ test("delivery center target tab disables test send for disabled target", async 
             channel_type: "webhook",
             enabled: false,
             config_json: {
-              url: "https://example.com/webhook",
+              url: "<已隐藏: https://example.com>",
               scene_names: ["announcement"],
             },
             config_summary: {
-              url: "https://example.com/webhook",
+              url: "<已隐藏: https://example.com>",
               scene_names: ["announcement"],
             },
           },

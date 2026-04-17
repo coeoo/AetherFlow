@@ -15,6 +15,7 @@ from app.models import DeliveryRecord, DeliveryTarget
 ALLOWED_DELIVERY_CHANNEL_TYPES = {"email", "wecom", "webhook"}
 ALLOWED_DELIVERY_KINDS = {"production", "test"}
 ALLOWED_DELIVERY_STATUSES = {"queued", "sending", "sent", "failed", "skipped"}
+SENSITIVE_DELIVERY_CONFIG_KEYS = {"url", "webhook_url", "endpoint_url"}
 
 
 def list_delivery_targets(session: Session) -> list[dict[str, object]]:
@@ -68,7 +69,11 @@ def update_delivery_target(
         target.enabled = enabled
     if config_json is not None:
         target.config_json = _normalize_delivery_target_config(
-            config_json,
+            _merge_preserving_sensitive_config(
+                target.config_json,
+                config_json,
+                channel_type=target.channel_type,
+            ),
             channel_type=target.channel_type,
         )
     target.updated_at = _utcnow()
@@ -387,10 +392,7 @@ def _resolve_host_ips(hostname: str) -> set[str]:
 
 def _summarize_delivery_url(raw_url: str) -> str:
     parsed = urlparse(raw_url)
-    path = parsed.path or ""
-    if path == "/":
-        path = ""
-    return f"{parsed.scheme.lower()}://{parsed.hostname or ''}{path}"
+    return f"{parsed.scheme.lower()}://{parsed.hostname or ''}"
 
 
 def _build_failure_message(exc: Exception) -> str:
@@ -412,6 +414,7 @@ def _serialize_delivery_record(
     record: DeliveryRecord,
     target: DeliveryTarget | None,
 ) -> dict[str, object]:
+    response_snapshot = _sanitize_response_snapshot(dict(record.response_snapshot_json or {}))
     return {
         "record_id": str(record.record_id),
         "scene_name": record.scene_name,
@@ -427,12 +430,15 @@ def _serialize_delivery_record(
         "sent_at": record.sent_at.isoformat() if record.sent_at is not None else None,
         "created_at": record.created_at.isoformat(),
         "payload_summary": dict(record.payload_summary_json or {}),
-        "response_snapshot": dict(record.response_snapshot_json or {}),
+        "response_snapshot": response_snapshot,
     }
 
 
 def _serialize_delivery_target(target: DeliveryTarget) -> dict[str, object]:
-    config_json = dict(target.config_json or {})
+    config_json = _mask_delivery_target_config(
+        dict(target.config_json or {}),
+        channel_type=target.channel_type,
+    )
     return {
         "target_id": str(target.target_id),
         "name": target.name,
@@ -488,6 +494,69 @@ def _extract_delivery_url(
     if candidate is None:
         return None
     return str(candidate).strip()
+
+
+def _mask_delivery_target_config(
+    config_json: dict[str, object],
+    *,
+    channel_type: str,
+) -> dict[str, object]:
+    masked_config = dict(config_json)
+    for key in _sensitive_config_keys_for_channel(channel_type):
+        raw_value = masked_config.get(key)
+        if raw_value is None:
+            continue
+        raw_text = str(raw_value).strip()
+        if not raw_text:
+            continue
+        masked_config[key] = _masked_delivery_config_value(raw_text)
+    return masked_config
+
+
+def _masked_delivery_config_value(raw_url: str) -> str:
+    parsed = urlparse(raw_url)
+    scheme = parsed.scheme.lower() if parsed.scheme else "https"
+    hostname = parsed.hostname or ""
+    return f"<已隐藏: {scheme}://{hostname}>"
+
+
+def _merge_preserving_sensitive_config(
+    existing_config_json: dict[str, object] | None,
+    incoming_config_json: dict[str, object] | None,
+    *,
+    channel_type: str,
+) -> dict[str, object]:
+    existing_config = dict(existing_config_json or {})
+    incoming_config = dict(incoming_config_json or {})
+
+    for key in _sensitive_config_keys_for_channel(channel_type):
+        existing_value = existing_config.get(key)
+        incoming_value = incoming_config.get(key)
+        if existing_value is None or incoming_value is None:
+            continue
+
+        if str(incoming_value).strip() == _masked_delivery_config_value(str(existing_value).strip()):
+            incoming_config[key] = existing_value
+
+    return incoming_config
+
+
+def _sensitive_config_keys_for_channel(channel_type: str) -> set[str]:
+    if channel_type not in ALLOWED_DELIVERY_CHANNEL_TYPES:
+        return set()
+    return set(SENSITIVE_DELIVERY_CONFIG_KEYS)
+
+
+def _sanitize_response_snapshot(snapshot: dict[str, object]) -> dict[str, object]:
+    sanitized = {
+        key: value
+        for key, value in snapshot.items()
+        if key in {"channel_type", "status_code", "message", "target_summary"}
+    }
+    target_summary = sanitized.get("target_summary")
+    if isinstance(target_summary, str) and target_summary.strip():
+        sanitized["target_summary"] = _summarize_delivery_url(target_summary)
+    return sanitized
 
 
 def _normalize_datetime(value: datetime) -> datetime:

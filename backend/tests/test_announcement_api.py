@@ -441,7 +441,7 @@ def test_get_platform_delivery_records_returns_announcement_records(client, db_s
             "sent_at": None,
             "created_at": record.created_at.isoformat(),
             "payload_summary": {"title": "OpenSSL advisory"},
-            "response_snapshot": {"mode": "platform_only"},
+            "response_snapshot": {},
         }
     ]
 
@@ -606,11 +606,11 @@ def test_get_platform_delivery_targets_returns_target_views(client, db_session) 
             "channel_type": "wecom",
             "enabled": True,
             "config_json": {
-                "webhook_url": "https://example.com/webhook",
+                "webhook_url": "<已隐藏: https://example.com>",
                 "scene_names": ["announcement"],
             },
             "config_summary": {
-                "webhook_url": "https://example.com/webhook",
+                "webhook_url": "<已隐藏: https://example.com>",
                 "scene_names": ["announcement"],
             },
         },
@@ -620,10 +620,10 @@ def test_get_platform_delivery_targets_returns_target_views(client, db_session) 
             "channel_type": "webhook",
             "enabled": False,
             "config_json": {
-                "url": "https://example.com/fallback",
+                "url": "<已隐藏: https://example.com>",
             },
             "config_summary": {
-                "url": "https://example.com/fallback",
+                "url": "<已隐藏: https://example.com>",
             },
         },
     ]
@@ -721,6 +721,60 @@ def test_patch_platform_delivery_target_updates_editable_fields(client, db_sessi
     }
 
 
+def test_patch_platform_delivery_target_keeps_existing_secret_when_payload_uses_masked_value(
+    client, db_session
+) -> None:
+    target = DeliveryTarget(
+        name="Webhook 通知组",
+        channel_type="webhook",
+        enabled=True,
+        config_json={
+            "url": "https://example.com/hooks/aetherflow-secret",
+            "scene_names": ["announcement"],
+        },
+    )
+    db_session.add(target)
+    db_session.commit()
+
+    response = client.patch(
+        f"/api/v1/platform/delivery-targets/{target.target_id}",
+        json={
+            "name": "Webhook 通知组（已更新）",
+            "config_json": {
+                "url": "<已隐藏: https://example.com>",
+                "scene_names": ["announcement", "platform"],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 0
+    assert body["data"] == {
+        "target_id": str(target.target_id),
+        "name": "Webhook 通知组（已更新）",
+        "channel_type": "webhook",
+        "enabled": True,
+        "config_json": {
+            "url": "<已隐藏: https://example.com>",
+            "scene_names": ["announcement", "platform"],
+        },
+        "config_summary": {
+            "url": "<已隐藏: https://example.com>",
+            "scene_names": ["announcement", "platform"],
+        },
+    }
+
+    db_session.expire_all()
+    reloaded_target = db_session.get(DeliveryTarget, target.target_id)
+    assert reloaded_target is not None
+    assert reloaded_target.name == "Webhook 通知组（已更新）"
+    assert reloaded_target.config_json == {
+        "url": "https://example.com/hooks/aetherflow-secret",
+        "scene_names": ["announcement", "platform"],
+    }
+
+
 def test_post_platform_delivery_target_test_creates_sent_test_record(
     client, db_session, monkeypatch
 ) -> None:
@@ -763,7 +817,7 @@ def test_post_platform_delivery_target_test_creates_sent_test_record(
     assert body["data"]["response_snapshot"] == {
         "channel_type": "webhook",
         "status_code": 200,
-        "target_summary": "https://example.com/hooks/aetherflow",
+        "target_summary": "https://example.com",
     }
 
 
@@ -859,7 +913,7 @@ def test_post_platform_delivery_record_send_executes_queued_record(
     assert body["data"]["response_snapshot"] == {
         "channel_type": "webhook",
         "status_code": 200,
-        "target_summary": "https://example.com/hooks/aetherflow",
+        "target_summary": "https://example.com",
     }
 
     db_session.expire_all()
@@ -913,6 +967,47 @@ def test_post_platform_delivery_record_retry_retries_failed_record(
     assert reloaded_record is not None
     assert reloaded_record.status == "sent"
     assert reloaded_record.error_message is None
+
+
+def test_get_platform_delivery_records_sanitizes_legacy_target_summary(client, db_session) -> None:
+    target = DeliveryTarget(
+        name="Webhook 通知组",
+        channel_type="webhook",
+        enabled=True,
+        config_json={"url": "https://example.com/hooks/aetherflow-secret"},
+    )
+    db_session.add(target)
+    db_session.flush()
+
+    record = DeliveryRecord(
+        target_id=target.target_id,
+        scene_name="announcement",
+        source_ref_type="announcement_run",
+        source_ref_id=uuid.uuid4(),
+        status="sent",
+        delivery_kind="production",
+        payload_summary_json={"title": "OpenSSL advisory"},
+        response_snapshot_json={
+            "channel_type": "webhook",
+            "status_code": 200,
+            "target_summary": "https://example.com/hooks/aetherflow-secret",
+            "delivery_url": "https://example.com/hooks/aetherflow-secret?token=abc",
+            "response_body": {"ok": True},
+        },
+    )
+    db_session.add(record)
+    db_session.commit()
+
+    response = client.get("/api/v1/platform/delivery-records?scene_name=announcement")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 0
+    assert body["data"][0]["response_snapshot"] == {
+        "channel_type": "webhook",
+        "status_code": 200,
+        "target_summary": "https://example.com",
+    }
 
 
 def test_post_platform_delivery_record_schedule_sets_scheduled_at(client, db_session) -> None:
