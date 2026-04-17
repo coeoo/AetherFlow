@@ -37,6 +37,65 @@ beforeEach(() => {
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/api/v1/platform/home-summary")) {
+        return mockJsonResponse({
+          code: 0,
+          message: "success",
+          data: {
+            platform_name: "AetherFlow",
+            platform_tagline: "把原始安全信号处理成可复查的结构化情报",
+            scenes: [
+              {
+                scene_name: "cve",
+                title: "CVE 补丁检索",
+                description: "输入一个 CVE 编号，快速得到补丁线索、证据和 Diff。",
+                path: "/cve",
+                recent_status: "CVE-2024-3094 · running",
+              },
+              {
+                scene_name: "announcement",
+                title: "安全公告提取",
+                description: "输入公告 URL 或进入监控视图，生成结构化情报包与投递建议。",
+                path: "/announcements",
+                recent_status: "手动提取 · failed",
+              },
+            ],
+            recent_jobs: [],
+            recent_deliveries: [],
+            health: {
+              api: "healthy",
+              database: "healthy",
+              worker: "degraded",
+              scheduler: "down",
+              notes: ["worker 当前状态为 degraded", "scheduler 当前状态为 down"],
+            },
+          },
+        });
+      }
+
+      if (url.endsWith("/api/v1/platform/health/summary")) {
+        return mockJsonResponse({
+          api: "healthy",
+          database: "healthy",
+          worker: "degraded",
+          scheduler: "down",
+          notes: ["worker 当前状态为 degraded", "scheduler 当前状态为 down"],
+        });
+      }
+
+      if (url.includes("/api/v1/platform/tasks?")) {
+        return mockJsonResponse({
+          code: 0,
+          message: "success",
+          data: {
+            items: [],
+            total: 0,
+            page: 1,
+            page_size: 20,
+          },
+        });
+      }
+
       if (url.endsWith("/api/v1/announcements/sources")) {
         return mockJsonResponse({
           code: 0,
@@ -183,4 +242,27 @@ test("loads the Manrope font from the application entry", () => {
   const mainEntry = readFileSync(`${process.cwd()}/src/main.tsx`, "utf-8");
 
   expect(mainEntry).toContain("@fontsource/manrope");
+});
+
+test("renders aggregated platform summary sections on the home page", async () => {
+  renderPath("/");
+
+  expect(await screen.findByText("平台健康摘要")).toBeInTheDocument();
+  expect(screen.getAllByText("最近任务").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("最近投递").length).toBeGreaterThan(0);
+  expect(screen.getByText("API")).toBeInTheDocument();
+  expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
+  expect(screen.getByRole("link", { name: "查看系统状态" })).toHaveAttribute("href", "/system/health");
+  expect(screen.getByRole("link", { name: "进入任务中心" })).toHaveAttribute("href", "/system/tasks");
+});
+
+test("renders platform health summary details on the system page", async () => {
+  renderPath("/system/health");
+
+  expect(await screen.findByText("健康摘要已接入")).toBeInTheDocument();
+  expect(screen.getByText("Database")).toBeInTheDocument();
+  expect(screen.getByText("Worker")).toBeInTheDocument();
+  expect(screen.getByText("Scheduler")).toBeInTheDocument();
+  expect(screen.getByText("worker 当前状态为 degraded")).toBeInTheDocument();
+  expect(screen.getByText("scheduler 当前状态为 down")).toBeInTheDocument();
 });
