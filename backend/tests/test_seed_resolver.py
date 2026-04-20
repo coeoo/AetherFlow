@@ -88,7 +88,7 @@ def test_resolve_seed_references_records_success_trace(db_session, monkeypatch) 
             )
         raise AssertionError(f"未知 URL: {url}")
 
-    monkeypatch.setattr("app.cve.seed_sources.httpx.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.seed_sources.http_client.get", _fake_http_get)
 
     references = resolve_seed_references(db_session, run=run, cve_id=run.cve_id)
     db_session.commit()
@@ -190,7 +190,7 @@ def test_resolve_seed_references_returns_empty_when_sources_succeed_but_no_refer
             return httpx.Response(200, json={"vulnerabilities": []}, request=request)
         raise AssertionError(f"未知 URL: {url}")
 
-    monkeypatch.setattr("app.cve.seed_sources.httpx.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.seed_sources.http_client.get", _fake_http_get)
 
     references = resolve_seed_references(db_session, run=run, cve_id=run.cve_id)
     assert references == []
@@ -237,7 +237,7 @@ def test_resolve_seed_references_raises_only_when_all_sources_failed(
             return httpx.Response(500, content=b"err", request=request)
         raise AssertionError(f"未知 URL: {url}")
 
-    monkeypatch.setattr("app.cve.seed_sources.httpx.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.seed_sources.http_client.get", _fake_http_get)
 
     try:
         resolve_seed_references(db_session, run=run, cve_id=run.cve_id)

@@ -131,15 +131,15 @@ export function CVELookupPage() {
     <AppShell
       eyebrow="Patch 检索"
       title="Patch 检索"
-      description="以漏洞编号作为入口，优先回看历史 Patch 结果；只有在你主动确认时，才发起一次新的检索。"
+      description="输入漏洞编号后先查询已有结果；如果你对当前记录不满意，再手动触发重新检索。"
     >
       <section className="cve-panel cve-panel-featured patch-query-panel">
         <form className="cve-panel-header" onSubmit={handleSubmit}>
           <p className="card-label">查询入口</p>
-          <h2>先看历史，再决定是否重新检索</h2>
+          <h2>输入编号后先查询已有结果，如需重跑再手动发起重新检索。</h2>
           <p className="card-copy">
-            当前页面统一以 <strong>Patch 结果中心</strong> 作为主视图。
-            输入使用 <strong>漏洞编号</strong> 作为检索入口，但会优先展示已有历史结果。
+            当前页面只负责 <strong>查询已有结果</strong> 与 <strong>发起重新检索</strong>。
+            详细的 patch、trace 与 diff 证据统一放在运行详情页中查看。
           </p>
           <div className="patch-query-row">
             <label className="cve-field" htmlFor="patch-query-input">
@@ -154,7 +154,7 @@ export function CVELookupPage() {
             </label>
             <div className="action-row patch-query-actions">
               <button className="action-link action-link-obsidian" type="submit">
-                查看历史结果
+                开始查询
               </button>
             </div>
           </div>

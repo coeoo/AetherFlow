@@ -69,13 +69,14 @@ def test_dev_start_and_status_manage_tmux_session() -> None:
         "AETHERFLOW_DEV_POSTGRES_LOG_CMD": "printf postgres-ready && exec sleep 300",
         "AETHERFLOW_DEV_API_CMD": "printf api-ready && exec sleep 300",
         "AETHERFLOW_DEV_FRONTEND_CMD": "printf frontend-ready && exec sleep 300",
+        "AETHERFLOW_DEV_WORKER_CMD": "printf worker-ready && exec sleep 300",
     }
 
     try:
         start_result = run_script("dev_start.sh", env=env)
         assert start_result.returncode == 0, start_result.stderr
         assert tmux_session_exists(session_name)
-        assert tmux_window_names(session_name) == {"postgres", "api", "frontend"}
+        assert tmux_window_names(session_name) == {"postgres", "api", "frontend", "worker"}
         assert "本地开发会话已创建" in start_result.stdout
         assert f"tmux 会话: {session_name}" in start_result.stdout
         assert "API 地址: http://0.0.0.0:18080" in start_result.stdout
@@ -93,12 +94,13 @@ def test_dev_start_and_status_manage_tmux_session() -> None:
         assert "  - postgres" in status_result.stdout
         assert "  - api" in status_result.stdout
         assert "  - frontend" in status_result.stdout
+        assert "  - worker" in status_result.stdout
         assert "地址汇总:" in status_result.stdout
         assert "tmux_session=running" in status_result.stdout
         assert "postgres=running" in status_result.stdout
         assert "api=running" in status_result.stdout
         assert "frontend=running" in status_result.stdout
-        assert "worker=disabled" in status_result.stdout
+        assert "worker=running" in status_result.stdout
     finally:
         kill_tmux_session(session_name)
 
@@ -131,7 +133,7 @@ def test_dev_common_defaults_bind_public_host_and_frontend_port_5180() -> None:
     assert "--host 0.0.0.0 --port 5180" in output_lines[3]
 
 
-def test_dev_start_with_worker_and_stop_cleans_tmux_session() -> None:
+def test_dev_start_without_worker_and_stop_cleans_tmux_session() -> None:
     session_name = f"aetherflow-test-{uuid.uuid4().hex[:8]}"
     env = {
         "AETHERFLOW_DEV_TMUX_SESSION": session_name,
@@ -143,10 +145,10 @@ def test_dev_start_with_worker_and_stop_cleans_tmux_session() -> None:
     }
 
     try:
-        start_result = run_script("dev_start.sh", "--with-worker", env=env)
+        start_result = run_script("dev_start.sh", "--without-worker", env=env)
         assert start_result.returncode == 0, start_result.stderr
-        assert "worker" in tmux_window_names(session_name)
-        assert "worker=running" in start_result.stdout
+        assert "worker" not in tmux_window_names(session_name)
+        assert "worker=disabled" in start_result.stdout
 
         stop_result = run_script("dev_stop.sh", env=env)
         assert stop_result.returncode == 0, stop_result.stderr

@@ -67,7 +67,7 @@ def test_execute_cve_run_downloads_patch_and_updates_summary(
             request=request,
         )
 
-    monkeypatch.setattr("app.cve.patch_downloader.httpx.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.patch_downloader.http_client.get", _fake_http_get)
 
     execute_cve_run(db_session, run_id=run.run_id)
     db_session.commit()
@@ -139,7 +139,7 @@ def test_execute_cve_run_persists_discovery_metadata_into_patch_meta_json(
             request=request,
         )
 
-    monkeypatch.setattr("app.cve.patch_downloader.httpx.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.patch_downloader.http_client.get", _fake_http_get)
 
     execute_cve_run(db_session, run_id=run.run_id)
     db_session.commit()
@@ -448,6 +448,28 @@ def test_plan_frontier_skips_direct_patch_matches_before_limiting_pages() -> Non
     ]
 
 
+def test_plan_frontier_prioritizes_debian_tracker_and_announce_pages() -> None:
+    frontier = plan_frontier(
+        [
+            "https://access.redhat.com/downloads",
+            "https://access.redhat.com/security/cve/CVE-2022-2509",
+            "https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+            "https://lists.debian.org/debian-lts-announce/2022/08/msg00002.html",
+            "https://www.debian.org/security/2022/dsa-5203",
+            "https://security-tracker.debian.org/tracker/CVE-2022-2509",
+        ]
+    )
+
+    assert frontier == [
+        "https://security-tracker.debian.org/tracker/CVE-2022-2509",
+        "https://www.debian.org/security/2022/dsa-5203",
+        "https://lists.debian.org/debian-lts-announce/2022/08/msg00002.html",
+        "https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+        "https://access.redhat.com/security/cve/CVE-2022-2509",
+        "https://access.redhat.com/downloads",
+    ]
+
+
 def test_execute_cve_run_consumes_direct_seed_candidates_beyond_page_budget(
     db_session, monkeypatch
 ) -> None:
@@ -621,9 +643,9 @@ def test_execute_cve_run_writes_source_fetch_records_without_breaking_summary(
             }
         ],
     )
-    monkeypatch.setattr("app.cve.seed_sources.httpx.get", _fake_http_get)
-    monkeypatch.setattr("app.cve.page_fetcher.httpx.get", _fake_http_get)
-    monkeypatch.setattr("app.cve.patch_downloader.httpx.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.seed_sources.http_client.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.page_fetcher.http_client.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.patch_downloader.http_client.get", _fake_http_get)
 
     execute_cve_run(db_session, run_id=run.run_id)
     db_session.commit()

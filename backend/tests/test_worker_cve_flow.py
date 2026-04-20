@@ -81,9 +81,9 @@ def test_post_run_then_worker_once_then_get_summary_returns_terminal_state(
             request=request,
         )
 
-    monkeypatch.setattr("app.cve.seed_sources.httpx.get", _fake_http_get)
-    monkeypatch.setattr("app.cve.page_fetcher.httpx.get", _fake_http_get)
-    monkeypatch.setattr("app.cve.patch_downloader.httpx.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.seed_sources.http_client.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.page_fetcher.http_client.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.patch_downloader.http_client.get", _fake_http_get)
 
     response = client.post("/api/v1/cve/runs", json={"cve_id": cve_id})
     run_id = response.json()["data"]["run_id"]
@@ -228,12 +228,10 @@ def test_worker_once_marks_run_terminal_when_seed_resolution_raises(
     assert body["stop_reason"] == "resolve_seeds_failed"
     assert body["summary"]["patch_found"] is False
     assert body["summary"]["error"] == "nvd timeout"
-    assert body["progress"] == {
-        "current_phase": "resolve_seeds",
-        "completed_steps": 0,
-        "total_steps": 6,
-        "terminal": True,
-    }
+    assert body["progress"]["current_phase"] == "resolve_seeds"
+    assert body["progress"]["completed_steps"] == 0
+    assert body["progress"]["total_steps"] == 6
+    assert body["progress"]["terminal"] is True
 
     db_session.expire_all()
     run = db_session.get(CVERun, run_id)
@@ -328,3 +326,96 @@ def test_worker_once_preserves_llm_fallback_summary_when_patch_download_failed(
     assert body["summary"]["llm_fallback_triggered"] is True
     assert body["summary"]["llm_decision"] == "select_candidate"
     assert body["summary"]["llm_selected_candidate_url"] == "https://example.com/fix.patch"
+
+
+def test_worker_follows_debian_tracker_chain_to_gitlab_commit_patch(
+    client, db_session, test_database_url, monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setenv("AETHERFLOW_ARTIFACT_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.cve.runtime.resolve_seed_references",
+        lambda session, *, run, cve_id: ["https://www.debian.org/security/2022/dsa-5203"],
+    )
+
+    patch_text = "diff --git a/lib/file.c b/lib/file.c\n+patched = true\n"
+
+    def _fake_http_get(url: str, **kwargs) -> httpx.Response:
+        request = httpx.Request("GET", url)
+        if url == "https://www.debian.org/security/2022/dsa-5203":
+            return httpx.Response(
+                200,
+                text=(
+                    '<html><body>'
+                    '<a href="https://security-tracker.debian.org/tracker/gnutls28">'
+                    "security tracker"
+                    "</a>"
+                    "</body></html>"
+                ),
+                headers={"content-type": "text/html; charset=utf-8"},
+                request=request,
+            )
+        if url == "https://security-tracker.debian.org/tracker/gnutls28":
+            return httpx.Response(
+                200,
+                text=(
+                    '<html><body>'
+                    '<a href="https://security-tracker.debian.org/tracker/CVE-2022-2509">'
+                    "CVE-2022-2509"
+                    "</a>"
+                    "</body></html>"
+                ),
+                headers={"content-type": "text/html; charset=utf-8"},
+                request=request,
+            )
+        if url == "https://security-tracker.debian.org/tracker/CVE-2022-2509":
+            return httpx.Response(
+                200,
+                text=(
+                    '<html><body>'
+                    '<a href="https://gitlab.com/gnutls/gnutls/-/commit/'
+                    'ce37f9eb265dbe9b6d597f5767449e8ee95848e2">'
+                    "fix commit"
+                    "</a>"
+                    "</body></html>"
+                ),
+                headers={"content-type": "text/html; charset=utf-8"},
+                request=request,
+            )
+        if url == "https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb265dbe9b6d597f5767449e8ee95848e2.patch":
+            return httpx.Response(
+                200,
+                text=patch_text,
+                headers={"content-type": "text/x-patch"},
+                request=request,
+            )
+        raise AssertionError(f"未预期的 URL: {url}")
+
+    monkeypatch.setattr("app.cve.page_fetcher.http_client.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.patch_downloader.http_client.get", _fake_http_get)
+
+    response = client.post("/api/v1/cve/runs", json={"cve_id": "CVE-2022-2509"})
+    run_id = response.json()["data"]["run_id"]
+
+    session_factory = create_session_factory(test_database_url)
+    processed = process_once(session_factory, worker_name="worker-e2e")
+    assert processed is True
+
+    detail = client.get(f"/api/v1/cve/runs/{run_id}")
+    assert detail.status_code == 200
+    body = detail.json()["data"]
+    assert body["status"] == "succeeded"
+    assert body["stop_reason"] == "patches_downloaded"
+    assert body["summary"]["primary_patch_url"] == (
+        "https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb265dbe9b6d597f5767449e8ee95848e2.patch"
+    )
+
+    fetched_urls = [
+        item["url"]
+        for item in body["source_traces"]
+        if item["step"] == "cve_page_fetch" and item["status"] == "succeeded"
+    ]
+    assert set(fetched_urls) == {
+        "https://www.debian.org/security/2022/dsa-5203",
+        "https://security-tracker.debian.org/tracker/gnutls28",
+        "https://security-tracker.debian.org/tracker/CVE-2022-2509",
+    }

@@ -2,8 +2,9 @@
   font-family: "Manrope", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: #191c1e;
   background:
-    radial-gradient(circle at top left, rgba(215, 223, 235, 0.42), transparent 32%),
-    linear-gradient(180deg, #f7f9fb 0%, #eef1f4 100%);
+    radial-gradient(circle at 0% 0%, rgba(200, 220, 255, 0.4) 0%, transparent 40%),
+    radial-gradient(circle at 100% 100%, rgba(240, 230, 255, 0.4) 0%, transparent 40%),
+    linear-gradient(180deg, #f0f4f9 0%, #e1e7f0 100%);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -68,26 +69,26 @@ textarea:focus {
 
 .app-shell {
   min-height: 100vh;
-  padding: 20px 20px 28px;
+  padding: 16px;
 }
 
 .topbar {
   position: sticky;
-  top: 20px;
+  top: 16px;
   z-index: 40;
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   align-items: center;
-  gap: 28px;
-  min-height: 76px;
+  gap: 24px;
+  min-height: 56px;
   margin: 0 auto 24px;
-  padding: 14px 24px;
+  padding: 10px 24px;
   max-width: 1680px;
-  border: 1px solid rgba(255, 255, 255, 0.88);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.78);
-  backdrop-filter: blur(28px);
-  box-shadow: 0 24px 48px rgba(25, 28, 30, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(32px) saturate(180%);
+  box-shadow: 0 16px 48px rgba(15, 20, 30, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 .brand-block {
@@ -96,7 +97,18 @@ textarea:focus {
   min-width: 220px;
 }
 
-.brand-kicker,
+.brand-kicker {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, #101518 0%, #4a5568 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
 .eyebrow,
 .card-label {
   margin: 0;
@@ -108,9 +120,10 @@ textarea:focus {
 }
 
 .brand-copy {
-  font-size: 0.84rem;
-  color: #657489;
-  line-height: 1.5;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #5a6678;
+  line-height: 1.4;
 }
 
 .nav-group {
@@ -307,8 +320,8 @@ textarea:focus {
 .workspace-sidebar-note {
   display: grid;
   gap: 8px;
-  padding: 18px;
-  border-radius: 24px;
+  padding: 16px;
+  border-radius: 16px;
   color: #5f6c7f;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(242, 244, 246, 0.95)),
@@ -346,11 +359,11 @@ textarea:focus {
 
 .hero-copy h1 {
   margin: 0;
-  font-size: clamp(2.8rem, 4vw, 3.75rem);
-  font-weight: 800;
-  line-height: 1.05;
-  letter-spacing: -0.04em;
-  color: #000000;
+  font-size: 1.8rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: #0f172a;
 }
 
 .hero-description {
@@ -371,23 +384,23 @@ textarea:focus {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 46px;
-  padding: 0 18px;
-  border-radius: 12px;
+  min-height: 40px;
+  padding: 0 20px;
+  border-radius: 8px;
   color: #ffffff;
-  background: #000000;
-  box-shadow: 0 18px 32px rgba(25, 28, 30, 0.08);
+  background: linear-gradient(135deg, #0a0a0c 0%, #2a2d34 100%);
+  box-shadow: 0 12px 32px rgba(10, 10, 12, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  font-weight: 600;
+  font-size: 0.88rem;
   cursor: pointer;
-  transition:
-    transform 140ms ease,
-    box-shadow 140ms ease,
-    background-color 140ms ease;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 .action-link:hover,
 .action-link:focus-visible {
-  transform: translateY(-1px);
-  box-shadow: 0 20px 36px rgba(25, 28, 30, 0.12);
+  transform: translateY(-2px);
+  box-shadow: 0 16px 40px rgba(10, 10, 12, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  background: linear-gradient(135deg, #121216 0%, #363942 100%);
 }
 
 .action-link:disabled,
@@ -422,47 +435,50 @@ textarea:focus {
 .cve-verdict-card {
   display: grid;
   gap: 16px;
-  padding: 28px;
-  border-radius: 24px;
-  background: #ffffff;
-  box-shadow: 0 24px 48px rgba(25, 28, 30, 0.06);
+  padding: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(24px);
+  box-shadow: 0 12px 32px rgba(15, 20, 30, 0.04), inset 0 1px 0 rgba(255, 255, 255, 1);
+  transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), box-shadow 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.summary-card:hover,
+.cve-panel:hover,
+.cve-verdict-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 48px rgba(15, 20, 30, 0.08), inset 0 1px 0 rgba(255, 255, 255, 1);
 }
 
 .summary-card-emphasis,
 .cve-panel-featured,
 .patch-status-panel,
 .cve-verdict-hero {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 249, 251, 0.98)),
-    #ffffff;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(246, 248, 255, 0.9) 100%);
 }
 
 .summary-card-spotlight {
-  background:
-    radial-gradient(circle at top right, rgba(183, 196, 255, 0.2), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(244, 247, 250, 0.98)),
-    #ffffff;
+  background: linear-gradient(135deg, rgba(240, 248, 255, 0.85) 0%, rgba(255, 255, 255, 0.95) 100%);
 }
 
 .summary-card-stream {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 251, 0.96)),
-    #ffffff;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.85) 0%, rgba(253, 250, 248, 0.75) 100%);
 }
 
 .summary-card-rail {
-  background:
-    linear-gradient(180deg, rgba(246, 248, 250, 0.96), rgba(255, 255, 255, 0.98)),
-    #ffffff;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.8) 0%, rgba(245, 248, 250, 0.7) 100%);
 }
 
 .summary-card h2,
 .cve-panel-header h2,
 .cve-panel-header h3 {
   margin: 0;
-  font-size: 1.45rem;
-  line-height: 1.2;
-  letter-spacing: -0.02em;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+  color: #1e293b;
 }
 
 .card-copy {
@@ -484,8 +500,19 @@ textarea:focus {
   display: grid;
   gap: 8px;
   padding: 16px;
-  border-radius: 18px;
-  background: linear-gradient(180deg, #fbfcfd 0%, #f3f6f8 100%);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(251, 252, 253, 0.6) 0%, rgba(243, 246, 248, 0.6) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.summary-inline-item:hover,
+.cve-inline-progress:hover,
+.cve-trace-item:hover,
+.cve-patch-item:hover,
+.cve-history-item:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(248, 250, 252, 0.9) 100%);
+  box-shadow: 0 8px 24px rgba(15, 20, 30, 0.04);
 }
 
 .summary-inline-item strong,
@@ -512,7 +539,7 @@ textarea:focus {
 .patch-results-rail,
 .patch-developer-sections {
   display: grid;
-  gap: 12px;
+  gap: 16px;
 }
 
 .stack-xs {
@@ -558,18 +585,19 @@ textarea:focus {
   align-items: center;
   justify-content: center;
   width: fit-content;
-  min-height: 28px;
-  padding: 0 12px;
+  min-height: 32px;
+  padding: 0 14px;
   border-radius: 999px;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 800;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .status-pill-running,
 .status-pill-queued,
-.cve-status-chip-queued {
+.cve-status-chip-queued,
+.cve-status-chip-running {
   color: #4c5a6d;
   background: #e6eaef;
 }
@@ -599,7 +627,7 @@ textarea:focus {
 .cve-detail-grid,
 .patch-command-grid {
   display: grid;
-  gap: 16px;
+  gap: 24px;
   grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
 }
 
@@ -609,13 +637,13 @@ textarea:focus {
 }
 
 .patch-query-panel {
-  padding: 24px 28px;
+  padding: 16px 20px;
 }
 
 .patch-query-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 16px;
+  gap: 20px;
   align-items: end;
 }
 
@@ -644,14 +672,70 @@ textarea:focus {
 
 .patch-command-grid {
   grid-template-columns: minmax(0, 1.16fr) minmax(320px, 0.84fr);
-  gap: 18px;
+  gap: 20px;
   align-items: start;
 }
 
 .patch-narrative-grid {
   display: grid;
-  gap: 18px;
+  gap: 24px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.patch-workbench-grid,
+.patch-current-overview-panel {
+  display: grid;
+  gap: 20px;
+}
+
+.patch-live-panel,
+.patch-recent-activity-panel,
+.patch-recent-trace-panel,
+.patch-live-panel-header,
+.patch-live-progress-block,
+.patch-live-progress-meta,
+.patch-live-stat-grid {
+  display: grid;
+  gap: 20px;
+}
+
+.patch-live-panel-header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.patch-live-progress-meta strong {
+  font-size: 1.25rem;
+  line-height: 1;
+  color: #191c1e;
+}
+
+.patch-live-progress-meta span {
+  color: #617084;
+  line-height: 1.6;
+}
+
+.patch-live-progress-track {
+  position: relative;
+  overflow: hidden;
+  min-height: 12px;
+  border-radius: 999px;
+  background: rgba(15, 20, 30, 0.08);
+}
+
+.patch-live-progress-bar {
+  min-height: 12px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0f1217 0%, #475872 100%);
+  transition: width 0.3s ease;
+}
+
+.patch-live-stat-grid {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.patch-workbench-grid {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .patch-progress-list {
@@ -663,7 +747,7 @@ textarea:focus {
 .patch-results-main,
 .patch-results-rail {
   display: grid;
-  gap: 16px;
+  gap: 12px;
 }
 
 .patch-empty-state {
@@ -733,9 +817,9 @@ textarea:focus {
   align-items: center;
   justify-content: center;
   width: fit-content;
-  min-height: 40px;
+  min-height: 36px;
   padding: 0 14px;
-  border-radius: 10px;
+  border-radius: 8px;
   color: #ffffff;
   background: #000000;
   cursor: pointer;
@@ -767,9 +851,9 @@ textarea:focus {
 
 .cve-verdict-copy h2 {
   margin: 0;
-  font-size: clamp(1.9rem, 3vw, 2.8rem);
-  line-height: 1.04;
-  letter-spacing: -0.03em;
+  font-size: clamp(2.2rem, 3.2vw, 2.8rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
 }
 
 .cve-kpi-card {
@@ -840,11 +924,20 @@ textarea:focus {
 .workspace-side-stack,
 .promo-card {
   display: grid;
-  gap: 16px;
+  gap: 24px;
 }
 
 .dashboard-stat-grid {
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.dashboard-stat-grid .summary-card h2 {
+  font-size: 2.2rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, #0f1217 0%, #465469 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .workspace-overview-grid {
@@ -854,7 +947,7 @@ textarea:focus {
 
 .promo-card {
   padding: 24px;
-  border-radius: 24px;
+  border-radius: 16px;
   color: #ffffff;
   background:
     radial-gradient(circle at top center, rgba(183, 196, 255, 0.48), transparent 26%),
@@ -937,6 +1030,7 @@ textarea:focus {
   .cve-detail-grid,
   .cve-verdict-hero,
   .patch-status-layout,
+  .patch-live-panel-header,
   .patch-narrative-grid,
   .patch-query-row {
     grid-template-columns: 1fr;

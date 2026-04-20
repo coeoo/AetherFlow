@@ -7,12 +7,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.announcements.intelligence import classify_linux_relevance
 from app.announcements.openwall_adapter import OpenwallAdapter
+from app import http_client
 from app.models import (
     AnnouncementDocument,
     AnnouncementIntelligencePackage,
@@ -25,7 +25,7 @@ from app.platform.artifact_store import save_text_artifact
 
 
 def fetch_url_content(url: str) -> str:
-    response = httpx.get(url, timeout=10.0, follow_redirects=True)
+    response = http_client.get(url, timeout=10.0, follow_redirects=True)
     response.raise_for_status()
     return response.text
 

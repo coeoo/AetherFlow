@@ -3,6 +3,15 @@ export type CVERunProgress = {
   completed_steps: number;
   total_steps: number;
   terminal: boolean;
+  percent?: number;
+  status_label?: string;
+  latest_signal?: string | null;
+  last_updated_at?: string | null;
+  last_meaningful_update_at?: string | null;
+  visited_trace_count?: number;
+  downloaded_patch_count?: number;
+  failed_trace_count?: number;
+  active_url?: string | null;
 };
 
 export type CVERunRecentProgress = {
@@ -10,6 +19,7 @@ export type CVERunRecentProgress = {
   label: string;
   status: string;
   detail: string | null;
+  error_message?: string | null;
 };
 
 export type CVESourceTrace = {
@@ -22,6 +32,7 @@ export type CVESourceTrace = {
   request_snapshot: Record<string, unknown>;
   response_meta: Record<string, unknown>;
   error_message: string | null;
+  created_at?: string;
 };
 
 export type CVEPatch = {

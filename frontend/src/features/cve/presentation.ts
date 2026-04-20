@@ -85,6 +85,38 @@ export function formatCveRunCreatedAt(createdAt: string) {
   }).format(date);
 }
 
+export function formatCveRelativeTime(value: string | null | undefined, nowMs = Date.now()) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  const diffSeconds = Math.max(0, Math.floor((nowMs - date.getTime()) / 1000));
+  if (diffSeconds <= 1) {
+    return "刚刚";
+  }
+  if (diffSeconds < 60) {
+    return `${diffSeconds} 秒前`;
+  }
+
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) {
+    return `${diffMinutes} 分钟前`;
+  }
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `${diffHours} 小时前`;
+  }
+
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays} 天前`;
+}
+
 export function getCveHistorySourceSummary(summary: {
   primary_family_source_host?: string;
   primary_family_evidence_source_count?: number;

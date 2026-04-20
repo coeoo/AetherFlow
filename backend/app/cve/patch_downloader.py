@@ -6,6 +6,7 @@ import re
 import httpx
 from sqlalchemy.orm import Session
 
+from app import http_client
 from app.cve.source_trace import record_source_fetch
 from app.models import CVEPatchArtifact
 from app.platform.artifact_store import save_text_artifact
@@ -71,7 +72,7 @@ def download_patch_candidate(
     }
 
     try:
-        response = httpx.get(
+        response = http_client.get(
             download_url,
             timeout=10.0,
             follow_redirects=True,

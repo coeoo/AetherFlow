@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import load_settings
 from app.cve.llm_fallback import maybe_run_cve_llm_fallback
+from app.cve.navigation import collect_follow_links
 from app.cve.page_analyzer import analyze_page
 from app.cve.page_fetcher import fetch_page
 from app.cve.patch_downloader import download_patch_candidate
@@ -27,6 +28,25 @@ _EXCEPTION_STOP_REASONS = {
 }
 
 _MAX_FRONTIER_PAGES = 10
+_MAX_NAVIGATION_HOPS = 2
+_MAX_FOLLOW_LINKS_PER_PAGE = 3
+_FRONTIER_PRIORITY_RULES: tuple[tuple[str, int], ...] = (
+    ("security-tracker.debian.org/tracker/cve-", 30),
+    ("security-tracker.debian.org/tracker/", 24),
+    ("tracker.debian.org/pkg/", 18),
+    ("www.debian.org/security/", 18),
+    ("lists.debian.org/debian-security-announce/", 16),
+    ("lists.debian.org/debian-lts-announce/", 14),
+    ("nvd.nist.gov/vuln/detail/cve-", 10),
+    ("access.redhat.com/security/cve/", 8),
+    ("github.com/advisories/ghsa-", 7),
+    ("downloads", -8),
+    ("/auth/realms/", -10),
+    ("/attachments/", -6),
+    (".sig", -8),
+    (".key", -8),
+    (".asc", -8),
+)
 _GITHUB_COMMIT_OR_PULL_RE = re.compile(
     r"^/[^/]+/[^/]+/(?:commit/[0-9a-f]{7,40}|pull/\d+)$",
     re.IGNORECASE,
@@ -38,21 +58,20 @@ _GITLAB_COMMIT_OR_MR_RE = re.compile(
 
 
 def plan_frontier(seed_references: list[str]) -> list[str]:
-    frontier: list[str] = []
+    frontier: list[tuple[str, int, int]] = []
     seen_urls: set[str] = set()
 
-    for reference in seed_references:
+    for index, reference in enumerate(seed_references):
         normalized = _normalize_frontier_url(reference)
         if normalized is None or normalized in seen_urls:
             continue
         if match_reference_url(normalized) is not None:
             continue
         seen_urls.add(normalized)
-        frontier.append(normalized)
-        if len(frontier) >= _MAX_FRONTIER_PAGES:
-            break
+        frontier.append((normalized, _score_frontier_url(normalized), index))
 
-    return frontier
+    frontier.sort(key=lambda item: (-item[1], item[2]))
+    return [url for url, _, _ in frontier[:_MAX_FRONTIER_PAGES]]
 
 
 def _normalize_frontier_url(url: str) -> str | None:
@@ -60,6 +79,16 @@ def _normalize_frontier_url(url: str) -> str | None:
     if not normalized:
         return None
     return urldefrag(normalized).url
+
+
+def _score_frontier_url(url: str) -> int:
+    normalized = url.lower()
+    score = sum(weight for marker, weight in _FRONTIER_PRIORITY_RULES if marker in normalized)
+    if "cve-" in normalized:
+        score += 2
+    if "security" in normalized:
+        score += 1
+    return score
 
 
 def _update_phase(run: CVERun, phase: str) -> None:
@@ -127,24 +156,13 @@ def execute_cve_run(session: Session, *, run_id: UUID) -> None:
 
         _update_phase(run, "fetch_page")
         session.flush()
-        snapshots, failed_fetch_count = _fetch_frontier_snapshots(
-            session, run=run, frontier=frontier
+        snapshots, patch_candidates, failed_fetch_count = _explore_frontier(
+            session,
+            run=run,
+            frontier=frontier,
+            patch_candidates=patch_candidates,
+            candidates_by_key=candidates_by_key,
         )
-
-        _update_phase(run, "analyze_page")
-        session.flush()
-        for snapshot in snapshots:
-            for candidate in analyze_page(snapshot):
-                enriched_candidate = _enrich_patch_candidate(
-                    snapshot,
-                    candidate,
-                    source_kind="page",
-                )
-                _merge_or_append_candidate(
-                    patch_candidates,
-                    candidates_by_key=candidates_by_key,
-                    candidate=enriched_candidate,
-                )
 
         if not patch_candidates:
             if failed_fetch_count > 0 and not snapshots:
@@ -254,19 +272,69 @@ def _build_direct_patch_candidates(seed_references: list[str]) -> list[dict[str,
     return direct_candidates
 
 
-def _fetch_frontier_snapshots(
-    session: Session, *, run: CVERun, frontier: list[str]
-) -> tuple[list[dict[str, str]], int]:
+def _explore_frontier(
+    session: Session,
+    *,
+    run: CVERun,
+    frontier: list[str],
+    patch_candidates: list[dict[str, object]],
+    candidates_by_key: dict[str, dict[str, object]],
+) -> tuple[list[dict[str, str]], list[dict[str, object]], int]:
     snapshots: list[dict[str, str]] = []
     failed_fetch_count = 0
+    queued_urls: set[str] = set(frontier)
+    visited_urls: set[str] = set()
+    queue: list[tuple[str, int]] = [(url, 0) for url in frontier]
 
-    for url in frontier:
+    while queue and len(visited_urls) < _MAX_FRONTIER_PAGES:
+        url, depth = queue.pop(0)
+        if url in visited_urls:
+            continue
+        visited_urls.add(url)
         try:
-            snapshots.append(fetch_page(session, run=run, url=url))
+            snapshot = fetch_page(session, run=run, url=url)
         except Exception:
             failed_fetch_count += 1
+            continue
 
-    return snapshots, failed_fetch_count
+        snapshots.append(snapshot)
+        _update_phase(run, "analyze_page")
+        session.flush()
+        for candidate in analyze_page(snapshot):
+            enriched_candidate = _enrich_patch_candidate(
+                snapshot,
+                candidate,
+                source_kind="page",
+            )
+            _merge_or_append_candidate(
+                patch_candidates,
+                candidates_by_key=candidates_by_key,
+                candidate=enriched_candidate,
+            )
+
+        if depth >= _MAX_NAVIGATION_HOPS:
+            continue
+
+        prioritized_follow_links: list[tuple[str, int]] = []
+        for next_url in collect_follow_links(
+            snapshot,
+            cve_id=run.cve_id,
+            max_results=_MAX_FOLLOW_LINKS_PER_PAGE,
+        ):
+            normalized_next_url = _normalize_frontier_url(next_url)
+            if normalized_next_url is None:
+                continue
+            if normalized_next_url in visited_urls or normalized_next_url in queued_urls:
+                continue
+            if match_reference_url(normalized_next_url) is not None:
+                continue
+            queued_urls.add(normalized_next_url)
+            prioritized_follow_links.append((normalized_next_url, depth + 1))
+
+        for next_item in reversed(prioritized_follow_links):
+            queue.insert(0, next_item)
+
+    return snapshots, patch_candidates, failed_fetch_count
 
 
 def _enrich_patch_candidate(

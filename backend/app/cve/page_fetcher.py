@@ -4,6 +4,7 @@ from typing import Any
 
 import httpx
 
+from app import http_client
 from app.cve.source_trace import record_source_fetch
 
 
@@ -12,7 +13,7 @@ def fetch_page(session, *, run, url: str) -> dict[str, Any]:
     response: httpx.Response | None = None
 
     try:
-        response = httpx.get(
+        response = http_client.get(
             url,
             timeout=10.0,
             follow_redirects=True,

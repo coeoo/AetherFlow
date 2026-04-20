@@ -6,13 +6,13 @@ import re
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 
-import httpx
+from app import http_client
 
 _BASE_URL = "https://www.openwall.com/lists/oss-security"
 
 
 def _fetch_text(url: str, timeout: float) -> str:
-    response = httpx.get(url, timeout=timeout, follow_redirects=True)
+    response = http_client.get(url, timeout=timeout, follow_redirects=True)
     response.raise_for_status()
     return response.text
 

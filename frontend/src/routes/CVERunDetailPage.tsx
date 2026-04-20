@@ -8,6 +8,7 @@ import { CVEPatchList } from "../features/cve/components/CVEPatchList";
 import { CVETraceTimeline } from "../features/cve/components/CVETraceTimeline";
 import { CVEVerdictHero } from "../features/cve/components/CVEVerdictHero";
 import { useCveRunDetail, usePatchContent } from "../features/cve/hooks";
+import { getCvePhaseLabel, getCveStopReasonLabel } from "../features/cve/presentation";
 
 export function CVERunDetailPage() {
   const { runId = "未提供 runId" } = useParams();
@@ -58,6 +59,8 @@ export function CVERunDetailPage() {
     );
   }
 
+  const hasEvidencePayload = detail.source_traces.length > 0 || detail.patches.length > 0;
+
   return (
     <AppShell
       eyebrow="Patch 检索"
@@ -72,6 +75,38 @@ export function CVERunDetailPage() {
       }
     >
       <CVEVerdictHero detail={detail} />
+
+      <section className="cve-panel">
+        <div className="cve-panel-header">
+          <p className="card-label">当前运行状态</p>
+          <h2>先确认这条 run 目前走到了哪里</h2>
+        </div>
+        <div className="summary-grid patch-summary-grid">
+          <article className="summary-inline-item">
+            <strong>状态</strong>
+            <span>{detail.status}</span>
+          </article>
+          <article className="summary-inline-item">
+            <strong>阶段</strong>
+            <span>{getCvePhaseLabel(detail.phase)}</span>
+          </article>
+          <article className="summary-inline-item">
+            <strong>停止原因</strong>
+            <span>{getCveStopReasonLabel(detail.stop_reason, detail.status)}</span>
+          </article>
+          <article className="summary-inline-item">
+            <strong>执行进度</strong>
+            <span>
+              {detail.progress.completed_steps}/{detail.progress.total_steps}
+            </span>
+          </article>
+        </div>
+        {!hasEvidencePayload ? (
+          <p className="card-copy">
+            当前这条 run 还没有生成页面轨迹或补丁结果。若状态仍是 queued/running，说明任务还没推进到可展示阶段；如果长时间停留不动，请先检查 worker 是否正常消费任务。
+          </p>
+        ) : null}
+      </section>
 
       <section className="cve-detail-grid">
         <div className="cve-detail-main">

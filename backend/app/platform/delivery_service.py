@@ -6,10 +6,10 @@ import socket
 from urllib.parse import urlparse
 from uuid import UUID
 
-import httpx
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app import http_client
 from app.models import DeliveryRecord, DeliveryTarget
 
 ALLOWED_DELIVERY_CHANNEL_TYPES = {"email", "wecom", "webhook"}
@@ -295,7 +295,7 @@ def _send_delivery(
 ) -> dict[str, object]:
     delivery_url = _resolve_delivery_url(target)
     payload = _build_channel_payload(record)
-    response = httpx.post(delivery_url, json=payload, timeout=10.0)
+    response = http_client.post(delivery_url, json=payload, timeout=10.0)
     response.raise_for_status()
 
     return {

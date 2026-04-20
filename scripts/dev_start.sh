@@ -5,25 +5,26 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/dev_common.sh"
 
 usage() {
     cat <<'EOF'
-用法: bash scripts/dev_start.sh [--with-worker]
+用法: bash scripts/dev_start.sh [--without-worker]
 
 启动本地开发会话，默认拉起：
 - postgres（Docker Compose）
 - api（uvicorn）
 - frontend（Vite）
+- worker
 
 可选参数：
-  --with-worker    同时拉起 worker
+  --without-worker  跳过 worker，仅启动 postgres/api/frontend
   --help           显示帮助
 EOF
 }
 
-with_worker=0
+with_worker=1
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --with-worker)
-            with_worker=1
+        --without-worker)
+            with_worker=0
             ;;
         --help)
             usage
@@ -84,12 +85,12 @@ echo "查看状态: bash scripts/dev_status.sh"
 echo
 print_window_list
 echo
-if [ "$with_worker" -eq 1 ]; then
-    print_service_state_lines "enabled"
-    echo
-    print_status_key_values "enabled"
-else
+if [ "$with_worker" -eq 0 ]; then
     print_service_state_lines "disabled"
     echo
     print_status_key_values "disabled"
+else
+    print_service_state_lines "enabled"
+    echo
+    print_status_key_values "enabled"
 fi

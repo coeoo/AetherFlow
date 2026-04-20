@@ -3,8 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import httpx
-
+from app import http_client
 from app.config import Settings
 
 _ALLOWED_DECISIONS = {"select_candidate", "needs_human_review", "abstain"}
@@ -333,7 +332,7 @@ def _invoke_provider(
     *,
     request_payload: dict[str, object],
 ) -> str:
-    response = httpx.post(
+    response = http_client.post(
         _build_chat_completions_url(settings.llm_base_url),
         timeout=float(settings.llm_timeout_seconds),
         headers={

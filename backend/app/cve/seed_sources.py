@@ -6,6 +6,8 @@ from urllib.parse import urldefrag
 
 import httpx
 
+from app import http_client
+
 
 @dataclass(frozen=True)
 class SeedSourceResult:
@@ -146,7 +148,7 @@ def _extract_nvd_references(payload: dict[str, Any]) -> list[str]:
 def fetch_seed_source(source: str, *, cve_id: str) -> SeedSourceResult:
     request_url = _build_request_url(source, cve_id)
     try:
-        response = httpx.get(request_url, timeout=10.0)
+        response = http_client.get(request_url, timeout=10.0)
     except httpx.RequestError as exc:
         return _failed_result(
             source=source,
