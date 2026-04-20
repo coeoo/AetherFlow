@@ -4,6 +4,11 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from app.cve.search_graph_service import (
+    record_search_decision,
+    record_search_edge,
+    record_search_node,
+)
 from app.cve.service import create_cve_run
 from app.models import Artifact, CVEPatchArtifact, CVERun, SourceFetchRecord, TaskJob
 
@@ -129,6 +134,9 @@ def test_get_cve_run_returns_detail_payload_with_progress_traces_and_patches(
     client, db_session, tmp_path
 ) -> None:
     run = create_cve_run(db_session, cve_id="CVE-2024-3094")
+    job = db_session.get(TaskJob, run.job_id)
+    assert job is not None
+    job.job_type = "cve_patch_agent_graph"
     run.status = "succeeded"
     run.phase = "finalize_run"
     run.stop_reason = "patches_downloaded"
@@ -259,12 +267,19 @@ def test_get_cve_run_returns_detail_payload_with_progress_traces_and_patches(
     assert response.status_code == 200
     body = response.json()
     assert body["data"]["run_id"] == str(run.run_id)
-    assert body["data"]["progress"] == {
-        "current_phase": "finalize_run",
-        "completed_steps": 6,
-        "total_steps": 6,
-        "terminal": True,
-    }
+    assert body["data"]["progress"]["current_phase"] == "finalize_run"
+    assert body["data"]["progress"]["completed_steps"] == 7
+    assert body["data"]["progress"]["total_steps"] == 7
+    assert body["data"]["progress"]["terminal"] is True
+    assert body["data"]["progress"]["percent"] == 100
+    assert body["data"]["progress"]["status_label"] == "已完成"
+    assert body["data"]["progress"]["latest_signal"] == "已完成补丁下载，结果可以开始复查。"
+    assert body["data"]["progress"]["visited_trace_count"] == 3
+    assert body["data"]["progress"]["downloaded_patch_count"] == 1
+    assert body["data"]["progress"]["failed_trace_count"] == 0
+    assert body["data"]["progress"]["active_url"] == "https://example.com/fix.patch"
+    assert body["data"]["progress"]["last_updated_at"] is not None
+    assert body["data"]["progress"]["last_meaningful_update_at"] is not None
     assert len(body["data"]["recent_progress"]) == 3
     assert {item["step"] for item in body["data"]["recent_progress"]} == {
         "cve_seed_resolve",
@@ -321,31 +336,125 @@ def test_get_cve_run_returns_detail_payload_with_progress_traces_and_patches(
             "download_url": "https://example.com/fix.patch",
         }
     ]
-    assert body["data"]["fix_families"] == [
+
+
+def test_get_cve_run_detail_includes_search_graph_fields(client, db_session) -> None:
+    run = create_cve_run(db_session, cve_id="CVE-2024-3094")
+    run.status = "running"
+    run.phase = "agent_decide"
+    db_session.flush()
+
+    root_node = record_search_node(
+        db_session,
+        run_id=run.run_id,
+        url="https://security-tracker.debian.org/tracker/CVE-2024-3094",
+        depth=0,
+        host="security-tracker.debian.org",
+        page_role="frontier_page",
+        fetch_status="queued",
+        heuristic_features={"frontier_score": 10},
+        flush=True,
+    )
+    child_node = record_search_node(
+        db_session,
+        run_id=run.run_id,
+        url="https://example.com/advisory",
+        depth=1,
+        host="example.com",
+        page_role="bridge_page",
+        fetch_status="fetched",
+        heuristic_features={"frontier_score": 7},
+        flush=True,
+    )
+    record_search_edge(
+        db_session,
+        run_id=run.run_id,
+        from_node_id=root_node.node_id,
+        to_node_id=child_node.node_id,
+        edge_type="follow_link",
+        selected_by="agent",
+        flush=True,
+    )
+    record_search_decision(
+        db_session,
+        run_id=run.run_id,
+        node_id=child_node.node_id,
+        decision_type="expand_frontier",
+        input_payload={"frontier_count": 1},
+        output_payload={"selected_urls": ["https://example.com/advisory"]},
+        validated=True,
+        model_name="gpt-5",
+        flush=True,
+    )
+    db_session.commit()
+
+    response = client.get(f"/api/v1/cve/runs/{run.run_id}")
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["search_graph"]["nodes"] == [
         {
-            "family_key": "family:https://example.com/fix.patch",
-            "title": "example.com",
-            "source_url": "https://example.com/fix.patch",
-            "source_host": "example.com",
-            "discovery_rule": "unknown",
-            "patch_count": 1,
-            "downloaded_patch_count": 1,
-            "primary_patch_id": str(patch.patch_id),
-            "patch_ids": [str(patch.patch_id)],
-            "patch_types": ["patch"],
-            "evidence_source_count": 1,
-            "related_source_hosts": ["example.com"],
-            "evidence_sources": [
-                {
-                    "source_url": "https://example.com/fix.patch",
-                    "source_host": "example.com",
-                    "discovery_rule": "unknown",
-                    "source_kind": "candidate",
-                    "order": 0,
-                }
-            ],
+            "node_id": str(root_node.node_id),
+            "url": "https://security-tracker.debian.org/tracker/CVE-2024-3094",
+            "depth": 0,
+            "host": "security-tracker.debian.org",
+            "page_role": "frontier_page",
+            "fetch_status": "queued",
+        },
+        {
+            "node_id": str(child_node.node_id),
+            "url": "https://example.com/advisory",
+            "depth": 1,
+            "host": "example.com",
+            "page_role": "bridge_page",
+            "fetch_status": "fetched",
+        },
+    ]
+    assert payload["search_graph"]["edges"] == [
+        {
+            "from_node_id": str(root_node.node_id),
+            "to_node_id": str(child_node.node_id),
+            "edge_type": "follow_link",
+            "selected_by": "agent",
         }
     ]
+    assert payload["frontier_status"] == {
+        "total_nodes": 2,
+        "max_depth": 1,
+        "active_node_count": 1,
+    }
+    assert payload["progress"]["current_phase"] == "agent_decide"
+    assert payload["progress"]["completed_steps"] > 0
+    assert payload["progress"]["total_steps"] >= 7
+    assert payload["progress"]["percent"] > 0
+    assert payload["progress"]["status_label"] == "Agent 决策中"
+    assert payload["decision_history"] == [
+        {
+            "decision_type": "expand_frontier",
+            "validated": True,
+            "model_name": "gpt-5",
+            "node_id": str(child_node.node_id),
+        }
+    ]
+
+
+def test_get_cve_run_detail_keeps_legacy_progress_contract_for_fast_first_run(
+    client, db_session
+) -> None:
+    run = create_cve_run(db_session, cve_id="CVE-2024-3094")
+    run.status = "succeeded"
+    run.phase = "finalize_run"
+    run.stop_reason = "patches_downloaded"
+    run.summary_json = {"patch_found": True, "patch_count": 1}
+    db_session.commit()
+
+    response = client.get(f"/api/v1/cve/runs/{run.run_id}")
+
+    assert response.status_code == 200
+    progress = response.json()["data"]["progress"]
+    assert progress["current_phase"] == "finalize_run"
+    assert progress["completed_steps"] == 6
+    assert progress["total_steps"] == 6
 
 
 def test_get_patch_content_returns_diff_text_for_downloaded_patch(
@@ -408,12 +517,18 @@ def test_get_cve_run_failed_detail_uses_failed_phase_for_progress(client, db_ses
     response = client.get(f"/api/v1/cve/runs/{run.run_id}")
 
     assert response.status_code == 200
-    assert response.json()["data"]["progress"] == {
-        "current_phase": "fetch_page",
-        "completed_steps": 2,
-        "total_steps": 6,
-        "terminal": True,
-    }
+    progress = response.json()["data"]["progress"]
+    assert progress["current_phase"] == "fetch_page"
+    assert progress["completed_steps"] == 2
+    assert progress["total_steps"] == 6
+    assert progress["terminal"] is True
+    assert progress["percent"] == 40
+    assert progress["status_label"] == "已失败"
+    assert progress["latest_signal"] == "运行在抓取页面阶段失败。"
+    assert progress["visited_trace_count"] == 0
+    assert progress["downloaded_patch_count"] == 0
+    assert progress["failed_trace_count"] == 0
+    assert progress["active_url"] is None
 
 
 def test_get_cve_run_detail_returns_llm_fallback_summary_fields(client, db_session) -> None:

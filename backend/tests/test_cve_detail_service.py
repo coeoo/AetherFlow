@@ -1,6 +1,11 @@
 from pathlib import Path
 
 from app.cve.detail_service import get_cve_run_detail
+from app.cve.search_graph_service import (
+    record_search_decision,
+    record_search_edge,
+    record_search_node,
+)
 from app.cve.service import create_cve_run
 from app.models import Artifact, CVEPatchArtifact
 
@@ -245,5 +250,101 @@ def test_get_cve_run_detail_merges_distinct_evidence_sources_within_same_family(
                     "order": 1,
                 },
             ],
+        }
+    ]
+
+
+def test_get_cve_run_detail_returns_search_graph_and_decision_history(db_session) -> None:
+    run = create_cve_run(db_session, cve_id="CVE-2024-3094")
+    run.status = "running"
+    run.phase = "agent_decide"
+    db_session.flush()
+
+    root_node = record_search_node(
+        db_session,
+        run_id=run.run_id,
+        url="https://security-tracker.debian.org/tracker/CVE-2024-3094",
+        depth=0,
+        host="security-tracker.debian.org",
+        page_role="frontier_page",
+        fetch_status="queued",
+        heuristic_features={"frontier_score": 10},
+        flush=True,
+    )
+    child_node = record_search_node(
+        db_session,
+        run_id=run.run_id,
+        url="https://example.com/advisory",
+        depth=1,
+        host="example.com",
+        page_role="bridge_page",
+        fetch_status="fetched",
+        heuristic_features={"frontier_score": 7},
+        flush=True,
+    )
+    record_search_edge(
+        db_session,
+        run_id=run.run_id,
+        from_node_id=root_node.node_id,
+        to_node_id=child_node.node_id,
+        edge_type="follow_link",
+        selected_by="agent",
+        anchor_text="advisory",
+        link_context="link context",
+        flush=True,
+    )
+    record_search_decision(
+        db_session,
+        run_id=run.run_id,
+        node_id=child_node.node_id,
+        decision_type="expand_frontier",
+        input_payload={"frontier_count": 1},
+        output_payload={"selected_urls": ["https://example.com/advisory"]},
+        validated=True,
+        model_name="gpt-5",
+        flush=True,
+    )
+    db_session.commit()
+
+    detail = get_cve_run_detail(db_session, run_id=run.run_id)
+
+    assert detail is not None
+    assert detail["search_graph"]["nodes"] == [
+        {
+            "node_id": str(root_node.node_id),
+            "url": "https://security-tracker.debian.org/tracker/CVE-2024-3094",
+            "depth": 0,
+            "host": "security-tracker.debian.org",
+            "page_role": "frontier_page",
+            "fetch_status": "queued",
+        },
+        {
+            "node_id": str(child_node.node_id),
+            "url": "https://example.com/advisory",
+            "depth": 1,
+            "host": "example.com",
+            "page_role": "bridge_page",
+            "fetch_status": "fetched",
+        },
+    ]
+    assert detail["search_graph"]["edges"] == [
+        {
+            "from_node_id": str(root_node.node_id),
+            "to_node_id": str(child_node.node_id),
+            "edge_type": "follow_link",
+            "selected_by": "agent",
+        }
+    ]
+    assert detail["frontier_status"] == {
+        "total_nodes": 2,
+        "max_depth": 1,
+        "active_node_count": 1,
+    }
+    assert detail["decision_history"] == [
+        {
+            "decision_type": "expand_frontier",
+            "validated": True,
+            "model_name": "gpt-5",
+            "node_id": str(child_node.node_id),
         }
     ]
