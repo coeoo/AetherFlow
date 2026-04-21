@@ -1316,7 +1316,7 @@ def download_and_validate_node(state: AgentState) -> AgentState:
             except KeyError:
                 pass
         for remaining_chain in tracker.get_active_chains():
-            remaining_id = str(remaining_chain.get("chain_id") or "")
+            remaining_id = remaining_chain.chain_id
             if remaining_id and remaining_id != current_chain_id:
                 try:
                     tracker.complete_chain(remaining_id)
