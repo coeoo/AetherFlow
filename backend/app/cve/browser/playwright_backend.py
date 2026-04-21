@@ -99,6 +99,10 @@ _A11Y_FALLBACK_SCRIPT = """
   return walk(document.body);
 }
 """
+_RETRYABLE_PAGE_ERRORS = (
+    "Execution context was destroyed",
+    "Target page, context or browser has been closed",
+)
 
 
 class PlaywrightPool:
@@ -201,9 +205,18 @@ class PlaywrightBackend(BrowserBackend):
                 except PlaywrightTimeoutError:
                     # 规格要求页面超时时仍尽量用当前已加载内容构建快照。
                     response = None
-                raw_accessibility = await _capture_accessibility_snapshot(page)
+                raw_accessibility = await _capture_page_artifact_with_retry(
+                    page,
+                    loader=_capture_accessibility_snapshot,
+                )
                 raw_html = await page.content()
-                links = await _extract_page_links(page, base_url=page.url or url)
+                links = await _capture_page_artifact_with_retry(
+                    page,
+                    loader=lambda current_page: _extract_page_links(
+                        current_page,
+                        base_url=current_page.url or url,
+                    ),
+                )
                 title = await page.title()
                 final_url = page.url or url
             finally:
@@ -291,3 +304,17 @@ def _normalize_domain(url: str) -> str:
 
 def _normalize_text(value: object) -> str:
     return " ".join(str(value or "").split()).strip()
+
+
+async def _capture_page_artifact_with_retry(page: Page, *, loader):
+    try:
+        return await loader(page)
+    except Exception as exc:
+        if not _is_retryable_page_error(exc):
+            raise
+    return await loader(page)
+
+
+def _is_retryable_page_error(exc: Exception) -> bool:
+    message = str(exc)
+    return any(marker in message for marker in _RETRYABLE_PAGE_ERRORS)

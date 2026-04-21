@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from concurrent.futures import Future
 from threading import Event
 from threading import Thread
@@ -12,6 +13,7 @@ from app.cve.browser.base import BrowserPageSnapshot
 
 
 _T = TypeVar("_T")
+_logger = logging.getLogger(__name__)
 
 
 class SyncBrowserBridge:
@@ -53,12 +55,14 @@ class SyncBrowserBridge:
             return
 
         try:
-            self._submit(self._backend.stop())
+            self._submit(self._backend.stop(), timeout_seconds=10.0)
+        except Exception:
+            _logger.warning("浏览器后端 stop 超时或失败，继续关闭事件循环", exc_info=True)
         finally:
             self._loop = None
             self._thread = None
             loop.call_soon_threadsafe(loop.stop)
-            thread.join(timeout=10)
+            thread.join(timeout=5)
 
     def _run_event_loop(self) -> None:
         loop = asyncio.new_event_loop()

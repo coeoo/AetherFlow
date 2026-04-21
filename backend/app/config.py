@@ -49,6 +49,7 @@ class Settings:
     llm_api_key: str = ""
     llm_default_model: str = ""
     llm_timeout_seconds: int = 20
+    llm_retry_attempts: int = 2
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "artifact_root", _resolve_artifact_root(self.artifact_root))
@@ -102,4 +103,5 @@ def load_settings() -> Settings:
         llm_api_key=os.getenv("LLM_API_KEY", "").strip(),
         llm_default_model=os.getenv("LLM_DEFAULT_MODEL", "").strip(),
         llm_timeout_seconds=_load_int_setting("LLM_TIMEOUT_SECONDS", 20),
+        llm_retry_attempts=_load_int_setting("LLM_RETRY_ATTEMPTS", 2),
     )

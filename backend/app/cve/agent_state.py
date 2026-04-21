@@ -83,6 +83,7 @@ class AgentState(TypedDict, total=False):
     next_action: str | None
     patches: list[dict[str, object]]
     stop_reason: str | None
+    _llm_decision_log: list[dict[str, object]]
 
 
 def build_initial_agent_state(*, run_id: str, cve_id: str) -> AgentState:
@@ -110,4 +111,5 @@ def build_initial_agent_state(*, run_id: str, cve_id: str) -> AgentState:
         "next_action": None,
         "patches": [],
         "stop_reason": None,
+        "_llm_decision_log": [],
     }

@@ -7,6 +7,10 @@ from http.server import BaseHTTPRequestHandler
 from http.server import ThreadingHTTPServer
 from threading import Thread
 
+import pytest
+import httpx
+
+from app.cve.agent_state import build_initial_agent_state
 from app.cve.browser.base import BrowserPageSnapshot
 from app.cve.browser.base import PageLink
 from app.cve.browser_agent_llm import MAX_KEY_LINKS
@@ -123,6 +127,12 @@ def test_build_navigation_context_includes_chain_and_browser_state() -> None:
     assert context.discovered_candidates[0]["candidate_url"] == "https://example.com/fix.patch"
     assert "nvd.nist.gov" in context.visited_domains
     assert context.navigation_path[0].startswith("advisory_page:")
+
+
+def test_build_initial_agent_state_initializes_llm_decision_log() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2022-2509")
+
+    assert state["_llm_decision_log"] == []
 
 
 class _LLMHandler(BaseHTTPRequestHandler):
@@ -243,6 +253,103 @@ def test_call_browser_agent_navigation_sends_a11y_tree_and_chain_context(monkeyp
     assert serialized_context["current_page"]["accessibility_tree_summary"].startswith("heading")
     assert serialized_context["active_chains"][0]["chain_id"] == "chain-1"
     assert serialized_context["navigation_path"][0].startswith("advisory_page:")
+
+
+def test_call_browser_agent_navigation_appends_acceptance_log(monkeypatch) -> None:
+    state = build_initial_agent_state(run_id="run-2", cve_id="CVE-2022-2509")
+    state["page_role_history"] = [
+        {
+            "url": "https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+            "role": "advisory_page",
+        },
+        {
+            "url": "https://security-tracker.debian.org/tracker/CVE-2022-2509",
+            "role": "tracker_page",
+        },
+    ]
+    page_view = build_llm_page_view(
+        BrowserPageSnapshot(
+            url="https://security-tracker.debian.org/tracker/CVE-2022-2509",
+            final_url="https://security-tracker.debian.org/tracker/CVE-2022-2509",
+            status_code=200,
+            title="CVE-2022-2509",
+            raw_html="<html></html>",
+            accessibility_tree='heading "CVE-2022-2509"\n  link "upstream fix"',
+            markdown_content="tracker summary",
+            links=[
+                PageLink(
+                    url="https://gitlab.com/org/proj/-/commit/abc1234",
+                    text="upstream fix",
+                    context="Fixed upstream in commit abc1234",
+                    is_cross_domain=True,
+                    estimated_target_role="commit_page",
+                )
+            ],
+            page_role_hint="tracker_page",
+            fetch_duration_ms=10,
+        ),
+        candidates=[],
+    )
+    context = build_navigation_context(state, page_view)
+
+    with _serve_llm_response() as base_url:
+        monkeypatch.setenv("LLM_BASE_URL", base_url)
+        monkeypatch.setenv("LLM_API_KEY", "demo-key")
+        monkeypatch.setenv("LLM_DEFAULT_MODEL", "qwen3.6-plus")
+
+        decision = call_browser_agent_navigation(context)
+
+    assert decision["action"] == "expand_frontier"
+    assert len(state["_llm_decision_log"]) == 1
+    log_entry = state["_llm_decision_log"][0]
+    assert log_entry["cve_id"] == "CVE-2022-2509"
+    assert log_entry["step_index"] == 1
+    assert log_entry["page_role"] == "tracker_page"
+    assert log_entry["selected_urls"] == ["https://gitlab.com/org/proj/-/commit/abc1234"]
+    assert log_entry["cross_domain"] is True
+    assert log_entry["latency_ms"] >= 0
+
+
+def test_call_browser_agent_navigation_retries_and_logs_timeout_failure(monkeypatch) -> None:
+    state = build_initial_agent_state(run_id="run-timeout", cve_id="CVE-2024-3094")
+    page_view = build_llm_page_view(
+        BrowserPageSnapshot(
+            url="https://www.openwall.com/lists/oss-security/2024/03/29/4",
+            final_url="https://www.openwall.com/lists/oss-security/2024/03/29/4",
+            status_code=200,
+            title="xz backdoor",
+            raw_html="<html></html>",
+            accessibility_tree='heading "xz backdoor"',
+            markdown_content="oss-security summary",
+            links=[],
+            page_role_hint="mailing_list_page",
+            fetch_duration_ms=10,
+        ),
+        candidates=[],
+    )
+    context = build_navigation_context(state, page_view)
+    attempts = {"count": 0}
+
+    def _raise_timeout(*args, **kwargs):
+        attempts["count"] += 1
+        raise httpx.ReadTimeout("The read operation timed out")
+
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.com")
+    monkeypatch.setenv("LLM_API_KEY", "demo-key")
+    monkeypatch.setenv("LLM_DEFAULT_MODEL", "qwen3.6-plus")
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "20")
+    monkeypatch.setattr("app.cve.browser_agent_llm.http_client.post", _raise_timeout)
+
+    with pytest.raises(httpx.ReadTimeout):
+        call_browser_agent_navigation(context)
+
+    assert attempts["count"] == 2
+    assert len(state["_llm_decision_log"]) == 1
+    log_entry = state["_llm_decision_log"][0]
+    assert log_entry["action"] == "llm_call_failed"
+    assert log_entry["error_type"] == "ReadTimeout"
+    assert log_entry["selected_urls"] == []
+    assert log_entry["latency_ms"] >= 0
 
 
 def test_call_browser_agent_navigation_raises_when_llm_response_missing_required_fields(monkeypatch) -> None:

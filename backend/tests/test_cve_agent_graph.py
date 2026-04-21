@@ -7,6 +7,8 @@ import app.cve.agent_graph as agent_graph_module
 from app.cve.agent_graph import build_cve_patch_graph
 from app.cve.agent_state import build_initial_agent_state
 from app.cve.agent_nodes import (
+    _filter_frontier_links,
+    _select_fallback_frontier_urls,
     agent_decide_node,
     build_initial_frontier_node,
     download_and_validate_node,
@@ -377,6 +379,132 @@ def test_fetch_next_batch_node_honors_selected_frontier_urls(
     assert expanded_urls == ["https://example.com/frontier-b"]
 
 
+def test_fetch_next_batch_node_prefers_meaningful_page_as_current_page_when_nvd_shell_is_present(
+    seeded_cve_run, db_session
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id="CVE-2022-2509",
+    )
+    state["session"] = db_session
+    state["budget"]["max_parallel_frontier"] = 2
+    state["_browser_bridge"] = _FakeBridge(
+        {
+            "https://nvd.nist.gov/vuln/detail/CVE-2022-2509": BrowserPageSnapshot(
+                url="https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+                final_url="https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+                status_code=200,
+                title="NVD - CVE-2022-2509",
+                raw_html="<html><body><h1>You are viewing this page in an unauthorized frame window.</h1></body></html>",
+                accessibility_tree='heading "You are viewing this page in an unauthorized frame window."',
+                markdown_content=(
+                    "# You are viewing this page in an unauthorized frame window.\n"
+                    "This site requires JavaScript to be enabled for complete site functionality."
+                ),
+                links=[
+                    PageLink(
+                        url="https://nvd.nist.gov/",
+                        text="https://nvd.nist.gov",
+                        context="redirected to https://nvd.nist.gov",
+                        is_cross_domain=False,
+                        estimated_target_role="advisory_page",
+                    )
+                ],
+                page_role_hint="advisory_page",
+                fetch_duration_ms=300,
+            ),
+            "https://lists.debian.org/debian-lts-announce/2022/08/msg00002.html": _make_snapshot(
+                "https://lists.debian.org/debian-lts-announce/2022/08/msg00002.html",
+                page_role_hint="mailing_list_page",
+                title="[SECURITY] [DLA 3070-1] gnutls28 security update",
+                links=[
+                    PageLink(
+                        url="https://security-tracker.debian.org/tracker/gnutls28",
+                        text="tracker",
+                        context="follow tracker",
+                        is_cross_domain=True,
+                        estimated_target_role="tracker_page",
+                    )
+                ],
+            ),
+        }
+    )
+    state["frontier"] = [
+        {
+            "url": "https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+            "depth": 0,
+            "score": 10,
+            "expanded": False,
+            "page_role": "advisory_page",
+        },
+        {
+            "url": "https://lists.debian.org/debian-lts-announce/2022/08/msg00002.html",
+            "depth": 0,
+            "score": 14,
+            "expanded": False,
+            "page_role": "mailing_list_page",
+        },
+    ]
+
+    result = fetch_next_batch_node(state)
+
+    assert (
+        result["current_page_url"]
+        == "https://lists.debian.org/debian-lts-announce/2022/08/msg00002.html"
+    )
+
+
+def test_fetch_next_batch_node_leaves_current_page_empty_when_only_blocked_shell_page_is_fetched(
+    seeded_cve_run, db_session
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id="CVE-2022-2509",
+    )
+    state["session"] = db_session
+    state["budget"]["max_parallel_frontier"] = 1
+    state["_browser_bridge"] = _FakeBridge(
+        {
+            "https://nvd.nist.gov/vuln/detail/CVE-2022-2509": BrowserPageSnapshot(
+                url="https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+                final_url="https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+                status_code=200,
+                title="NVD - CVE-2022-2509",
+                raw_html="<html><body><h1>You are viewing this page in an unauthorized frame window.</h1></body></html>",
+                accessibility_tree='heading "You are viewing this page in an unauthorized frame window."',
+                markdown_content=(
+                    "# You are viewing this page in an unauthorized frame window.\n"
+                    "This site requires JavaScript to be enabled for complete site functionality."
+                ),
+                links=[
+                    PageLink(
+                        url="https://nvd.nist.gov/",
+                        text="https://nvd.nist.gov",
+                        context="redirected to https://nvd.nist.gov",
+                        is_cross_domain=False,
+                        estimated_target_role="advisory_page",
+                    )
+                ],
+                page_role_hint="advisory_page",
+                fetch_duration_ms=300,
+            )
+        }
+    )
+    state["frontier"] = [
+        {
+            "url": "https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+            "depth": 0,
+            "score": 10,
+            "expanded": False,
+            "page_role": "advisory_page",
+        }
+    ]
+
+    result = fetch_next_batch_node(state)
+
+    assert result["current_page_url"] is None
+
+
 def test_patch_agent_graph_routes_expand_frontier_back_to_fetch_batch(monkeypatch) -> None:
     call_log: list[str] = []
     decide_call_count = 0
@@ -739,6 +867,125 @@ def test_agent_decide_node_invalid_duplicate_llm_result_uses_filtered_fallback(
     assert result["decision_history"][-1]["validated"] is True
 
 
+def test_agent_decide_node_rule_fallback_skips_site_navigation_noise(
+    seeded_cve_run, db_session
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["current_page_url"] = "https://nvd.nist.gov/vuln/detail/CVE-2022-2509"
+    state["page_observations"] = {
+        "https://nvd.nist.gov/vuln/detail/CVE-2022-2509": {
+            "url": "https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+            "depth": 0,
+            "fetch_status": "fetched",
+            "extracted_links": [
+                "https://nvd.nist.gov/general",
+                "https://security-tracker.debian.org/tracker/CVE-2022-2509",
+                "https://github.com/login?return_to=/advisories/GHSA",
+            ],
+            "candidates": [],
+            "extracted": True,
+        }
+    }
+    state["browser_snapshots"] = {
+        "https://nvd.nist.gov/vuln/detail/CVE-2022-2509": {
+            "url": "https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+            "final_url": "https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+            "status_code": 200,
+            "title": "NVD",
+            "raw_html": "<html></html>",
+            "accessibility_tree": "heading",
+            "markdown_content": "summary",
+            "links": [
+                {
+                    "url": "https://nvd.nist.gov/general",
+                    "text": "General",
+                    "context": "site navigation",
+                    "is_cross_domain": False,
+                    "estimated_target_role": "advisory_page",
+                },
+                {
+                    "url": "https://security-tracker.debian.org/tracker/CVE-2022-2509",
+                    "text": "Debian tracker",
+                    "context": "vendor references",
+                    "is_cross_domain": True,
+                    "estimated_target_role": "tracker_page",
+                },
+                {
+                    "url": "https://github.com/login?return_to=/advisories/GHSA",
+                    "text": "Sign in",
+                    "context": "github navigation",
+                    "is_cross_domain": True,
+                    "estimated_target_role": "unknown_page",
+                },
+            ],
+        }
+    }
+    state["frontier"] = [
+        {"url": "https://nvd.nist.gov/general", "depth": 1, "score": 1, "expanded": False},
+        {
+            "url": "https://security-tracker.debian.org/tracker/CVE-2022-2509",
+            "depth": 1,
+            "score": 30,
+            "expanded": False,
+        },
+        {
+            "url": "https://github.com/login?return_to=/advisories/GHSA",
+            "depth": 1,
+            "score": 0,
+            "expanded": False,
+        },
+    ]
+
+    result = agent_decide_node(state)
+
+    assert result["next_action"] == "expand_frontier"
+    assert result["selected_frontier_urls"] == [
+        "https://security-tracker.debian.org/tracker/CVE-2022-2509"
+    ]
+
+
+def test_agent_decide_node_rule_fallback_drops_login_and_general_pages(
+    seeded_cve_run, db_session
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["current_page_url"] = "https://github.com/advisories/GHSA-w33j-4mrg-pgc3"
+    state["frontier"] = [
+        {
+            "url": "https://github.com/login?return_to=/advisories/GHSA-w33j-4mrg-pgc3",
+            "depth": 1,
+            "score": 20,
+            "expanded": False,
+        },
+        {
+            "url": "https://nvd.nist.gov/general",
+            "depth": 1,
+            "score": 19,
+            "expanded": False,
+        },
+        {
+            "url": "https://www.debian.org/security/2022/dsa-5203",
+            "depth": 1,
+            "score": 18,
+            "expanded": False,
+        },
+    ]
+
+    result = agent_decide_node(state)
+
+    assert result["next_action"] == "expand_frontier"
+    assert result["selected_frontier_urls"] == [
+        "https://www.debian.org/security/2022/dsa-5203"
+    ]
+
+
 def test_agent_decide_node_overrides_needs_human_review_when_expandable_frontier_exists(
     seeded_cve_run, db_session, monkeypatch
 ) -> None:
@@ -804,6 +1051,529 @@ def test_agent_decide_node_overrides_needs_human_review_when_expandable_frontier
         "https://security-tracker.debian.org/tracker/gnutls28"
     ]
     assert result["decision_history"][-1]["decision_type"] == "expand_frontier"
+
+
+def test_filter_frontier_links_skips_mailing_list_navigation_noise_and_keeps_high_value_targets() -> None:
+    links = [
+        PageLink(
+            url="https://lists.debian.org/debian-lts-announce/prev-date.html",
+            text="Date Prev",
+            context="mail archive navigation",
+            is_cross_domain=False,
+            estimated_target_role="mailing_list_page",
+        ),
+        PageLink(
+            url="https://lists.debian.org/debian-lts-announce/next-date.html",
+            text="Date Next",
+            context="mail archive navigation",
+            is_cross_domain=False,
+            estimated_target_role="mailing_list_page",
+        ),
+        PageLink(
+            url="https://lists.debian.org/debian-lts-announce/2022/08/thrd2.html",
+            text="Thread Next",
+            context="mail archive navigation",
+            is_cross_domain=False,
+            estimated_target_role="mailing_list_page",
+        ),
+        PageLink(
+            url="https://lists.debian.org/debian-lts-announce/maillist.html",
+            text="Date Index",
+            context="mail archive navigation",
+            is_cross_domain=False,
+            estimated_target_role="mailing_list_page",
+        ),
+        PageLink(
+            url="https://security-tracker.debian.org/tracker/CVE-2022-2509",
+            text="Debian security tracker",
+            context="follow tracker",
+            is_cross_domain=True,
+            estimated_target_role="tracker_page",
+        ),
+        PageLink(
+            url="https://salsa.debian.org/gnutls-team/gnutls/-/commit/abcdef1234567890",
+            text="upstream fix commit",
+            context="commit reference",
+            is_cross_domain=True,
+            estimated_target_role="commit_page",
+        ),
+    ]
+
+    filtered_links = _filter_frontier_links("mailing_list_page", links)
+
+    assert [link.url for link in filtered_links] == [
+        "https://security-tracker.debian.org/tracker/CVE-2022-2509",
+        "https://salsa.debian.org/gnutls-team/gnutls/-/commit/abcdef1234567890",
+    ]
+
+
+def test_extract_links_and_candidates_node_filters_mailing_list_noise_before_frontier_slice(
+    seeded_cve_run, db_session, monkeypatch
+) -> None:
+    root_node = CVESearchNode(
+        run_id=seeded_cve_run.run_id,
+        url="https://lists.debian.org/debian-lts-announce/2022/08/msg00002.html",
+        depth=0,
+        host="lists.debian.org",
+        page_role="mailing_list_page",
+        fetch_status="fetched",
+    )
+    db_session.add(root_node)
+    db_session.flush()
+
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id="CVE-2022-2509",
+    )
+    state["session"] = db_session
+    state["budget"]["max_children_per_node"] = 2
+    state["page_nodes"] = [
+        {
+            "node_id": str(root_node.node_id),
+            "url": root_node.url,
+            "depth": root_node.depth,
+            "host": root_node.host,
+            "fetch_status": root_node.fetch_status,
+            "page_role": root_node.page_role,
+        }
+    ]
+    state["page_observations"] = {
+        root_node.url: {
+            "source_node_id": str(root_node.node_id),
+            "chain_id": None,
+            "url": root_node.url,
+            "depth": 0,
+            "fetch_status": "fetched",
+            "content": "<html></html>",
+            "content_type": "text/html",
+            "extracted_links": [],
+            "candidates": [],
+            "extracted": False,
+        }
+    }
+    state["browser_snapshots"] = {
+        root_node.url: asdict(
+            _make_snapshot(
+                root_node.url,
+                page_role_hint="mailing_list_page",
+                links=[
+                    PageLink(
+                        url="https://lists.debian.org/debian-lts-announce/prev-date.html",
+                        text="Date Prev",
+                        context="mail archive navigation",
+                        is_cross_domain=False,
+                        estimated_target_role="mailing_list_page",
+                    ),
+                    PageLink(
+                        url="https://lists.debian.org/debian-lts-announce/next-date.html",
+                        text="Date Next",
+                        context="mail archive navigation",
+                        is_cross_domain=False,
+                        estimated_target_role="mailing_list_page",
+                    ),
+                    PageLink(
+                        url="https://lists.debian.org/debian-lts-announce/2022/08/thrd1.html",
+                        text="Thread Prev",
+                        context="mail archive navigation",
+                        is_cross_domain=False,
+                        estimated_target_role="mailing_list_page",
+                    ),
+                    PageLink(
+                        url="https://lists.debian.org/debian-lts-announce/2022/08/thrd2.html",
+                        text="Thread Next",
+                        context="mail archive navigation",
+                        is_cross_domain=False,
+                        estimated_target_role="mailing_list_page",
+                    ),
+                    PageLink(
+                        url="https://lists.debian.org/debian-lts-announce/maillist.html",
+                        text="Date Index",
+                        context="mail archive navigation",
+                        is_cross_domain=False,
+                        estimated_target_role="mailing_list_page",
+                    ),
+                    PageLink(
+                        url="https://security-tracker.debian.org/tracker/CVE-2022-2509",
+                        text="Debian security tracker",
+                        context="follow tracker",
+                        is_cross_domain=True,
+                        estimated_target_role="tracker_page",
+                    ),
+                    PageLink(
+                        url="https://salsa.debian.org/gnutls-team/gnutls/-/commit/abcdef1234567890",
+                        text="upstream fix commit",
+                        context="commit reference",
+                        is_cross_domain=True,
+                        estimated_target_role="commit_page",
+                    ),
+                ],
+            )
+        )
+    }
+    monkeypatch.setattr("app.cve.agent_nodes.analyze_page", lambda snapshot: [])
+
+    result = extract_links_and_candidates_node(state)
+    db_session.commit()
+
+    frontier_urls = [item["url"] for item in result["frontier"]]
+    assert frontier_urls == ["https://security-tracker.debian.org/tracker/CVE-2022-2509"]
+    assert [candidate["candidate_url"] for candidate in result["direct_candidates"]] == [
+        "https://salsa.debian.org/gnutls-team/gnutls/-/commit/abcdef1234567890.patch"
+    ]
+
+
+def test_extract_links_and_candidates_node_prioritizes_tracker_link_over_mailing_list_metadata_noise(
+    seeded_cve_run, db_session, monkeypatch
+) -> None:
+    root_url = "https://lists.debian.org/debian-security-announce/2022/msg00172.html"
+    root_node = CVESearchNode(
+        run_id=seeded_cve_run.run_id,
+        url=root_url,
+        depth=0,
+        host="lists.debian.org",
+        page_role="mailing_list_page",
+        fetch_status="fetched",
+    )
+    db_session.add(root_node)
+    db_session.flush()
+
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id="CVE-2022-2509",
+    )
+    state["session"] = db_session
+    state["budget"]["max_children_per_node"] = 3
+    state["page_nodes"] = [
+        {
+            "node_id": str(root_node.node_id),
+            "url": root_node.url,
+            "depth": root_node.depth,
+            "host": root_node.host,
+            "fetch_status": root_node.fetch_status,
+            "page_role": root_node.page_role,
+        }
+    ]
+    state["page_observations"] = {
+        root_url: {
+            "source_node_id": str(root_node.node_id),
+            "chain_id": None,
+            "url": root_url,
+            "depth": 0,
+            "fetch_status": "fetched",
+            "content": "<html></html>",
+            "content_type": "text/html",
+            "extracted_links": [],
+            "candidates": [],
+            "extracted": False,
+        }
+    }
+    state["browser_snapshots"] = {
+        root_url: asdict(
+            _make_snapshot(
+                root_url,
+                page_role_hint="mailing_list_page",
+                links=[
+                    PageLink(
+                        url="https://lists.debian.org/debian-security-announce/2022/msg00171.html",
+                        text="Date Prev",
+                        context="[Date Prev][Date Next] [Thread Prev][Thread Next] [Date Index] [Thread Index]",
+                        is_cross_domain=False,
+                        estimated_target_role="mailing_list_page",
+                    ),
+                    PageLink(
+                        url="https://lists.debian.org/debian-security-announce/2022/msg00173.html",
+                        text="Date Next",
+                        context="[Date Prev][Date Next] [Thread Prev][Thread Next] [Date Index] [Thread Index]",
+                        is_cross_domain=False,
+                        estimated_target_role="mailing_list_page",
+                    ),
+                    PageLink(
+                        url="mailto:debian-security-announce%40lists.debian.org",
+                        text="debian-security-announce@lists.debian.org",
+                        context="To: debian-security-announce@lists.debian.org",
+                        is_cross_domain=True,
+                        estimated_target_role="mailing_list_page",
+                    ),
+                    PageLink(
+                        url="mailto:carnil%40debian.org",
+                        text="carnil@debian.org",
+                        context="From: Salvatore Bonaccorso <carnil@debian.org>",
+                        is_cross_domain=True,
+                        estimated_target_role="unknown_page",
+                    ),
+                    PageLink(
+                        url="https://lists.debian.org/msgid-search/E1oL8O9-0004xA-CC@seger.debian.org",
+                        text="[🔎]",
+                        context="Message-id: <[🔎] E1oL8O9-0004xA-CC@seger.debian.org>",
+                        is_cross_domain=False,
+                        estimated_target_role="mailing_list_page",
+                    ),
+                    PageLink(
+                        url=root_url,
+                        text="E1oL8O9-0004xA-CC@seger.debian.org",
+                        context="Message-id: <[🔎] E1oL8O9-0004xA-CC@seger.debian.org>",
+                        is_cross_domain=False,
+                        estimated_target_role="mailing_list_page",
+                    ),
+                    PageLink(
+                        url="https://www.debian.org/security/",
+                        text="https://www.debian.org/security/",
+                        context="Debian Security Advisory",
+                        is_cross_domain=True,
+                        estimated_target_role="tracker_page",
+                    ),
+                    PageLink(
+                        url="https://www.debian.org/security/faq",
+                        text="https://www.debian.org/security/faq",
+                        context="Debian Security FAQ",
+                        is_cross_domain=True,
+                        estimated_target_role="tracker_page",
+                    ),
+                    PageLink(
+                        url="https://security-tracker.debian.org/tracker/gnutls28",
+                        text="https://security-tracker.debian.org/tracker/gnutls28",
+                        context="Debian Security Advisory",
+                        is_cross_domain=True,
+                        estimated_target_role="tracker_page",
+                    ),
+                    PageLink(
+                        url="https://lists.debian.org/debian-security-announce/2022/msg00171.html",
+                        text="[SECURITY] [DSA 5202-1] unzip security update",
+                        context="Prev by Date: [SECURITY] [DSA 5202-1] unzip security update",
+                        is_cross_domain=False,
+                        estimated_target_role="mailing_list_page",
+                    ),
+                    PageLink(
+                        url="https://lists.debian.org/debian-security-announce/2022/msg00173.html",
+                        text="[SECURITY] [DSA 5204-1] gst-plugins-good1.0 security update",
+                        context="Next by Date: [SECURITY] [DSA 5204-1] gst-plugins-good1.0 security update",
+                        is_cross_domain=False,
+                        estimated_target_role="mailing_list_page",
+                    ),
+                ],
+            )
+        )
+    }
+    monkeypatch.setattr("app.cve.agent_nodes.analyze_page", lambda snapshot: [])
+
+    result = extract_links_and_candidates_node(state)
+    db_session.commit()
+
+    frontier_urls = [item["url"] for item in result["frontier"]]
+    assert frontier_urls == ["https://security-tracker.debian.org/tracker/gnutls28"]
+
+
+def test_agent_decide_node_rule_fallback_skips_mailto_and_msgid_noise(
+    seeded_cve_run, db_session, monkeypatch
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id="CVE-2022-2509",
+    )
+    state["session"] = db_session
+    state["current_page_url"] = "https://nvd.nist.gov/vuln/detail/CVE-2022-2509"
+    state["budget"]["max_children_per_node"] = 3
+    state["frontier"] = [
+        {
+            "url": "mailto:debian-security-announce%40lists.debian.org",
+            "depth": 1,
+            "score": 30,
+            "expanded": False,
+            "page_role": "mailing_list_page",
+        },
+        {
+            "url": "https://lists.debian.org/msgid-search/E1oL8O9-0004xA-CC@seger.debian.org",
+            "depth": 1,
+            "score": 29,
+            "expanded": False,
+            "page_role": "mailing_list_page",
+        },
+        {
+            "url": "https://www.debian.org/security/",
+            "depth": 1,
+            "score": 28,
+            "expanded": False,
+            "page_role": "tracker_page",
+        },
+        {
+            "url": "https://security-tracker.debian.org/tracker/gnutls28",
+            "depth": 1,
+            "score": 27,
+            "expanded": False,
+            "page_role": "tracker_page",
+        },
+    ]
+    state["page_observations"] = {
+        state["current_page_url"]: {
+            "url": state["current_page_url"],
+            "depth": 0,
+            "fetch_status": "fetched",
+            "extracted_links": [],
+            "candidates": [],
+            "extracted": True,
+        }
+    }
+    state["browser_snapshots"] = {
+        state["current_page_url"]: asdict(_make_snapshot(state["current_page_url"]))
+    }
+
+    monkeypatch.setattr(
+        "app.cve.agent_nodes.call_browser_agent_navigation",
+        lambda navigation_context: {
+            "action": "stop_search",
+            "reason_summary": "页面没有直接 patch。",
+            "selected_urls": [],
+            "selected_candidate_keys": [],
+            "model_name": "fake-llm",
+            "chain_updates": [],
+            "new_chains": [],
+        },
+    )
+
+    result = agent_decide_node(state)
+
+    assert result["next_action"] == "expand_frontier"
+    assert result["selected_frontier_urls"] == [
+        "https://security-tracker.debian.org/tracker/gnutls28"
+    ]
+
+
+def test_select_fallback_frontier_urls_prefers_high_value_cross_domain_over_nvd_same_domain_noise() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2022-2509")
+    state["current_page_url"] = "https://nvd.nist.gov/vuln/detail/CVE-2022-2509"
+    state["budget"]["max_children_per_node"] = 2
+    state["budget"]["max_cross_domain_expansions"] = 2
+    state["frontier"] = [
+        {
+            "url": "https://nvd.nist.gov/vuln/search",
+            "depth": 1,
+            "score": 10,
+            "expanded": False,
+            "page_role": "advisory_page",
+        },
+        {
+            "url": "https://nvd.nist.gov/vuln",
+            "depth": 1,
+            "score": 9,
+            "expanded": False,
+            "page_role": "advisory_page",
+        },
+        {
+            "url": "https://security-tracker.debian.org/tracker/gnutls28",
+            "depth": 1,
+            "score": 30,
+            "expanded": False,
+            "page_role": "tracker_page",
+        },
+    ]
+
+    selected_urls = _select_fallback_frontier_urls(state, state["frontier"])
+
+    assert selected_urls == ["https://security-tracker.debian.org/tracker/gnutls28"]
+
+
+def test_extract_links_and_candidates_node_deduplicates_frontier_links_across_multiple_pages(
+    seeded_cve_run, db_session, monkeypatch
+) -> None:
+    first_node = CVESearchNode(
+        run_id=seeded_cve_run.run_id,
+        url="https://lists.debian.org/debian-lts-announce/2022/08/msg00002.html",
+        depth=0,
+        host="lists.debian.org",
+        page_role="mailing_list_page",
+        fetch_status="fetched",
+    )
+    second_node = CVESearchNode(
+        run_id=seeded_cve_run.run_id,
+        url="https://www.debian.org/security/2022/dsa-5203",
+        depth=0,
+        host="www.debian.org",
+        page_role="mailing_list_page",
+        fetch_status="fetched",
+    )
+    db_session.add_all([first_node, second_node])
+    db_session.flush()
+
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id="CVE-2022-2509",
+    )
+    state["session"] = db_session
+    state["budget"]["max_children_per_node"] = 2
+    state["page_nodes"] = [
+        {
+            "node_id": str(first_node.node_id),
+            "url": first_node.url,
+            "depth": first_node.depth,
+            "host": first_node.host,
+            "fetch_status": first_node.fetch_status,
+            "page_role": first_node.page_role,
+        },
+        {
+            "node_id": str(second_node.node_id),
+            "url": second_node.url,
+            "depth": second_node.depth,
+            "host": second_node.host,
+            "fetch_status": second_node.fetch_status,
+            "page_role": second_node.page_role,
+        },
+    ]
+    state["page_observations"] = {
+        first_node.url: {
+            "source_node_id": str(first_node.node_id),
+            "chain_id": None,
+            "url": first_node.url,
+            "depth": 0,
+            "fetch_status": "fetched",
+            "content": "<html></html>",
+            "content_type": "text/html",
+            "extracted_links": [],
+            "candidates": [],
+            "extracted": False,
+        },
+        second_node.url: {
+            "source_node_id": str(second_node.node_id),
+            "chain_id": None,
+            "url": second_node.url,
+            "depth": 0,
+            "fetch_status": "fetched",
+            "content": "<html></html>",
+            "content_type": "text/html",
+            "extracted_links": [],
+            "candidates": [],
+            "extracted": False,
+        },
+    }
+    tracker_link = PageLink(
+        url="https://security-tracker.debian.org/tracker/gnutls28",
+        text="https://security-tracker.debian.org/tracker/gnutls28",
+        context="Debian Security Advisory",
+        is_cross_domain=True,
+        estimated_target_role="tracker_page",
+    )
+    state["browser_snapshots"] = {
+        first_node.url: asdict(
+            _make_snapshot(
+                first_node.url,
+                page_role_hint="mailing_list_page",
+                links=[tracker_link],
+            )
+        ),
+        second_node.url: asdict(
+            _make_snapshot(
+                second_node.url,
+                page_role_hint="mailing_list_page",
+                links=[tracker_link],
+            )
+        ),
+    }
+    monkeypatch.setattr("app.cve.agent_nodes.analyze_page", lambda snapshot: [])
+
+    result = extract_links_and_candidates_node(state)
+    db_session.commit()
+
+    frontier_urls = [item["url"] for item in result["frontier"]]
+    assert frontier_urls == ["https://security-tracker.debian.org/tracker/gnutls28"]
 
 
 def test_extract_links_and_candidates_node_appends_frontier_edge_and_candidate(

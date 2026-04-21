@@ -38,6 +38,43 @@ from app.models.cve import CVECandidateArtifact, CVEPatchArtifact, CVESearchNode
 
 _logger = logging.getLogger(__name__)
 
+_GLOBAL_NOISE_PATH_FRAGMENTS = (
+    "/login",
+    "/signin",
+    "/signup",
+    "/register",
+    "/msgid-search/",
+    "/general",
+    "/dashboard",
+    "/about",
+    "/contact",
+    "/privacy",
+    "/terms",
+    "/help",
+    "/features/",
+    "/pricing",
+    "/enterprise",
+)
+_MAILING_LIST_NOISE_TEXTS = {
+    "date prev",
+    "date next",
+    "date index",
+    "thread prev",
+    "thread next",
+    "author prev",
+    "author next",
+}
+_MAILING_LIST_NOISE_PATH_FRAGMENTS = (
+    "/maillist.html",
+    "/threads.html",
+    "/subject.html",
+    "/author.html",
+    "/date.html",
+    "/prev-date.html",
+    "/next-date.html",
+    "/thrd",
+)
+
 
 def _require_session(state: AgentState):
     session = state.get("session")
@@ -267,8 +304,13 @@ def _ensure_search_node(session, *, run_id: UUID, frontier_item: dict[str, objec
     return node
 
 
-def _find_frontier_item(state: AgentState, url: str) -> dict[str, object] | None:
-    for item in state.get("frontier", []):
+def _find_frontier_item(
+    state: AgentState,
+    url: str,
+    frontier_items: list[dict[str, object]] | None = None,
+) -> dict[str, object] | None:
+    search_items = frontier_items if frontier_items is not None else list(state.get("frontier", []))
+    for item in search_items:
         if str(item.get("url")) == url:
             return item
     return None
@@ -416,38 +458,153 @@ def _append_page_role_history(state: AgentState, *, url: str, role: str, title: 
     page_role_history.append(entry)
     state["page_role_history"] = page_role_history
 
+
+def _is_navigation_noise_url(url: str) -> bool:
+    normalized = url.lower()
+    parsed = urlparse(normalized)
+    if parsed.scheme in {"mailto", "javascript", "tel"}:
+        return True
+    if normalized in {
+        "https://www.debian.org/security/",
+        "https://www.debian.org/lts/security/",
+        "https://www.debian.org/security/faq",
+    }:
+        return True
+    path = parsed.path or "/"
+    return any(fragment in path for fragment in _GLOBAL_NOISE_PATH_FRAGMENTS)
+
+
+def _is_mailing_list_navigation_noise(link: PageLink) -> bool:
+    normalized_text = " ".join(link.text.lower().split())
+    normalized_context = " ".join(link.context.lower().split())
+    normalized_url = link.url.lower()
+    path = urlparse(normalized_url).path or "/"
+    if normalized_text in _MAILING_LIST_NOISE_TEXTS:
+        return True
+    if "mail archive navigation" in normalized_context:
+        return True
+    if normalized_context.startswith("message-id:"):
+        return True
+    if normalized_context.startswith("to:") or normalized_context.startswith("from:"):
+        return True
+    if normalized_context.startswith("reply-to:") or normalized_context.startswith("mail-followup-to:"):
+        return True
+    if normalized_context.startswith("prev by date:") or normalized_context.startswith("next by date:"):
+        return True
+    if normalized_context.startswith("previous by thread:") or normalized_context.startswith("next by thread:"):
+        return True
+    return any(fragment in path for fragment in _MAILING_LIST_NOISE_PATH_FRAGMENTS)
+
+
+def _is_high_value_frontier_link(link: PageLink) -> bool:
+    target_url = (normalize_frontier_url(link.url) or link.url).lower()
+    target_role = (link.estimated_target_role or classify_page_role(target_url)).strip()
+    if "security-tracker.debian.org/tracker/" in target_url:
+        return True
+    if target_role in {"tracker_page", "commit_page", "download_page"}:
+        if target_url in {
+            "https://www.debian.org/security/",
+            "https://www.debian.org/lts/security/",
+            "https://www.debian.org/security/faq",
+        }:
+            return False
+        return True
+    return any(
+        marker in target_url
+        for marker in (
+            "/commit/",
+            "/merge_requests/",
+            ".patch",
+            ".diff",
+            ".debdiff",
+        )
+    )
+
+
+def _should_skip_frontier_link(source_page_role: str, link: PageLink) -> bool:
+    normalized_url = normalize_frontier_url(link.url)
+    if normalized_url is None:
+        return True
+    if _is_high_value_frontier_link(link):
+        return False
+    if _is_navigation_noise_url(normalized_url):
+        return True
+    if source_page_role == "mailing_list_page" and _is_mailing_list_navigation_noise(link):
+        return True
+    return False
+
+
+def _filter_frontier_links(source_page_role: str, links: list[PageLink]) -> list[PageLink]:
+    filtered_links: list[PageLink] = []
+    seen_urls: set[str] = set()
+    for link in links:
+        normalized_url = normalize_frontier_url(link.url)
+        if normalized_url is None or normalized_url in seen_urls:
+            continue
+        seen_urls.add(normalized_url)
+        if _should_skip_frontier_link(source_page_role, link):
+            continue
+        filtered_links.append(link)
+    return filtered_links
+
+
 def _select_fallback_frontier_urls(
     state: AgentState,
     frontier_items: list[dict[str, object]],
 ) -> list[str]:
     current_page_url = str(state.get("current_page_url") or "").strip()
     current_host = urlparse(current_page_url).hostname or current_page_url
+    current_page_role = classify_page_role(current_page_url) if current_page_url else ""
     visited_urls = {str(url) for url in state.get("visited_urls", [])}
     max_children = int(state["budget"].get("max_children_per_node", 1) or 1)
     remaining_cross_domain_budget = int(
         state["budget"].get("max_cross_domain_expansions", 0) or 0
     )
 
-    same_domain_urls: list[str] = []
-    cross_domain_urls: list[str] = []
+    same_domain_urls: list[tuple[int, str]] = []
+    cross_domain_urls: list[tuple[int, str]] = []
     seen_urls: set[str] = set()
 
     for item in frontier_items:
         url = str(item.get("url") or "").strip()
         if not url or url in seen_urls or url in visited_urls:
             continue
+        synthetic_link = PageLink(
+            url=url,
+            text=str(item.get("anchor_text") or ""),
+            context=str(item.get("link_context") or ""),
+            is_cross_domain=(urlparse(url).hostname or url) != current_host,
+            estimated_target_role=str(item.get("page_role") or ""),
+        )
+        if _should_skip_frontier_link(current_page_role, synthetic_link):
+            continue
         seen_urls.add(url)
         item_host = urlparse(url).hostname or url
+        item_score = int(item.get("score", 0) or 0)
         if current_host and item_host == current_host:
-            same_domain_urls.append(url)
+            same_domain_urls.append((item_score, url))
         else:
-            cross_domain_urls.append(url)
+            cross_domain_urls.append((item_score, url))
 
-    selected_urls = same_domain_urls[:max_children]
+    same_domain_urls.sort(key=lambda item: item[0], reverse=True)
+    cross_domain_urls.sort(key=lambda item: item[0], reverse=True)
+    if cross_domain_urls and (
+        not same_domain_urls or cross_domain_urls[0][0] > same_domain_urls[0][0]
+    ):
+        selected_urls = [
+            url
+            for _, url in cross_domain_urls[: min(max_children, remaining_cross_domain_budget)]
+        ]
+    else:
+        selected_urls = [url for _, url in same_domain_urls[:max_children]]
     remaining_slots = max_children - len(selected_urls)
     if remaining_slots > 0 and remaining_cross_domain_budget > 0:
         selected_urls.extend(
-            cross_domain_urls[: min(remaining_slots, remaining_cross_domain_budget)]
+            [
+                url
+                for _, url in cross_domain_urls[: min(remaining_slots, remaining_cross_domain_budget)]
+                if url not in selected_urls
+            ]
         )
     return selected_urls
 
@@ -563,6 +720,27 @@ def _count_page_roles(state: AgentState) -> dict[str, int]:
             continue
         counts[role] = counts.get(role, 0) + 1
     return counts
+
+
+def _is_blocked_or_empty_page(snapshot: BrowserPageSnapshot) -> bool:
+    normalized_markdown = " ".join(snapshot.markdown_content.lower().split())
+    normalized_html = " ".join(snapshot.raw_html.lower().split())
+    normalized_title = " ".join(snapshot.title.lower().split())
+    if "unauthorized frame window" in normalized_markdown:
+        return True
+    if "unauthorized frame window" in normalized_html:
+        return True
+    if "requires javascript to be enabled" in normalized_markdown:
+        return True
+    if "requires javascript to be enabled" in normalized_html:
+        return True
+    if "checking connection, please wait" in normalized_markdown:
+        return True
+    if "checking connection, please wait" in normalized_html:
+        return True
+    if "i challenge thee" in normalized_title:
+        return True
+    return False
 
 
 def resolve_seeds_node(state: AgentState) -> AgentState:
@@ -693,6 +871,9 @@ def fetch_next_batch_node(state: AgentState) -> AgentState:
     browser_snapshots = dict(state.get("browser_snapshots", {}))
     visited_urls = list(state.get("visited_urls", []))
     run_id = UUID(state["run_id"])
+    preferred_current_page_url: str | None = None
+    preferred_current_node_id: str | None = None
+    preferred_current_chain_id: str | None = None
 
     fetched_count = 0
     for frontier_item in frontier_items:
@@ -727,9 +908,10 @@ def fetch_next_batch_node(state: AgentState) -> AgentState:
                 "chain_id": frontier_item.get("chain_id"),
             }
             page_observations[str(frontier_item["url"])] = observation
-            state["current_page_url"] = str(frontier_item["url"])
-            state["current_node_id"] = str(node.node_id)
-            state["current_chain_id"] = frontier_item.get("chain_id")
+            if not _is_blocked_or_empty_page(snapshot):
+                preferred_current_page_url = str(frontier_item["url"])
+                preferred_current_node_id = str(node.node_id)
+                preferred_current_chain_id = frontier_item.get("chain_id")
             _append_page_role_history(
                 state,
                 url=snapshot.final_url or snapshot.url,
@@ -763,6 +945,9 @@ def fetch_next_batch_node(state: AgentState) -> AgentState:
     state["page_observations"] = page_observations
     state["browser_snapshots"] = browser_snapshots
     state["visited_urls"] = visited_urls
+    state["current_page_url"] = preferred_current_page_url
+    state["current_node_id"] = preferred_current_node_id
+    state["current_chain_id"] = preferred_current_chain_id
     state["selected_frontier_urls"] = []
     return state
 
@@ -826,13 +1011,14 @@ def extract_links_and_candidates_node(state: AgentState) -> AgentState:
         source_node_uuid = UUID(str(source_node_id)) if source_node_id else None
         next_depth = int(observation.get("depth", 0)) + 1
         if next_depth <= int(state["budget"].get("max_depth", 0) or 0):
-            for link in snapshot.links[:max_children_per_node]:
+            filtered_links = _filter_frontier_links(snapshot.page_role_hint, snapshot.links)
+            for link in filtered_links[:max_children_per_node]:
                 normalized_link = normalize_frontier_url(link.url)
                 if normalized_link is None:
                     continue
                 if match_reference_url(normalized_link) is not None:
                     continue
-                frontier_item = _find_frontier_item(state, normalized_link)
+                frontier_item = _find_frontier_item(state, normalized_link, frontier)
                 if frontier_item is None:
                     child_node = record_search_node(
                         session,
@@ -863,7 +1049,11 @@ def extract_links_and_candidates_node(state: AgentState) -> AgentState:
                         run_id=run_id,
                         from_node_id=source_node_uuid,
                         to_node_id=UUID(str(frontier_item["source_node_id"])),
-                        edge_type="follow_link",
+                        edge_type=(
+                            "follow_link_cross_domain"
+                            if link.is_cross_domain
+                            else "follow_link"
+                        ),
                         selected_by="browser",
                         anchor_text=link.text,
                         link_context=link.context,
@@ -988,6 +1178,9 @@ def agent_decide_node(state: AgentState) -> AgentState:
             node_id=UUID(state["current_node_id"]) if state.get("current_node_id") else None,
             decision_type="rule_fallback",
             input_payload={
+                "current_page": asdict(navigation_context.current_page) if raw_snapshot else {},
+                "navigation_path": list(navigation_context.navigation_path) if raw_snapshot else [],
+                "active_chains": list(navigation_context.active_chains) if raw_snapshot else [],
                 "frontier_count": len(state.get("frontier", [])),
                 "direct_candidate_count": len(state.get("direct_candidates", [])),
                 "current_page_url": current_page_url,
@@ -1116,11 +1309,19 @@ def download_and_validate_node(state: AgentState) -> AgentState:
 
     tracker = _load_chain_tracker(state)
     current_chain_id = str(state.get("current_chain_id") or "").strip()
-    if downloaded_count > 0 and current_chain_id:
-        try:
-            tracker.complete_chain(current_chain_id)
-        except KeyError:
-            pass
+    if downloaded_count > 0:
+        if current_chain_id:
+            try:
+                tracker.complete_chain(current_chain_id)
+            except KeyError:
+                pass
+        for remaining_chain in tracker.get_active_chains():
+            remaining_id = str(remaining_chain.get("chain_id") or "")
+            if remaining_id and remaining_id != current_chain_id:
+                try:
+                    tracker.complete_chain(remaining_id)
+                except KeyError:
+                    pass
     _store_chain_tracker(state, tracker)
 
     state["patches"] = patches

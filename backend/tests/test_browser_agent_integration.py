@@ -9,7 +9,7 @@ from app.cve.agent_state import build_initial_agent_state
 from app.cve.browser.base import BrowserPageSnapshot, PageLink
 from app.cve.service import create_cve_run
 from app.models import CVERun
-from app.models.cve import CVEPatchArtifact
+from app.models.cve import CVEPatchArtifact, CVESearchEdge
 
 
 _FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "browser_agent"
@@ -223,6 +223,8 @@ def test_browser_agent_integration_handles_multi_chain_multi_domain_cve_2024_309
         "https://www.openwall.com/lists/oss-security/2024/03/29/4",
         "https://access.redhat.com/security/cve/CVE-2024-3094",
     ]
+    edges = db_session.query(CVESearchEdge).filter(CVESearchEdge.run_id == execution.run.run_id).all()
+    assert any("cross_domain" in edge.edge_type for edge in edges)
     chain_summary = execution.run.summary_json["chain_summary"]
     assert len(chain_summary) == 2
     assert {chain["status"] for chain in chain_summary} == {"dead_end", "completed"}

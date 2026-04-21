@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from time import perf_counter
 from dataclasses import asdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -83,7 +84,7 @@ def build_llm_page_view(snapshot: BrowserPageSnapshot, candidates: list[dict]) -
 def build_navigation_context(state: dict, page_view: LLMPageView) -> NavigationContext:
     """从 AgentState 和页面视图构造完整导航上下文。"""
     visited_urls = [str(url) for url in list(state.get("visited_urls", []))]
-    return NavigationContext(
+    context = NavigationContext(
         cve_id=str(state.get("cve_id", "")),
         budget_remaining=_coerce_budget(state.get("budget")),
         navigation_path=_build_navigation_path(state, page_view),
@@ -97,6 +98,9 @@ def build_navigation_context(state: dict, page_view: LLMPageView) -> NavigationC
         discovered_candidates=[dict(candidate) for candidate in list(state.get("direct_candidates", []))],
         visited_domains=_extract_visited_domains(visited_urls),
     )
+    # 验收日志钩子通过上下文对象携带，不改 LLM 调用函数签名。
+    object.__setattr__(context, "_llm_decision_log", state.get("_llm_decision_log"))
+    return context
 
 
 def call_browser_agent_navigation(context: NavigationContext) -> dict[str, Any]:
@@ -105,28 +109,50 @@ def call_browser_agent_navigation(context: NavigationContext) -> dict[str, Any]:
     if not settings.llm_base_url or not settings.llm_api_key or not settings.llm_default_model:
         raise RuntimeError("missing_provider_config")
 
-    response = http_client.post(
-        f"{settings.llm_base_url.rstrip('/')}/chat/completions",
-        timeout=float(settings.llm_timeout_seconds),
-        headers={
-            "Authorization": f"Bearer {settings.llm_api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": settings.llm_default_model,
-            "response_format": {"type": "json_object"},
-            "messages": [
-                {
-                    "role": "system",
-                    "content": _load_browser_navigation_prompt(),
+    started_at = perf_counter()
+    response = None
+    last_error: Exception | None = None
+    max_attempts = max(1, int(settings.llm_retry_attempts))
+    for attempt_index in range(max_attempts):
+        try:
+            response = http_client.post(
+                f"{settings.llm_base_url.rstrip('/')}/chat/completions",
+                timeout=float(settings.llm_timeout_seconds),
+                headers={
+                    "Authorization": f"Bearer {settings.llm_api_key}",
+                    "Content-Type": "application/json",
                 },
-                {
-                    "role": "user",
-                    "content": json.dumps(asdict(context), ensure_ascii=False),
+                json={
+                    "model": settings.llm_default_model,
+                    "response_format": {"type": "json_object"},
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": _load_browser_navigation_prompt(),
+                        },
+                        {
+                            "role": "user",
+                            "content": json.dumps(asdict(context), ensure_ascii=False),
+                        },
+                    ],
                 },
-            ],
-        },
-    )
+            )
+            break
+        except Exception as exc:
+            last_error = exc
+            if attempt_index + 1 >= max_attempts:
+                _append_llm_failure_log(
+                    context,
+                    error=exc,
+                    model_name=settings.llm_default_model,
+                    latency_ms=int((perf_counter() - started_at) * 1000),
+                )
+                raise
+
+    if response is None:
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("llm_request_failed_without_response")
     response.raise_for_status()
     payload = response.json()
     content = str(payload["choices"][0]["message"]["content"])
@@ -137,6 +163,12 @@ def call_browser_agent_navigation(context: NavigationContext) -> dict[str, Any]:
     if missing_fields:
         raise ValueError(f"browser_agent_navigation 缺少字段: {', '.join(missing_fields)}")
     decision["model_name"] = settings.llm_default_model
+    _append_llm_decision_log(
+        context,
+        decision=decision,
+        model_name=settings.llm_default_model,
+        latency_ms=int((perf_counter() - started_at) * 1000),
+    )
     return decision
 
 
@@ -202,3 +234,72 @@ def _extract_visited_domains(visited_urls: list[str]) -> list[str]:
         seen.add(domain)
         domains.append(domain)
     return domains
+
+
+def _append_llm_decision_log(
+    context: NavigationContext,
+    *,
+    decision: dict[str, Any],
+    model_name: str,
+    latency_ms: int,
+) -> None:
+    raw_log = getattr(context, "_llm_decision_log", None)
+    if not isinstance(raw_log, list):
+        return
+
+    selected_urls = [
+        str(item).strip()
+        for item in list(decision.get("selected_urls", []))
+        if str(item).strip()
+    ]
+    page_domain = urlparse(context.current_page.url).netloc.lower()
+    raw_log.append(
+        {
+            "cve_id": context.cve_id,
+            "step_index": len(raw_log) + 1,
+            "page_url": context.current_page.url,
+            "page_role": context.current_page.page_role,
+            "action": str(decision.get("action", "")),
+            "selected_urls": selected_urls,
+            "selected_candidate_keys": [
+                str(item)
+                for item in list(decision.get("selected_candidate_keys", []))
+                if str(item).strip()
+            ],
+            "reason_summary": str(decision.get("reason_summary", "")),
+            "cross_domain": any(
+                urlparse(selected_url).netloc.lower() != page_domain
+                for selected_url in selected_urls
+            ),
+            "latency_ms": max(0, latency_ms),
+            "model_name": model_name,
+        }
+    )
+
+
+def _append_llm_failure_log(
+    context: NavigationContext,
+    *,
+    error: Exception,
+    model_name: str,
+    latency_ms: int,
+) -> None:
+    raw_log = getattr(context, "_llm_decision_log", None)
+    if not isinstance(raw_log, list):
+        return
+    raw_log.append(
+        {
+            "cve_id": context.cve_id,
+            "step_index": len(raw_log) + 1,
+            "page_url": context.current_page.url,
+            "page_role": context.current_page.page_role,
+            "action": "llm_call_failed",
+            "selected_urls": [],
+            "selected_candidate_keys": [],
+            "reason_summary": str(error),
+            "cross_domain": False,
+            "latency_ms": max(0, latency_ms),
+            "model_name": model_name,
+            "error_type": type(error).__name__,
+        }
+    )

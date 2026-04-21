@@ -27,7 +27,12 @@ def classify_page_role(url: str) -> str:
     ):
         return "commit_page"
 
-    if host.endswith("security-tracker.debian.org") or "errata" in host or "/tracker/" in path:
+    if (
+        host.endswith("security-tracker.debian.org")
+        or host.endswith("www.debian.org") and path.startswith("/security/")
+        or "errata" in host
+        or "/tracker/" in path
+    ):
         return "tracker_page"
 
     if (
@@ -36,6 +41,7 @@ def classify_page_role(url: str) -> str:
         or "debian-security-announce" in path
         or "debian-lts-announce" in path
         or "lists.debian.org" in host
+        or "lists.gnupg.org" in host and "/pipermail/" in path
     ):
         return "mailing_list_page"
 

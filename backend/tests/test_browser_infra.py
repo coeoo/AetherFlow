@@ -141,6 +141,7 @@ def test_classify_page_role_returns_expected_role() -> None:
         classify_page_role("https://security-tracker.debian.org/tracker/CVE-2022-2509")
         == "tracker_page"
     )
+    assert classify_page_role("https://www.debian.org/security/2022/dsa-5203") == "tracker_page"
     assert classify_page_role("https://nvd.nist.gov/vuln/detail/CVE-2022-2509") == "advisory_page"
     assert classify_page_role("https://github.com/advisories/GHSA-abcd-1234") == "advisory_page"
     assert classify_page_role("https://github.com/user/repo/commit/abc123") == "commit_page"
@@ -148,6 +149,10 @@ def test_classify_page_role_returns_expected_role() -> None:
     assert classify_page_role("https://example.com/file.patch") == "download_page"
     assert (
         classify_page_role("https://www.openwall.com/lists/oss-security/2022/08/01/1")
+        == "mailing_list_page"
+    )
+    assert (
+        classify_page_role("https://lists.gnupg.org/pipermail/gnutls-help/2022-July/004746.html")
         == "mailing_list_page"
     )
 
@@ -221,6 +226,30 @@ def test_sync_browser_bridge_derives_submit_timeout_from_navigation_budget(monke
     bridge.navigate("https://example.com/page", timeout_ms=120_000)
 
     assert captured["timeout_seconds"] == pytest.approx(130.0)
+
+
+def test_sync_browser_bridge_stop_swallows_backend_stop_failure(monkeypatch) -> None:
+    backend = _FakeBrowserBackend()
+    bridge = SyncBrowserBridge(backend)
+    bridge._loop = asyncio.new_event_loop()
+
+    class _FakeThread:
+        def join(self, timeout=None):
+            return None
+
+    captured: dict[str, float] = {}
+
+    def _fake_submit(self, coroutine, *, timeout_seconds: float = 60.0):
+        captured["timeout_seconds"] = timeout_seconds
+        coroutine.close()
+        raise TimeoutError("stop timeout")
+
+    monkeypatch.setattr(SyncBrowserBridge, "_submit", _fake_submit)
+    bridge._thread = _FakeThread()  # type: ignore[assignment]
+
+    bridge.stop()
+
+    assert captured["timeout_seconds"] == pytest.approx(10.0)
 
 
 def test_markdown_extractor_returns_truncated_markdown_text() -> None:
@@ -309,6 +338,78 @@ def test_playwright_backend_timeout_returns_partial_snapshot(monkeypatch) -> Non
     assert snapshot.title == "Partial Title"
     assert "Partial" in snapshot.raw_html
     assert snapshot.links[0].estimated_target_role == "download_page"
+    assert fake_page.closed is True
+
+
+def test_playwright_backend_retries_when_evaluate_context_is_destroyed(monkeypatch) -> None:
+    class _FakePage:
+        def __init__(self) -> None:
+            self.url = "https://www.debian.org/security/2022/dsa-5203"
+            self.closed = False
+
+        async def goto(self, url: str, *, wait_until: str, timeout: int):
+            return None
+
+        async def content(self) -> str:
+            return "<html><body><h1>Debian Security Advisory</h1></body></html>"
+
+        async def title(self) -> str:
+            return "Debian Security Advisory"
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class _FakeContext:
+        def __init__(self, page: _FakePage) -> None:
+            self._page = page
+
+        async def new_page(self) -> _FakePage:
+            return self._page
+
+    fake_page = _FakePage()
+    fake_context = _FakeContext(fake_page)
+
+    @asynccontextmanager
+    async def _fake_acquire():
+        yield fake_context
+
+    backend = PlaywrightBackend(pool_size=1, headless=True)
+    monkeypatch.setattr(backend._pool, "acquire", _fake_acquire)
+
+    call_count = {"a11y": 0, "links": 0}
+
+    async def _fake_capture_accessibility_snapshot(page):
+        call_count["a11y"] += 1
+        if call_count["a11y"] == 1:
+            raise RuntimeError("Execution context was destroyed")
+        return {"role": "heading", "name": "Debian Security Advisory"}
+
+    async def _fake_extract_page_links(page, *, base_url):
+        call_count["links"] += 1
+        return [
+            PageLink(
+                url="https://security-tracker.debian.org/tracker/CVE-2022-2509",
+                text="tracker",
+                context="follow tracker",
+                is_cross_domain=True,
+                estimated_target_role="tracker_page",
+            )
+        ]
+
+    monkeypatch.setattr(
+        "app.cve.browser.playwright_backend._capture_accessibility_snapshot",
+        _fake_capture_accessibility_snapshot,
+    )
+    monkeypatch.setattr(
+        "app.cve.browser.playwright_backend._extract_page_links",
+        _fake_extract_page_links,
+    )
+
+    snapshot = asyncio.run(backend.navigate("https://www.debian.org/security/2022/dsa-5203"))
+
+    assert snapshot.title == "Debian Security Advisory"
+    assert snapshot.links[0].estimated_target_role == "tracker_page"
+    assert call_count["a11y"] == 2
     assert fake_page.closed is True
 
 

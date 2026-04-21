@@ -12,3 +12,29 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  acceptance:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.acceptance
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/aetherflow_dev
+      AETHERFLOW_CVE_BROWSER_HEADLESS: "true"
+      AETHERFLOW_CVE_BROWSER_POOL_SIZE: "2"
+      AETHERFLOW_CVE_BROWSER_CDP_ENDPOINT: ""
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-20}
+      PYTHONPATH: /app/backend
+    volumes:
+      - ../backend:/app/backend
+      - acceptance-results:/app/results
+    working_dir: /app
+    command: ["sleep", "infinity"]
+
+volumes:
+  acceptance-results:

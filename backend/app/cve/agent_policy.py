@@ -107,10 +107,15 @@ def _has_chain_derived_cross_domain_candidates(state) -> bool:
 
 def evaluate_stop_condition(state: dict) -> StopEvaluation:
     """
+    规则0：已有下载成功的 patch → 无条件停止
     规则1：有活跃链路且预算未耗尽 → 不停
     规则2：有候选且所有链路已终止 → 停
     规则3：无活跃链路 + 无 frontier + 无候选 → 停
     """
+    patches = list(state.get("patches") or [])
+    if any(isinstance(p, dict) and p.get("download_status") == "downloaded" for p in patches):
+        return StopEvaluation(should_stop=True, reason="patches_downloaded")
+
     active_chains = _active_chains(state)
     if active_chains and _remaining_page_budget(state) > 0:
         return StopEvaluation(should_stop=False, reason="active_chains_in_progress")
