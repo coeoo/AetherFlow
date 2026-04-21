@@ -1,16 +1,17 @@
-# CVE Patch 多跳 Agent 搜索主链功能设计
+# CVE Patch 浏览器驱动型 Agent 搜索主链功能设计
 
-> **CVE 场景智能体执行内核详细功能设计文档**
+> **CVE 场景浏览器驱动型智能体执行内核详细功能设计文档**
 
 ---
 
 ## 📋 模块概述
 
-**模块名称**：CVE Patch 多跳 Agent 搜索主链  
+**模块名称**：CVE Patch 浏览器驱动型 Agent 搜索主链  
 **模块编号**：M103  
 **优先级**：P0  
 **负责人**：AI + 开发团队  
-**状态**：后端基础能力已落地，主链接线与前端消费待继续推进
+**状态**：Phase 1-4 实现完成，离线集成测试通过（81 passed），待真实网络验收  
+**权威规格**：[2026-04-21-cve-browser-agent-design.md](/opt/projects/demo/aetherflow/docs/superpowers/specs/2026-04-21-cve-browser-agent-design.md)
 
 ---
 
@@ -18,31 +19,34 @@
 
 ### 业务目标
 
-将 CVE 场景的后端主链从“`fast-first` 规则执行器”升级为“`LangGraph` 编排的受控多跳 Patch Agent”。
+将 CVE 场景的后端主链从"`httpx 文本抓取 + 规则打分 + 局部 LLM 策略器`"重设计为"`Playwright 浏览器驱动型 AI Agent`"。
 
-新的主链目标不是继续补强关键词匹配，而是：
+新的主链目标：
 
-- 从多源 seed references 出发
-- 通过多跳页面探索逐步逼近 patch
-- 让模型参与搜索决策，而不是只在失败后做建议层 fallback
+- 用真实浏览器打开页面，获取完整 DOM 和可访问性树
+- 让 LLM 看到页面的结构化语义表示，而非 HTML 截断
+- 通过链路感知的导航决策跨域追踪完整链路（advisory→tracker→commit→patch）
 - 在有限预算内找到可下载、可校验、可复核的 patch 地址
-- 完整保留搜索路径、决策原因、候选收敛和下载验证证据
+- 完整保留搜索路径、链路状态、决策原因、候选收敛和下载验证证据
 
 ### 用户价值
 
-- 用户看到的不只是“命中了哪个 patch”，还能看到系统是如何沿多条来源链逐步找到它的。
-- 对 bridge page、tracker page、bug tracker、code review 页面等复杂链路，系统可以做受控多跳搜索，而不是只依赖显式关键词命中。
-- 即使最终未成功命中 patch，系统也能解释“已经搜索到哪里、为什么停止、还缺什么证据”。
+- 用户可以看到系统是如何沿多条来源链逐步追踪到 patch 的完整链路
+- 跨域链路（如 NVD → Debian tracker → GitLab commit）不再被截断
+- 动态渲染的页面（JS 渲染）可以正确获取内容
+- 即使最终未成功命中 patch，系统也能解释完整的探索路径和停止原因
 
 ### 模块职责
 
-本模块负责定义 CVE Patch Agent 的正式执行内核：
+本模块负责定义 CVE Patch 浏览器 Agent 的执行内核：
 
 - 多源 seed 聚合
-- 初始 frontier 构建
-- 页面抓取与链接提取
-- 页面角色识别
-- Agent 决策
+- 初始 frontier 构建与页面角色分类
+- **浏览器页面导航与快照构建**
+- **可访问性树提取与裁剪**
+- **结构化链接提取与上下文保留**
+- **链路追踪与链路状态管理**
+- **LLM 链路感知导航决策**
 - 候选下载与校验
 - 搜索图落库与证据收敛
 
@@ -52,89 +56,99 @@
 
 ### 场景1：标准 CVE Patch 搜索
 
-**场景描述**：用户输入一个 CVE 编号，系统从官方记录、OSV、GitHub Advisory、NVD 等来源拿到初始 references，并在有限预算内搜索 patch。
+**场景描述**：用户输入一个 CVE 编号，系统从官方记录、OSV、GitHub Advisory、NVD 等来源拿到初始 references，并通过浏览器 Agent 在有限预算内搜索 patch。
 
 **目标能力**：
 
-- 优先利用显式 patch 候选
-- 若没有显式 patch，则进入多跳页面搜索
-- 最终返回 patch 结果或明确的停止原因
+- 优先利用显式 patch 候选（seed 中直接包含 .patch/.diff 链接）
+- 若没有显式 patch，则启动浏览器 Agent 多跳搜索
+- 最终返回 patch 结果或明确的停止原因与探索路径
 
-### 场景2：安全公告到补丁的桥接链路
+### 场景2：跨域链路追踪
 
-**场景描述**：seed 指向的是公告页或 tracker 页，本身不是 patch，需要经过 1 到 4 跳页面探索才能命中 patch。
+**场景描述**：seed 指向的是公告页或 tracker 页，patch 在另一个域上。需要跨域追踪完整链路。
 
-**典型路径**：
+**典型链路**：
 
-- 公告页 → vendor tracker → bug tracker → raw attachment
-- Debian DSA → security tracker → CVE 子页 → GitLab commit patch
-- NVD 详情页 → vendor advisory → merge request → `.patch`
+```
+NVD advisory → Debian security-tracker → GitLab commit → .patch 下载
+NVD advisory → Red Hat errata → Bugzilla → upstream commit
+oss-security 邮件列表 → GitHub commit → .patch 下载
+```
 
-### 场景3：复杂 bridge page + 跨域链路
+**当前系统缺陷**：`navigation.py` 的同域限制阻断了跨域链路。
 
-**场景描述**：页面上存在多个“看起来都可能有价值”的普通链接，系统需要在预算内决定：
+**新系统能力**：LLM 在链路上下文中做跨域导航决策，受跨域预算控制。
 
-- 先扩展哪个
-- 是否允许跨域
-- 哪些节点值得继续深入
-- 哪些节点应当剪枝
+### 场景3：动态页面处理
+
+**场景描述**：部分安全 tracker 和 advisory 页面使用 JavaScript 渲染内容，httpx 无法获取有效信息。
+
+**新系统能力**：Playwright 浏览器执行 JS 后获取完整 DOM 和 a11y 树。
 
 ### 场景4：搜索未收敛但需要解释
 
-**场景描述**：最终没有拿到 patch，但系统必须告诉用户：
+**场景描述**：最终没有拿到 patch，但系统必须向用户展示：
 
-- 已访问了哪些页面
-- 哪些链接被继续扩展
-- 哪些页面被判定为 noise / blocked / bridge
-- 为什么在当前预算下停止
+- 完整的链路追踪记录（每条链路的状态：in_progress / completed / dead_end）
+- 每个页面的角色判定和导航决策原因
+- 预算消耗情况
+- 为什么在当前状态下停止
 
 ---
 
 ## 🔄 业务流程
 
-### 长期目标主流程
+### 主流程
 
 ```mermaid
 flowchart TD
     A["输入 CVE ID"] --> B["resolve_seeds\n多源 seed 聚合"]
-    B --> C["normalize_and_rank_sources\n标准化来源与初始评分"]
-    C --> D["seed_direct_candidate_check\n显式 patch 候选识别"]
-    D --> E["build_initial_frontier\n构建首轮 frontier"]
-    E --> F["fetch_next_batch\n抓取当前 frontier 页面"]
-    F --> G["extract_links_and_candidates\n提取链接、候选和页面特征"]
-    G --> H["agent_decide\n模型做搜索决策"]
-    H -->|expand_frontier| F
-    H -->|try_candidate_download| I["download_and_validate\n下载并校验 patch"]
-    I --> J["evaluate_result\n判断是否继续搜索"]
-    J -->|continue| F
-    J -->|stop| K["finalize_run\n收敛结果与证据"]
-    H -->|need_human_review| K
-    H -->|stop_search| K
+    B --> C["build_initial_frontier\n构建 frontier + 初始化链路"]
+    C --> D["fetch_next_batch\n浏览器导航 + 页面快照"]
+    D --> E["extract_links_and_candidates\na11y 树提取 + 结构化链接 + 候选识别"]
+    E --> F["agent_decide\nLLM 链路感知导航决策"]
+    F -->|expand_frontier| D
+    F -->|try_candidate_download| G["download_and_validate\n下载并校验 patch"]
+    G -->|活跃链路存在| D
+    G -->|所有链路终止| H["finalize_run\n收敛结果与证据"]
+    F -->|stop_search| H
+    F -->|needs_human_review| H
 ```
 
 ### 主流程说明
 
-主流程以图运行时为基础，允许多轮循环决策、frontier 收缩与扩展、候选下载与重新搜索。
+1. **resolve_seeds**：从 CVE 官方记录、OSV、GitHub Advisory、NVD 聚合 seed references（纯 API 调用，无需浏览器）
+2. **build_initial_frontier**：对 seed URL 进行页面角色分类、优先级评分，初始化导航链路
+3. **fetch_next_batch**：使用 **Playwright 浏览器**打开页面，构建 BrowserPageSnapshot（含 a11y 树、结构化链接、markdown）
+4. **extract_links_and_candidates**：从 BrowserPageSnapshot 提取结构化链接（含上下文），运行 page_analyzer + reference_matcher 识别候选
+5. **agent_decide**：LLM 接收 NavigationContext（含链路状态、a11y 树、key_links），输出结构化导航决策
+6. **download_and_validate**：下载候选 patch 并校验内容。**如果仍有活跃链路且预算未尽，路由回 fetch_next_batch 继续探索**
+7. **finalize_run**：收敛结果，生成 summary_json（含链路摘要）
 
 ---
 
 ## 📊 功能清单
 
-| 功能点 | 功能描述 | 优先级 | 状态 |
+| 功能点 | 功能描述 | 优先级 | 阶段 |
 |--------|---------|--------|------|
-| Seed 解析 | 从 `cve_official / osv / github_advisory / nvd` 聚合 seed references，并保留来源级 trace | P0 | 🚧 |
-| 直达候选识别 | 识别 seed 中显式 `.patch/.diff/.debdiff` 与 commit / PR / MR patch 候选 | P0 | 🚧 |
-| 图运行时编排 | 使用 `LangGraph` 管理状态、节点执行、循环与收口 | P0 | ✅ 已落地基础骨架 |
-| Frontier 构建 | 基于来源可信度、页面角色和预算构建初始搜索 frontier | P0 | ✅ 已落地首轮版本 |
-| 页面抓取工具 | 受控 HTTP 抓取页面并落 trace / snapshot | P0 | 🚧 |
-| 链接与候选提取 | 提取链接、显式候选、页面摘要和规则特征 | P0 | 🚧 |
-| 页面角色识别 | 识别 `bridge_page / bug_tracker_page / code_review_page / terminal_patch_page` 等角色 | P0 | 🚧 待接真实页面分析 |
-| Agent 决策 | 模型决定扩展哪些链接、是否跨域、何时停止或进入下载 | P0 | 🚧 已落地状态机分支，待接真实决策输入 |
-| 预算控制 | 限制总页面数、深度、并行 frontier、跨域扩展与下载尝试 | P0 | ✅ 已落默认预算对象，待接运行时消耗 |
-| 候选下载与校验 | 下载 patch、校验内容不是 HTML 且确实像 patch/diff | P0 | 🚧 |
-| 搜索图落库 | 持久化搜索节点、边、决策和候选收敛过程 | P0 | ✅ 已落地后端模型与服务层 |
-| 详情页图回放 | 展示搜索路径、frontier、budget、决策记录 | P1 | 🚧 已接后端详情字段，前端待完整消费 |
-| 人工复核挂点 | 支持在预算耗尽或证据冲突时转人工复核 | P1 | 🚧 待实现 |
+| Seed 解析 | 从多源聚合 seed references，保留来源级 trace | P0 | Phase 1 |
+| 直达候选识别 | 识别 seed 中显式 `.patch/.diff/.debdiff` 与 commit / PR / MR patch 候选 | P0 | Phase 1 |
+| 浏览器基础设施 | BrowserBackend 协议、PlaywrightPool、SyncBrowserBridge | P0 | Phase 1 |
+| 页面角色分类 | URL 启发式分类（advisory / tracker / commit / download 等） | P0 | Phase 1 |
+| a11y 树裁剪 | 从 Playwright 快照提取裁剪后的可访问性树（≤6000 字符） | P0 | Phase 1 |
+| Markdown 提取 | 浏览器内 Readability 提取纯文本 markdown（≤2000 字符） | P0 | Phase 1 |
+| 结构化链接提取 | 从 a11y 树提取带上下文的 PageLink 列表 | P0 | Phase 1 |
+| LLM 导航接口 | 构建 LLMPageView + NavigationContext，调用 LLM 返回结构化决策 | P0 | Phase 2 |
+| 链路追踪 | NavigationChain 创建/扩展/关闭/查询 | P0 | Phase 2 |
+| 导航提示词 | browser_agent_navigation.md 系统提示词 | P0 | Phase 2 |
+| 节点重写 | agent_nodes.py 全部节点使用浏览器 + chain-aware LLM | P0 | Phase 3 |
+| 条件路由 | download_and_validate 后可路由回 fetch（活跃链路时） | P0 | Phase 3 |
+| 链路感知停止 | 基于链路状态的停止评估（替代简单的"无 frontier 则停"） | P0 | Phase 3 |
+| 单路径运行时 | runtime.py 精简为唯一路径，删除 fast-first 与 httpx agent | P0 | Phase 3 |
+| 搜索图落库 | 持久化搜索节点、边、决策和候选收敛（复用现有表） | P0 | Phase 3 |
+| 集成测试 | 5 个真实 CVE 场景端到端验证 | P0 | Phase 4 |
+| 详情页图回放 | 展示链路追踪、frontier、budget、决策记录 | P1 | Phase 4 |
 
 ---
 
@@ -142,10 +156,10 @@ flowchart TD
 
 ### 页面1：无独立页面
 
-本模块是 CVE 场景的后端智能体执行内核，用户通过以下页面间接感知：
+本模块是 CVE 场景的后端浏览器 Agent 执行内核，用户通过以下页面间接感知：
 
 - `M101`：工作台结果和运行状态
-- `M102`：详情页中的搜索路径、patch 收敛与证据图
+- `M102`：详情页中的搜索路径、链路追踪、patch 收敛与证据图
 
 ### 对前端的影响
 
@@ -156,165 +170,98 @@ flowchart TD
 - trace 时间线
 - diff 查看
 
-未来需要新增：
+浏览器 Agent 落地后新增：
 
-- 搜索路径图
-- 当前 frontier 面板
-- Agent 决策记录
+- **链路追踪面板**：每条 NavigationChain 的状态和步骤
+- 搜索路径图（含跨域边标识）
+- 页面角色标签
+- Agent 决策记录（含链路上下文和跨域理由）
 - 预算消耗面板
-- 从 seed 到 patch 的收敛链
 
 ---
 
-## 📌 当前实现快照（2026-04-20）
+## 🏗️ 核心架构
 
-### 已落地范围
+### 浏览器层
 
-- Patch Agent 状态对象、策略对象、节点骨架、LangGraph 图入口已创建
-- 搜索图相关数据库表、Alembic 迁移、服务层写入接口已创建
-- `detail_service` 已返回：
-  - `search_graph`
-  - `frontier_status`
-  - `decision_history`
-- `detail_service` 已正确区分：
-  - legacy `cve_patch_fast_first`
-  - agent `cve_patch_agent_graph`
-- 重复命中的候选已支持 evidence merge
-- `canonical_key` 已从原始 URL 文本提升为归一化键
+```
+BrowserBackend (Protocol)
+    ├── PlaywrightBackend        # Playwright 实现
+    │     └── PlaywrightPool     # BrowserContext 池（默认 3 个）
+    └── (未来) LightpandaBackend # 通过 CDP 端点连接
 
-### 本轮已验证
-
-已通过以下核心回归：
-
-```bash
-TEST_DATABASE_URL=postgresql+psycopg://postgres:postgres@127.0.0.1:55432/aetherflow_dev \
-timeout 60s ./.venv/bin/python -m pytest \
-  backend/tests/test_cve_agent_graph.py \
-  backend/tests/test_search_graph_service.py \
-  backend/tests/test_cve_detail_service.py \
-  backend/tests/test_cve_api.py \
-  backend/tests/test_cve_agent_schema_contract.py \
-  backend/tests/test_migrations.py -q
+SyncBrowserBridge                # async→sync 桥接，供 LangGraph 同步节点调用
 ```
 
-### 下一步实现重点
+**BrowserPageSnapshot** 是浏览器层的唯一输出物，包含：
 
-- 将 `runtime.py` 切到 Patch Agent 主链
-- 实现 `extract_links_and_candidates_node`
-- 实现 `download_and_validate_node`
-- 实现 `finalize_run_node`
-- 接 worker / job type 新主线
-- 让前端详情页真正展示搜索图、frontier 和决策记录
+| 字段 | 说明 |
+|------|------|
+| `url` / `final_url` | 请求 URL 与重定向后的最终 URL |
+| `status_code` | HTTP 状态码 |
+| `title` | 页面标题 |
+| `raw_html` | 原始 HTML（供 page_analyzer 使用） |
+| `accessibility_tree` | 裁剪后的 a11y 树（≤6000 字符） |
+| `markdown_content` | Readability 提取的纯文本 markdown（≤2000 字符） |
+| `links` | 结构化 PageLink 列表（含 text、context、is_cross_domain、estimated_target_role） |
+| `page_role_hint` | 启发式页面角色 |
+| `fetch_duration_ms` | 页面加载耗时 |
+
+### LLM 决策层
+
+```
+NavigationContext
+    ├── cve_id
+    ├── budget_remaining
+    ├── navigation_path          # 从哪来
+    ├── current_page (LLMPageView)  # 在哪里
+    │     ├── accessibility_tree_summary (≤6000 字符)
+    │     ├── key_links (前 15 个，含上下文)
+    │     ├── patch_candidates
+    │     └── page_text_summary (≤2000 字符)
+    ├── active_chains            # 链路状态
+    ├── discovered_candidates    # 已有发现
+    └── visited_domains
+```
+
+### 链路追踪层
+
+```
+NavigationChain
+    ├── chain_id
+    ├── chain_type               # advisory_to_patch / tracker_to_commit / mailing_list_to_fix
+    ├── steps: list[ChainStep]   # [{url, page_role, depth}]
+    ├── status                   # in_progress / completed / dead_end
+    └── expected_next_roles      # 预期下一步的页面角色
+```
 
 ---
 
 ## 💾 数据设计
 
-### 涉及的数据表
+### 数据存储复用
 
-#### 当前已存在
+浏览器 Agent 复用现有搜索图数据模型，无需 schema 变更：
 
-- `cve_runs`
-- `cve_patch_artifacts`
-- `artifacts`
-- `source_fetch_records`
+| 现有表 | 新增存储内容 |
+|--------|------------|
+| `cve_search_nodes` | `page_role` 存入 `heuristic_features_json`；a11y 树元数据存入 `content_excerpt` |
+| `cve_search_edges` | 跨域边标识存入 `edge_type`；链路 ID 存入 `link_context` |
+| `cve_search_decisions` | NavigationContext 存入 `input_json`；链路更新存入 `output_json` |
+| `cve_candidate_artifacts` | 来源链路 ID 存入 `evidence_json` |
+| `cve_runs` | 链路摘要存入 `summary_json` |
 
-#### 目标新增
+### 状态字段扩展
 
-- `cve_search_nodes`
-- `cve_search_edges`
-- `cve_search_decisions`
-- `cve_candidate_artifacts`
+`AgentState` 新增字段（内存态，不影响 DB schema）：
 
-### 平台表职责
-
-#### `cve_runs`
-
-顶层运行记录，承载：
-
-- `status`
-- `phase`
-- `stop_reason`
-- `summary_json`
-
-#### `source_fetch_records`
-
-记录工具级抓取行为，例如：
-
-- seed 解析
-- 页面抓取
-- patch 下载
-
-它可以继续保留，但不应独自承担图搜索状态的全部表达。
-
-### 目标新增数据模型
-
-#### `cve_search_nodes`
-
-用于表达搜索过程中访问过的页面节点。
-
-| 字段名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| node_id | uuid | 是 | 节点 ID |
-| run_id | uuid | 是 | 关联运行 |
-| url | string | 是 | 页面 URL |
-| depth | number | 是 | 当前节点深度 |
-| host | string | 是 | 页面 host |
-| page_role | string | 是 | 页面角色 |
-| fetch_status | string | 是 | 抓取状态 |
-| content_excerpt | string | 否 | 页面摘要 |
-| heuristic_features_json | object | 是 | 规则特征摘要 |
-| created_at | datetime | 是 | 创建时间 |
-
-#### `cve_search_edges`
-
-用于表达页面之间的跳转关系。
-
-| 字段名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| edge_id | uuid | 是 | 边 ID |
-| run_id | uuid | 是 | 关联运行 |
-| from_node_id | uuid | 是 | 来源节点 |
-| to_node_id | uuid | 是 | 目标节点 |
-| edge_type | string | 是 | 边类型 |
-| anchor_text | string | 否 | 锚文本 |
-| link_context | string | 否 | 链接上下文摘要 |
-| selected_by | string | 是 | `rule/agent/human` |
-| created_at | datetime | 是 | 创建时间 |
-
-#### `cve_search_decisions`
-
-用于审计 Agent 每一轮决策。
-
-| 字段名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| decision_id | uuid | 是 | 决策 ID |
-| run_id | uuid | 是 | 关联运行 |
-| node_id | uuid | 否 | 当前决策所处节点 |
-| decision_type | string | 是 | 决策类型 |
-| model_name | string | 否 | 模型名称 |
-| input_json | object | 是 | 决策输入 |
-| output_json | object | 是 | 决策输出 |
-| validated | boolean | 是 | 是否通过校验 |
-| rejection_reason | string | 否 | 被拒原因 |
-| created_at | datetime | 是 | 创建时间 |
-
-#### `cve_candidate_artifacts`
-
-用于表达候选 patch 的发现、下载和验证结果。
-
-| 字段名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| candidate_id | uuid | 是 | 候选 ID |
-| run_id | uuid | 是 | 关联运行 |
-| source_node_id | uuid | 否 | 来源页面节点 |
-| candidate_url | string | 是 | 候选 URL |
-| candidate_type | string | 是 | 候选类型 |
-| canonical_key | string | 是 | 规范化唯一键 |
-| download_status | string | 是 | 下载状态 |
-| validation_status | string | 是 | 内容校验状态 |
-| artifact_id | uuid | 否 | 关联 Artifact |
-| evidence_json | object | 是 | 来源与收敛信息 |
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `navigation_chains` | `list[dict]` | NavigationChain 列表 |
+| `current_chain_id` | `str | None` | 当前活跃链路 ID |
+| `page_role_history` | `list[dict]` | 页面角色记录 `[{url, role, title, depth}]` |
+| `cross_domain_hops` | `int` | 已用跨域次数 |
+| `browser_snapshots` | `dict[str, dict]` | URL → BrowserPageSnapshot 序列化 |
 
 ---
 
@@ -324,242 +271,88 @@ timeout 60s ./.venv/bin/python -m pytest \
 
 **接口路径**：`POST /api/v1/cve/runs`
 
-**当前契约**：
-
-- 创建 `task_job + cve_run`
-- 返回 `run_id`
-
-**后续约束**：
-
-- 不需要为 Agent 化重写对外入口
-- Agent 图运行时在后台执行，不改变工作台入口模式
+**约束**：不需要为浏览器 Agent 重写对外入口。Agent 在后台执行，不改变工作台入口模式。
 
 ### 接口2：获取 run 详情
 
 **接口路径**：`GET /api/v1/cve/runs/{run_id}`
 
-**当前契约**：
+**当前已返回**：`summary`、`progress`、`source_traces`、`patches`、`search_graph`、`frontier_status`、`decision_history`
 
-- 返回 `summary`
-- 返回 `progress`
-- 返回 `source_traces`
-- 返回 `patches`
+**浏览器 Agent 新增字段**：
 
-**目标扩展**：
-
-后续详情接口需逐步增加以下字段：
-
-- `search_graph`
-- `search_nodes`
-- `search_edges`
-- `decision_history`
-- `budget_status`
-- `frontier_status`
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `navigation_chains` | `array` | 链路追踪记录 |
+| `page_roles` | `object` | 每个节点的页面角色 |
+| `cross_domain_hops` | `number` | 已用跨域次数 |
 
 ### 接口3：获取 patch 内容
 
 **接口路径**：`GET /api/v1/cve/runs/{run_id}/patch-content`
 
-**约束**：
-
-- 仍按需加载
-- 仍由下载成功的 Artifact 提供内容
-- Agent 化不改变 patch 内容读取方式
-
----
-
-## 📦 前端状态对象
-
-### 当前已消费的对象
-
-- `summary`
-- `progress`
-- `source_traces`
-- `patches`
-
-### 目标新增的对象
-
-#### `PatchSearchGraphView`
-
-| 字段名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| nodes | array | 是 | 搜索节点 |
-| edges | array | 是 | 搜索边 |
-| frontier | array | 是 | 当前 frontier |
-| decision_history | array | 是 | 决策记录 |
-| budget | object | 是 | 剩余预算 |
-
-#### `PatchBudgetView`
-
-| 字段名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| max_pages_total | number | 是 | 页面总预算 |
-| visited_pages | number | 是 | 已访问页面数 |
-| max_depth | number | 是 | 最大深度 |
-| current_max_depth | number | 是 | 当前最大深度 |
-| max_cross_domain_expansions | number | 是 | 跨域预算 |
-| used_cross_domain_expansions | number | 是 | 已用跨域预算 |
-| max_download_attempts | number | 是 | 下载预算 |
-| used_download_attempts | number | 是 | 已用下载预算 |
-
----
-
-## 🔁 子流程 / 状态机
-
-### Agent 主状态机
-
-```text
-queued
-  -> resolve_seeds
-  -> build_initial_frontier
-  -> fetch_next_batch
-  -> extract_links_and_candidates
-  -> agent_decide
-      -> expand_frontier
-      -> try_candidate_download
-      -> stop_search
-      -> need_human_review
-  -> finalize_run
-```
-
-### 页面节点生命周期
-
-```text
-discovered
-  -> fetched
-  -> analyzed
-  -> expanded / pruned / converted_to_candidate
-```
-
-### 候选 patch 生命周期
-
-```text
-discovered
-  -> canonicalized
-  -> download_pending
-  -> downloaded / download_failed
-  -> validated / invalid_content
-```
+**约束**：Agent 化不改变 patch 内容读取方式。
 
 ---
 
 ## ✅ 业务规则
 
-### 规则1：规则负责工具和约束，模型负责搜索决策
+### 规则1：浏览器是唯一页面获取方式
 
-**规则描述**：
+- 所有页面获取通过 Playwright 浏览器完成
+- 不再使用 httpx 抓取页面（httpx 仅用于 seed 解析 API 调用和 patch 文件下载）
+- 无 fallback 降级到 httpx
 
-- 规则层负责 seed 解析、页面抓取、链接提取、显式 patch 候选识别、canonical URL 转换、下载与校验。
-- 模型负责判断页面角色、链接价值、跨域意愿、继续或停止策略。
-- 不允许继续让规则直接决定整个搜索主链。
+### 规则2：LLM 看到的是 a11y 树，不是 HTML 截断
 
-### 规则2：模型不能直接发 HTTP
+- 主输入为裁剪后的可访问性树（≤6000 字符）
+- 辅助输入为 Readability 提取的 markdown（≤2000 字符）
+- 不再向 LLM 传递原始 HTML 或截断文本
 
-**规则描述**：
+### 规则3：导航决策由 LLM 在链路上下文中做出
 
-- 模型不直接抓页面
-- 模型只输出动作
-- 真正的抓取由受控工具层执行
+- LLM 接收完整的 NavigationContext（含链路状态、导航路径、预算）
+- 不再使用关键词打分决定导航方向
+- LLM 可以选择跨域链接，但必须说明理由
 
-### 规则3：模型不能乱编 URL
+### 规则4：链路终止前不得停止
 
-**规则描述**：
+- 只要存在 `in_progress` 状态的链路且预算未耗尽，Agent 不得停止
+- `needs_human_review` 仅在无活跃链路、无未扩展 frontier、无跨域候选时接受
 
-- 默认只能从当前已提取的链接集合中选择下一跳
-- 唯一允许的 URL 变换是调用 canonicalize 工具，把 commit / MR / PR 转为 patch URL
+### 规则5：模型只能选路，不能编路
 
-### 规则4：Agent 输出必须结构化并经过校验
+- 默认只能从当前页面已提取的 key_links 中选择下一跳
+- 唯一允许的 URL 变换是调用 canonicalize 工具把 commit/MR/PR 转为 patch URL
 
-**规则描述**：
+### 规则6：跨域受预算控制
+
+- 跨域扩展消耗 `max_cross_domain_expansions` 预算
+- 默认预算 8 次，允许追踪 advisory→tracker→commit 完整链路
+
+### 规则7：成功 patch 事实不可覆盖
+
+- 已下载成功并通过内容校验的 patch，模型不得覆盖该事实
+- 模型只能决定是否继续搜索补充更多证据
+
+### 规则8：Agent 输出必须结构化并经过校验
 
 - 决策输出必须是结构化 JSON
-- 决策动作仅允许：
-  - `expand_frontier`
-  - `try_candidate_download`
-  - `stop_search`
-  - `need_human_review`
-- 任何超预算、越权、未知链接、重复跳转的输出都必须被拒绝
+- 动作仅允许：`expand_frontier` / `try_candidate_download` / `stop_search` / `needs_human_review`
+- 任何超预算、越权、未知链接、重复跳转的输出必须被拒绝
 
-### 规则5：必须使用显式搜索预算
-
-**规则描述**：
-
-默认预算建议为：
-
-- `max_pages_total = 18`
-- `max_depth = 4`
-- `max_children_per_node = 2`
-- `max_parallel_frontier = 4`
-- `max_cross_domain_expansions = 6`
-- `max_download_attempts = 6`
-- `max_agent_iterations = 10`
-
-### 规则6：允许跨域，但必须受控
-
-**规则描述**：
-
-- 不再把“同域”当作硬编码唯一策略
-- 跨域扩展必须消耗专门预算
-- 是否跨域由模型结合页面角色、来源可信度和剩余预算共同决定
-
-### 规则7：成功 patch 事实不能被模型覆盖
-
-**规则描述**：
-
-- 一旦已有 patch 下载成功并通过内容校验，模型不得覆盖该事实
-- 模型只能决定是否继续搜索补充更多证据，不得改写成功结论
-
-### 规则8：Patch 下载必须继续走确定性校验
-
-**规则描述**：
-
-- 下载器必须检查内容不是 HTML
-- 必须确认内容像真实 patch / diff
-- 模型不允许直接宣布“这是 patch”
-
-### 规则9：页面必须具备角色语义
-
-**规则描述**：
-
-页面至少应支持以下角色：
-
-- `terminal_patch_page`
-- `code_review_page`
-- `bug_tracker_page`
-- `vendor_advisory_page`
-- `security_tracker_page`
-- `nvd_or_scoring_page`
-- `bridge_page`
-- `noise_page`
-- `blocked_page`
-
-### 规则10：停止必须可解释
-
-**规则描述**：
+### 规则9：停止必须可解释
 
 Agent 停止时必须明确属于以下之一：
 
 - `patches_downloaded`
 - `no_seed_references`
 - `search_budget_exhausted`
+- `all_chains_resolved`
 - `no_viable_frontier`
 - `patch_download_failed`
-- `need_human_review`
+- `needs_human_review`
 - `run_failed`
-
-### 规则11：必须记录搜索图与决策审计
-
-**规则描述**：
-
-- 不能只保留工具级 trace
-- 必须能回放“节点、边、决策、候选、预算”的完整过程
-
-### 规则12：文档与实现都必须围绕 Agent 主线组织
-
-**规则描述**：
-
-- 后续开发、测试、接口与页面设计都必须围绕搜索图、预算和决策收敛展开
-- 不再把规则流水线作为文档和模块边界的中心叙事
 
 ---
 
@@ -567,160 +360,91 @@ Agent 停止时必须明确属于以下之一：
 
 ### 异常1：无 seed references
 
-**触发条件**：多源查询后没有可用初始 references
+**触发条件**：多源查询后没有可用初始 references  
+**处理方案**：运行收口为 `no_seed_references`，保留来源级 trace
 
-**处理方案**：
+### 异常2：浏览器页面加载超时
 
-- 运行收口为 `no_seed_references`
-- 仍保留来源级 trace
+**触发条件**：页面在 30 秒内未完成加载  
+**处理方案**：以当前已加载内容构建快照；若内容为空，节点标记为 `blocked_page`
 
-### 异常2：页面抓取失败
+### 异常3：浏览器进程崩溃
 
-**触发条件**：frontier 节点页面访问失败
+**触发条件**：Playwright 浏览器进程异常退出  
+**处理方案**：PlaywrightPool 重建浏览器实例，当前页面重试一次；若仍失败，标记节点 `blocked_page` 继续搜索
 
-**处理方案**：
+### 异常4：模型输出非法
 
-- 节点标记为 `blocked_page`
-- 当前分支失败，但不等于整条 run 失败
-- 只要还有可扩展 frontier，搜索继续
+**触发条件**：返回未知动作、选择不存在的链接、超出预算  
+**处理方案**：决策记录写入 `validated = false`，拒绝输出，可重试一次
 
-### 异常3：模型输出非法
+### 异常5：搜索预算耗尽
 
-**触发条件**：
+**触发条件**：任一预算维度耗尽  
+**处理方案**：收口为 `search_budget_exhausted`，返回当前已访问路径和链路状态
 
-- 返回未知动作
-- 选择了不存在的链接
-- 超出预算
-- 越权跨域
+### 异常6：所有链路进入死胡同
 
-**处理方案**：
-
-- 决策记录写入 `validated = false`
-- 拒绝该输出
-- 可重试一次或直接转人工复核
-
-### 异常4：搜索预算耗尽
-
-**触发条件**：页面数、深度、跨域预算、下载预算或 agent 轮次预算耗尽
-
-**处理方案**：
-
-- 收口为 `search_budget_exhausted`
-- 返回当前已访问路径和未完成原因
-
-### 异常5：候选下载失败
-
-**触发条件**：候选 patch 无法下载或内容校验失败
-
-**处理方案**：
-
-- 候选记录标记失败原因
-- 若预算允许，继续回到搜索
-- 若无剩余预算或无新候选，则收口为 `patch_download_failed`
-
-### 异常6：需要人工复核
-
-**触发条件**：
-
-- 页面角色长期不明确
-- 规则与模型结论冲突
-- 预算将尽但仍未收敛
-
-**处理方案**：
-
-- 收口为 `need_human_review`
-- 返回当前证据和建议操作
-
----
-
-## 🔐 权限控制
-
-### 访问权限
-
-- 当前无独立权限模型
-
-### 数据权限
-
-- 继续通过场景接口暴露
-- 图搜索审计属于详情页可见数据的一部分
-
----
-
-## 📝 开发要点
-
-### 技术难点
-
-1. 需要把当前线性执行器重构为 `LangGraph` 图运行时，同时不破坏现有 `run` / `job` / `attempt` 收口契约。
-2. 需要明确模型与规则的边界，避免模型变成无约束浏览代理。
-3. 需要在预算、跨域、候选下载、人工复核之间建立可解释的收口策略。
-4. 需要将现有 `source_fetch_records` 升级为“工具级 trace + 图级审计”双层观测模型。
-
-### 性能要求
-
-- 单次 run 必须有整体超时
-- 单页抓取必须有超时
-- Agent 每轮决策必须受 token 与次数预算约束
-- 不能为每个请求重复创建新的数据库 Engine / 连接池
-
-### 注意事项
-
-- 不再以“规则页面探索”作为长期叙事中心
-- 不能继续把模型永久限制在失败后建议层
-- 不能把同域硬编码策略继续当作唯一导航规则
-- 文档必须直接围绕最终 Agent 目标组织，避免再次被旧实现叙事拉回去
+**触发条件**：所有 NavigationChain 状态为 `dead_end`，无候选  
+**处理方案**：收口为 `no_viable_frontier`，返回完整链路追踪记录
 
 ---
 
 ## 🧪 测试要点
 
-### 当前基线需要继续保留
+### 浏览器基础设施测试
 
-- [x] 多源 seed 聚合可用
-- [x] 显式 `.patch/.diff/.debdiff` 与 commit patch 识别可用
-- [x] Bugzilla raw attachment 提取可用
-- [x] patch 下载与内容校验可用
-- [x] 运行终态与平台任务状态对齐
+- [ ] PlaywrightPool 启动/导航/快照/停止正常工作
+- [ ] a11y_pruner 输出 ≤6000 字符
+- [ ] page_role_classifier 正确分类各类页面
+- [ ] SyncBrowserBridge 在同步上下文中正确返回快照
+- [ ] 页面加载超时时以已加载内容构建快照
 
-### Agent 化新增测试
+### LLM 决策测试
 
-- [ ] LangGraph 状态机可在预算内完成多轮搜索
-- [ ] Agent 输出非法动作时会被 validator 拒绝
-- [ ] 允许跨域但必须消耗跨域预算
-- [ ] 页面角色识别可区分 bridge / bug tracker / code review / terminal patch
-- [ ] 搜索预算耗尽时返回可解释 stop reason
+- [ ] LLM 请求载荷包含 a11y 树 + NavigationContext
+- [ ] fake LLM 测试：给定 tracker 页面 + 活跃链路，选择跨域 commit 链接
+- [ ] Agent 输出非法动作时被 validator 拒绝
 - [ ] 已有成功 patch 时模型不能覆盖成功事实
+
+### 链路追踪测试
+
+- [ ] 链路状态机正确转换（in_progress → completed / dead_end）
+- [ ] 活跃链路存在时 Agent 不早停
+- [ ] 所有链路终止后正确收口
+
+### 端到端测试
+
+- [ ] fake browser + fake LLM：Agent 走完 advisory→tracker→commit 链
+- [ ] 跨域导航正常工作且扣减预算
+- [ ] download_and_validate 后可回到 fetch_next_batch（活跃链路时）
 - [ ] 搜索图节点、边、决策可正确落库
-- [ ] 详情页可回放搜索路径与预算消耗
+- [ ] 预算耗尽时返回可解释 stop reason
 
-### 边界测试
+### 集成测试（Phase 4）
 
-- [ ] 初始 seed 为空时收口为 `no_seed_references`
-- [ ] 多个 frontier 并存时不会无限扩展
-- [ ] 重复链接不会反复访问
-- [ ] 候选 URL 规范化后不会重复下载
-- [ ] 模型选择不存在的链接时会被拒绝
-- [ ] 预算用尽前后 stop reason 一致且可解释
+- [ ] CVE-2022-2509：通过 Debian tracker → GitLab commit 链路找到 patch
+- [ ] CVE-2024-3094：多链路多域场景
+- [ ] 链路完成率 ≥ 80%
+- [ ] 单次运行 ≤ 3 分钟
 
 ---
 
 ## 📅 开发计划
 
-| 阶段 | 任务 | 预计工时 | 负责人 | 状态 |
-|------|------|---------|--------|------|
-| 设计 | 明确 Agent 化方向并修正文档体系 | 0.5天 | AI | ✅ |
-| 阶段1 | 引入 LangGraph 状态机与受控决策节点 | 2天 | AI | ✅ 基础骨架已完成 |
-| 阶段1 | 保留并接入现有工具层能力 | 1天 | AI | 🚧 仅完成 seed/frontier 初步接入 |
-| 阶段1 | 实现搜索预算与 validator | 1天 | AI | 🚧 预算对象已落地，validator 待接真实模型输出 |
-| 阶段2 | 落搜索节点、边、决策与候选收敛数据模型 | 2天 | AI | ✅ 已完成 |
-| 阶段2 | 扩展详情接口与前端搜索图展示 | 2天 | AI | 🚧 后端详情已完成，前端展示待继续 |
-| 阶段3 | 增加人工复核挂点与恢复机制 | 1天 | AI | ⏳ |
+| 阶段 | 任务 | 预计工时 | 状态 |
+|------|------|---------|------|
+| Phase 1 | 浏览器基础设施（browser/ 包、配置） | 2天 | ⏳ |
+| Phase 2 | LLM 接口 + 链路追踪（browser_agent_llm、chain_tracker、提示词） | 2天 | ⏳ |
+| Phase 3 | 节点重写 + 图改造 + 单路径运行时 | 3天 | ⏳ |
+| Phase 4 | 集成测试与调优 | 2天 | ⏳ |
 
 ---
 
 ## 📖 相关文档
 
 - [总体项目设计.md](/opt/projects/demo/aetherflow/docs/00-总设计/总体项目设计.md)
-- [2026-04-20-cve-patch-agent-graph-design.md](/opt/projects/demo/aetherflow/docs/superpowers/specs/2026-04-20-cve-patch-agent-graph-design.md)
+- [CVE Patch 浏览器驱动型 AI Agent 设计规格](/opt/projects/demo/aetherflow/docs/superpowers/specs/2026-04-21-cve-browser-agent-design.md)
 - `M101-CVE检索工作台功能设计.md`
 - `M102-CVE运行详情与补丁证据功能设计.md`
 - `M004-公共文档采集与Artifact基座功能设计.md`
@@ -729,8 +453,17 @@ Agent 停止时必须明确属于以下之一：
 
 ## 🔄 变更记录
 
+### 2026-04-21
+
+- 从"CVE Patch 多跳 Agent 搜索主链"全量重写为"CVE Patch 浏览器驱动型 Agent 搜索主链"
+- 废弃 httpx 抓取、关键词打分导航、同域限制、fast-first 路径
+- 引入浏览器基础设施（BrowserBackend Protocol + PlaywrightPool + SyncBrowserBridge）
+- 引入 a11y 树作为 LLM 主输入
+- 引入链路意识模型（NavigationChain）
+- 引入链路感知停止条件
+- 所有节点改造为浏览器 + chain-aware LLM
+
 ### 2026-04-20
 
-- 将文档从“CVE 数据源与页面探索规则”整体改写为“CVE Patch 多跳 Agent 搜索主链”
-- 将 `LangGraph` 图运行时、Agent 决策、预算模型、搜索图落库和人工复核纳入正式设计范围
-- 不再把“规则优先 + 受限 fallback”作为主文档口径
+- 从"CVE 数据源与页面探索规则"改写为"CVE Patch 多跳 Agent 搜索主链"
+- 引入 LangGraph 图运行时、Agent 决策、预算模型、搜索图落库

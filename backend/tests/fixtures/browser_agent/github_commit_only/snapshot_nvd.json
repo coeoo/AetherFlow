@@ -1,0 +1,20 @@
+{
+  "url": "https://nvd.nist.gov/vuln/detail/CVE-2023-9999",
+  "final_url": "https://nvd.nist.gov/vuln/detail/CVE-2023-9999",
+  "status_code": 200,
+  "title": "CVE-2023-9999 - NVD",
+  "raw_html": "<html><body><h1>CVE-2023-9999</h1><a href=\"https://github.com/example/project/commit/abcdef123456\">upstream commit</a></body></html>",
+  "accessibility_tree": "heading \"CVE-2023-9999\"\n  link \"upstream commit\"",
+  "markdown_content": "NVD points directly to the upstream GitHub commit reference.",
+  "links": [
+    {
+      "url": "https://github.com/example/project/commit/abcdef123456",
+      "text": "upstream commit",
+      "context": "This commit contains the upstream fix.",
+      "is_cross_domain": true,
+      "estimated_target_role": "commit_page"
+    }
+  ],
+  "page_role_hint": "advisory_page",
+  "fetch_duration_ms": 65
+}

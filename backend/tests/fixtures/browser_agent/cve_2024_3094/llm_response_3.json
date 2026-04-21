@@ -1,0 +1,12 @@
+{
+  "action": "try_candidate_download",
+  "reason_summary": "GitLab commit 页面已经提供 patch 下载链接，立即进入下载校验。",
+  "confirmed_page_role": "commit_page",
+  "selected_urls": [],
+  "selected_candidate_keys": [
+    "https://gitlab.com/xz-backdoor/xz/-/commit/8f2c1a2.patch"
+  ],
+  "cross_domain_justification": "",
+  "chain_updates": [],
+  "new_chains": []
+}

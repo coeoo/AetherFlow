@@ -138,6 +138,7 @@ def _build_progress(
 ) -> dict[str, object]:
     phase_sequence = _resolve_phase_sequence(
         run,
+        traces=traces,
         job_type=job_type,
         search_nodes=search_nodes,
         search_edges=search_edges,
@@ -566,6 +567,7 @@ def _failed_completed_steps(run: CVERun, *, phase_sequence: list[str]) -> int:
 def _resolve_phase_sequence(
     run: CVERun,
     *,
+    traces: list[dict[str, object]],
     job_type: str | None,
     search_nodes: list[dict[str, object]],
     search_edges: list[dict[str, object]],
@@ -573,6 +575,7 @@ def _resolve_phase_sequence(
 ) -> list[str]:
     if _is_agent_run(
         run,
+        traces=traces,
         job_type=job_type,
         search_nodes=search_nodes,
         search_edges=search_edges,
@@ -585,6 +588,7 @@ def _resolve_phase_sequence(
 def _is_agent_run(
     run: CVERun,
     *,
+    traces: list[dict[str, object]],
     job_type: str | None,
     search_nodes: list[dict[str, object]],
     search_edges: list[dict[str, object]],
@@ -594,7 +598,7 @@ def _is_agent_run(
     runtime_kind = str(summary.get("runtime_kind") or "").strip().lower()
     if runtime_kind in {"patch_agent", "patch_agent_graph"}:
         return True
-    if job_type == "cve_patch_agent_graph":
+    if job_type == "cve_patch_agent_graph" and (traces or search_nodes or search_edges or decision_history):
         return True
     if run.phase in _AGENT_ONLY_PHASES:
         return True

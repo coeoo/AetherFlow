@@ -1,0 +1,12 @@
+{
+  "url": "https://www.openwall.com/lists/oss-security/2024/03/29/4",
+  "final_url": "https://www.openwall.com/lists/oss-security/2024/03/29/4",
+  "status_code": 200,
+  "title": "oss-security - xz backdoor disclosure",
+  "raw_html": "<html><body><h1>xz backdoor disclosure</h1><p>No direct patch artifact on this page.</p></body></html>",
+  "accessibility_tree": "heading \"xz backdoor disclosure\"\n  text \"No direct patch artifact on this page.\"",
+  "markdown_content": "Openwall discussion provides context but no immediately actionable patch link in this recording.",
+  "links": [],
+  "page_role_hint": "mailing_list_page",
+  "fetch_duration_ms": 90
+}

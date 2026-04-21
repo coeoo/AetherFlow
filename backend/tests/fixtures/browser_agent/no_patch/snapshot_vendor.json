@@ -1,0 +1,12 @@
+{
+  "url": "https://vendor.example.com/security/CVE-2021-0001",
+  "final_url": "https://vendor.example.com/security/CVE-2021-0001",
+  "status_code": 200,
+  "title": "Vendor advisory for CVE-2021-0001",
+  "raw_html": "<html><body><h1>Vendor advisory</h1><p>No patch artifact is linked here.</p></body></html>",
+  "accessibility_tree": "heading \"Vendor advisory\"\n  text \"No patch artifact is linked here.\"",
+  "markdown_content": "The vendor advisory contains impact description only and no downloadable fix.",
+  "links": [],
+  "page_role_hint": "advisory_page",
+  "fetch_duration_ms": 58
+}

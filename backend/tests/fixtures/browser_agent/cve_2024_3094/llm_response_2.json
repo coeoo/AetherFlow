@@ -1,0 +1,17 @@
+{
+  "action": "expand_frontier",
+  "reason_summary": "Red Hat advisory 给出了上游 GitLab commit，应跨域继续追踪。",
+  "confirmed_page_role": "advisory_page",
+  "selected_urls": [
+    "https://gitlab.com/xz-backdoor/xz/-/commit/8f2c1a2"
+  ],
+  "selected_candidate_keys": [],
+  "cross_domain_justification": "多域场景下，从厂商公告跳到上游 commit 是确认修复内容的关键步骤。",
+  "chain_updates": [
+    {
+      "action": "extend",
+      "new_step_role": "commit_page"
+    }
+  ],
+  "new_chains": []
+}

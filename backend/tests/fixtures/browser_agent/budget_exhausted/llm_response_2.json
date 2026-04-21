@@ -1,0 +1,12 @@
+{
+  "action": "expand_frontier",
+  "reason_summary": "如果预算允许，应继续访问 tracker 页面。",
+  "confirmed_page_role": "advisory_page",
+  "selected_urls": [
+    "https://tracker.example.com/CVE-2020-4242"
+  ],
+  "selected_candidate_keys": [],
+  "cross_domain_justification": "tracker 仍然是唯一可推进方向。",
+  "chain_updates": [],
+  "new_chains": []
+}

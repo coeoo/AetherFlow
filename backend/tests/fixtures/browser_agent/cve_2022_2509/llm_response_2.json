@@ -1,0 +1,17 @@
+{
+  "action": "expand_frontier",
+  "reason_summary": "Debian tracker 明确指向上游 GitLab commit，应继续跨域追踪。",
+  "confirmed_page_role": "tracker_page",
+  "selected_urls": [
+    "https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb"
+  ],
+  "selected_candidate_keys": [],
+  "cross_domain_justification": "从 Debian tracker 跳到上游 GitLab commit 是拿到 patch 的关键一步。",
+  "chain_updates": [
+    {
+      "action": "extend",
+      "new_step_role": "commit_page"
+    }
+  ],
+  "new_chains": []
+}

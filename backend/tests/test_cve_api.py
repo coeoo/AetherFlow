@@ -34,7 +34,7 @@ def test_post_cve_runs_creates_queued_run_and_task_job(client, db_session) -> No
     job = db_session.get(TaskJob, run.job_id)
     assert job is not None
     assert job.scene_name == "cve"
-    assert job.job_type == "cve_patch_fast_first"
+    assert job.job_type == "cve_patch_agent_graph"
     assert job.trigger_kind == "manual"
     assert job.status == "queued"
 

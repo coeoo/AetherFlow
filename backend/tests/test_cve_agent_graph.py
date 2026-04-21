@@ -1,13 +1,63 @@
+import uuid
+from types import SimpleNamespace
+
+from dataclasses import asdict
+
 import app.cve.agent_graph as agent_graph_module
 from app.cve.agent_graph import build_cve_patch_graph
 from app.cve.agent_state import build_initial_agent_state
 from app.cve.agent_nodes import (
     agent_decide_node,
     build_initial_frontier_node,
+    download_and_validate_node,
+    extract_links_and_candidates_node,
+    finalize_run_node,
     fetch_next_batch_node,
 )
-from app.models.cve import CVECandidateArtifact, CVESearchDecision, CVESearchNode
+from app.cve.browser.base import BrowserPageSnapshot, PageLink
+from app.models import CVERun
+from app.models.cve import (
+    CVECandidateArtifact,
+    CVEPatchArtifact,
+    CVESearchDecision,
+    CVESearchNode,
+)
 from sqlalchemy import select
+
+
+def _make_snapshot(
+    url: str,
+    *,
+    links: list[PageLink] | None = None,
+    page_role_hint: str = "frontier_page",
+    title: str = "fake",
+) -> BrowserPageSnapshot:
+    return BrowserPageSnapshot(
+        url=url,
+        final_url=url,
+        status_code=200,
+        title=title,
+        raw_html="<html><body>fake</body></html>",
+        accessibility_tree="heading 'fake'",
+        markdown_content="fake",
+        links=list(links or []),
+        page_role_hint=page_role_hint,
+        fetch_duration_ms=100,
+    )
+
+
+class _FakeBridge:
+    def __init__(self, snapshots: dict[str, BrowserPageSnapshot] | None = None) -> None:
+        self._snapshots = dict(snapshots or {})
+
+    def navigate(self, url: str, *, timeout_ms: int = 30000) -> BrowserPageSnapshot:
+        return self._snapshots.get(url, _make_snapshot(url))
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
 
 
 def test_build_initial_agent_state_starts_with_seed_budget() -> None:
@@ -18,6 +68,11 @@ def test_build_initial_agent_state_starts_with_seed_budget() -> None:
     assert state["budget"]["max_pages_total"] > 0
     assert state["frontier"] == []
     assert state["decision_history"] == []
+    assert state["navigation_chains"] == []
+    assert state["current_chain_id"] is None
+    assert state["page_role_history"] == []
+    assert state["cross_domain_hops"] == 0
+    assert state["browser_snapshots"] == {}
 
 
 def test_build_cve_patch_graph_exposes_finalize_node() -> None:
@@ -43,12 +98,49 @@ def test_patch_agent_graph_records_seed_candidates_frontier_and_decision(
         "app.cve.agent_nodes.resolve_seed_references",
         _fake_resolve_seed_references,
     )
+    monkeypatch.setattr("app.cve.agent_nodes.analyze_page", lambda snapshot: [])
+    monkeypatch.setattr(
+        "app.cve.agent_nodes.call_browser_agent_navigation",
+        lambda navigation_context: {
+            "action": "try_candidate_download",
+            "reason_summary": "直接尝试下载候选 patch",
+            "selected_urls": [],
+            "selected_candidate_keys": [],
+            "chain_updates": [],
+            "new_chains": [],
+        },
+    )
+
+    def _fake_download(session, *, run, candidate):
+        patch = CVEPatchArtifact(
+            run_id=run.run_id,
+            candidate_url=str(candidate["candidate_url"]),
+            patch_type=str(candidate["patch_type"]),
+            download_status="downloaded",
+            patch_meta_json={
+                "discovered_from_url": candidate.get("discovered_from_url"),
+                "discovery_sources": candidate.get("discovery_sources"),
+            },
+        )
+        session.add(patch)
+        session.flush()
+        return patch
+
+    monkeypatch.setattr("app.cve.agent_nodes.download_patch_candidate", _fake_download)
 
     state = build_initial_agent_state(
         run_id=str(seeded_cve_run.run_id),
         cve_id=seeded_cve_run.cve_id,
     )
     state["session"] = db_session
+    state["_browser_bridge"] = _FakeBridge(
+        {
+            "https://security-tracker.debian.org/tracker/CVE-2024-3094": _make_snapshot(
+                "https://security-tracker.debian.org/tracker/CVE-2024-3094",
+                page_role_hint="tracker_page",
+            )
+        }
+    )
 
     result = build_cve_patch_graph().invoke(state)
     db_session.commit()
@@ -102,7 +194,7 @@ def test_build_initial_frontier_node_deduplicates_candidates_with_same_canonical
     assert len(persisted_candidates) == 1
     assert persisted_candidates[0].evidence_json["evidence_source_count"] == 2
     assert [
-        source["discovered_from_url"]
+        source["source_url"]
         for source in persisted_candidates[0].evidence_json["discovery_sources"]
     ] == [
         "https://github.com/example/repo/commit/abcdef1",
@@ -136,7 +228,7 @@ def test_build_initial_frontier_node_merges_equivalent_patch_urls_after_normaliz
     assert len(persisted_candidates) == 1
     assert persisted_candidates[0].evidence_json["evidence_source_count"] == 2
     assert [
-        source["discovered_from_url"]
+        source["source_url"]
         for source in persisted_candidates[0].evidence_json["discovery_sources"]
     ] == [
         "https://example.com/download?patch=1&file=fix.patch",
@@ -170,7 +262,7 @@ def test_agent_decide_node_appends_decision_history(seeded_cve_run, db_session) 
     ]
 
 
-def test_agent_decide_node_expands_only_frontier_items_without_source_node_id(
+def test_agent_decide_node_expands_only_frontier_items_without_expanded_flag(
     seeded_cve_run, db_session
 ) -> None:
     state = build_initial_agent_state(
@@ -184,11 +276,13 @@ def test_agent_decide_node_expands_only_frontier_items_without_source_node_id(
             "depth": 0,
             "score": 8,
             "source_node_id": "node-1",
+            "expanded": True,
         },
         {
             "url": "https://example.com/next-hop",
             "depth": 1,
             "score": 5,
+            "expanded": False,
         },
     ]
 
@@ -209,6 +303,13 @@ def test_fetch_next_batch_node_materializes_frontier_before_agent_decide(
         cve_id=seeded_cve_run.cve_id,
     )
     state["session"] = db_session
+    state["_browser_bridge"] = _FakeBridge(
+        {
+            "https://example.com/queued-frontier": _make_snapshot(
+                "https://example.com/queued-frontier"
+            )
+        }
+    )
     state["frontier"] = [
         {
             "url": "https://example.com/queued-frontier",
@@ -228,6 +329,52 @@ def test_fetch_next_batch_node_materializes_frontier_before_agent_decide(
         select(CVESearchNode).where(CVESearchNode.run_id == seeded_cve_run.run_id)
     ).scalars().all()
     assert len(persisted_nodes) == 1
+
+
+def test_fetch_next_batch_node_honors_selected_frontier_urls(
+    seeded_cve_run, db_session
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["_browser_bridge"] = _FakeBridge(
+        {
+            "https://example.com/frontier-a": _make_snapshot("https://example.com/frontier-a"),
+            "https://example.com/frontier-b": _make_snapshot("https://example.com/frontier-b"),
+            "https://example.com/frontier-c": _make_snapshot("https://example.com/frontier-c"),
+        }
+    )
+    state["frontier"] = [
+        {
+            "url": "https://example.com/frontier-a",
+            "depth": 0,
+            "score": 9,
+            "expanded": False,
+        },
+        {
+            "url": "https://example.com/frontier-b",
+            "depth": 0,
+            "score": 8,
+            "expanded": False,
+        },
+        {
+            "url": "https://example.com/frontier-c",
+            "depth": 0,
+            "score": 7,
+            "expanded": False,
+        },
+    ]
+    state["selected_frontier_urls"] = ["https://example.com/frontier-b"]
+
+    result = fetch_next_batch_node(state)
+    db_session.commit()
+
+    expanded_urls = [
+        item["url"] for item in result["frontier"] if item.get("expanded")
+    ]
+    assert expanded_urls == ["https://example.com/frontier-b"]
 
 
 def test_patch_agent_graph_routes_expand_frontier_back_to_fetch_batch(monkeypatch) -> None:
@@ -287,3 +434,590 @@ def test_patch_agent_graph_routes_expand_frontier_back_to_fetch_batch(monkeypatc
         "decide",
         "finalize",
     ]
+
+
+def test_patch_agent_graph_routes_download_back_to_fetch_batch_when_requested(monkeypatch) -> None:
+    call_log: list[str] = []
+    decide_call_count = 0
+    download_call_count = 0
+
+    def _resolve(state):
+        call_log.append("resolve")
+        return state
+
+    def _build(state):
+        call_log.append("build")
+        return state
+
+    def _fetch(state):
+        call_log.append("fetch")
+        return state
+
+    def _extract(state):
+        call_log.append("extract")
+        return state
+
+    def _decide(state):
+        nonlocal decide_call_count
+        call_log.append("decide")
+        decide_call_count += 1
+        state["next_action"] = "try_candidate_download" if decide_call_count == 1 else "stop_search"
+        return state
+
+    def _download(state):
+        nonlocal download_call_count
+        call_log.append("download")
+        download_call_count += 1
+        state["next_action"] = "fetch_next_batch" if download_call_count == 1 else "finalize_run"
+        return state
+
+    def _finalize(state):
+        call_log.append("finalize")
+        return state
+
+    monkeypatch.setattr(agent_graph_module, "resolve_seeds_node", _resolve)
+    monkeypatch.setattr(agent_graph_module, "build_initial_frontier_node", _build)
+    monkeypatch.setattr(agent_graph_module, "fetch_next_batch_node", _fetch)
+    monkeypatch.setattr(agent_graph_module, "extract_links_and_candidates_node", _extract)
+    monkeypatch.setattr(agent_graph_module, "agent_decide_node", _decide)
+    monkeypatch.setattr(agent_graph_module, "download_and_validate_node", _download)
+    monkeypatch.setattr(agent_graph_module, "finalize_run_node", _finalize)
+
+    agent_graph_module.build_cve_patch_graph().invoke({"run_id": "run-1", "cve_id": "CVE-2024-3094"})
+
+    assert call_log == [
+        "resolve",
+        "build",
+        "fetch",
+        "extract",
+        "decide",
+        "download",
+        "fetch",
+        "extract",
+        "decide",
+        "finalize",
+    ]
+
+
+def test_agent_decide_node_uses_fake_llm_expand_frontier(
+    seeded_cve_run, db_session, monkeypatch
+) -> None:
+    frontier_node = CVESearchNode(
+        run_id=seeded_cve_run.run_id,
+        url="https://example.com/root",
+        depth=0,
+        host="example.com",
+        page_role="frontier_page",
+        fetch_status="fetched",
+    )
+    db_session.add(frontier_node)
+    db_session.flush()
+
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["current_page_url"] = "https://example.com/root"
+    state["current_node_id"] = str(frontier_node.node_id)
+    state["page_nodes"] = [
+        {
+            "node_id": str(frontier_node.node_id),
+            "url": frontier_node.url,
+            "depth": 0,
+            "host": frontier_node.host,
+            "fetch_status": frontier_node.fetch_status,
+            "page_role": frontier_node.page_role,
+        }
+    ]
+    state["page_observations"] = {
+        "https://example.com/root": {
+            "source_node_id": str(frontier_node.node_id),
+            "url": "https://example.com/root",
+            "depth": 0,
+            "fetch_status": "fetched",
+            "extracted_links": ["https://example.com/child"],
+            "candidates": [],
+            "extracted": True,
+        }
+    }
+    state["browser_snapshots"] = {
+        "https://example.com/root": asdict(
+            _make_snapshot(
+                "https://example.com/root",
+                links=[
+                    PageLink(
+                        url="https://example.com/child",
+                        text="child",
+                        context="follow link",
+                        is_cross_domain=False,
+                        estimated_target_role="advisory_page",
+                    )
+                ],
+            )
+        )
+    }
+    state["frontier"] = [
+        {
+            "url": "https://example.com/child",
+            "depth": 1,
+            "score": 5,
+            "expanded": False,
+        }
+    ]
+
+    monkeypatch.setattr(
+        "app.cve.agent_nodes.call_browser_agent_navigation",
+        lambda navigation_context: {
+            "action": "expand_frontier",
+            "reason_summary": "继续扩展",
+            "selected_urls": ["https://example.com/child"],
+            "selected_candidate_keys": [],
+            "model_name": "fake-llm",
+            "chain_updates": [],
+            "new_chains": [],
+        },
+    )
+
+    result = agent_decide_node(state)
+    db_session.commit()
+
+    assert result["next_action"] == "expand_frontier"
+    decision = db_session.execute(
+        select(CVESearchDecision).where(CVESearchDecision.run_id == seeded_cve_run.run_id)
+    ).scalar_one()
+    assert decision.decision_type == "expand_frontier"
+    assert decision.validated is True
+    assert decision.model_name == "fake-llm"
+
+
+def test_agent_decide_node_records_rejected_llm_url_and_falls_back(
+    seeded_cve_run, db_session, monkeypatch
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["current_page_url"] = "https://example.com/root"
+    state["page_observations"] = {
+        "https://example.com/root": {
+            "url": "https://example.com/root",
+            "depth": 0,
+            "fetch_status": "fetched",
+            "extracted_links": [],
+            "candidates": [],
+            "extracted": True,
+        }
+    }
+    state["browser_snapshots"] = {
+        "https://example.com/root": asdict(_make_snapshot("https://example.com/root"))
+    }
+
+    monkeypatch.setattr(
+        "app.cve.agent_nodes.call_browser_agent_navigation",
+        lambda navigation_context: {
+            "action": "expand_frontier",
+            "reason_summary": "越界 URL",
+            "selected_urls": ["https://evil.example.com/out-of-scope"],
+            "selected_candidate_keys": [],
+            "model_name": "fake-llm",
+            "chain_updates": [],
+            "new_chains": [],
+        },
+    )
+
+    result = agent_decide_node(state)
+    decisions = db_session.execute(
+        select(CVESearchDecision)
+        .where(CVESearchDecision.run_id == seeded_cve_run.run_id)
+        .order_by(CVESearchDecision.created_at, CVESearchDecision.decision_id)
+    ).scalars().all()
+
+    assert result["next_action"] == "stop_search"
+    assert any(decision.validated is False for decision in decisions)
+    assert any(
+        decision.rejection_reason == "selected_url_not_in_frontier_or_page"
+        for decision in decisions
+    )
+
+
+def test_agent_decide_node_fallback_limits_cross_domain_expansion(
+    seeded_cve_run, db_session, monkeypatch
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["budget"]["max_cross_domain_expansions"] = 1
+    state["budget"]["max_children_per_node"] = 3
+    state["current_page_url"] = "https://lists.example.com/post"
+    state["page_observations"] = {
+        "https://lists.example.com/post": {
+            "url": "https://lists.example.com/post",
+            "depth": 0,
+            "fetch_status": "fetched",
+            "extracted_links": [],
+            "candidates": [],
+            "extracted": True,
+        }
+    }
+    state["frontier"] = [
+        {"url": "https://redhat.example.com/a", "depth": 1, "score": 10, "expanded": False},
+        {"url": "https://redhat.example.com/b", "depth": 1, "score": 9, "expanded": False},
+        {"url": "https://redhat.example.com/c", "depth": 1, "score": 8, "expanded": False},
+    ]
+
+    def _raise_timeout(navigation_context):
+        raise TimeoutError("llm timeout")
+
+    monkeypatch.setattr("app.cve.agent_nodes.call_browser_agent_navigation", _raise_timeout)
+
+    result = agent_decide_node(state)
+
+    assert result["next_action"] == "expand_frontier"
+    assert result["selected_frontier_urls"] == ["https://redhat.example.com/a"]
+    assert result["decision_history"][-1]["validated"] is True
+
+
+def test_agent_decide_node_invalid_duplicate_llm_result_uses_filtered_fallback(
+    seeded_cve_run, db_session, monkeypatch
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["current_page_url"] = "https://example.com/root"
+    state["visited_urls"] = ["https://example.com/already-visited"]
+    state["page_observations"] = {
+        "https://example.com/root": {
+            "url": "https://example.com/root",
+            "depth": 0,
+            "fetch_status": "fetched",
+            "extracted_links": [],
+            "candidates": [],
+            "extracted": True,
+        }
+    }
+    state["browser_snapshots"] = {
+        "https://example.com/root": asdict(_make_snapshot("https://example.com/root"))
+    }
+    state["frontier"] = [
+        {
+            "url": "https://example.com/already-visited",
+            "depth": 1,
+            "score": 10,
+            "expanded": False,
+        },
+        {
+            "url": "https://example.com/fresh-hop",
+            "depth": 1,
+            "score": 9,
+            "expanded": False,
+        },
+    ]
+
+    monkeypatch.setattr(
+        "app.cve.agent_nodes.call_browser_agent_navigation",
+        lambda navigation_context: {
+            "action": "expand_frontier",
+            "reason_summary": "重复 URL",
+            "selected_urls": ["https://example.com/already-visited"],
+            "selected_candidate_keys": [],
+            "model_name": "fake-llm",
+            "chain_updates": [],
+            "new_chains": [],
+        },
+    )
+
+    result = agent_decide_node(state)
+
+    assert result["next_action"] == "expand_frontier"
+    assert result["selected_frontier_urls"] == ["https://example.com/fresh-hop"]
+    assert result["decision_history"][-1]["validated"] is True
+
+
+def test_agent_decide_node_overrides_needs_human_review_when_expandable_frontier_exists(
+    seeded_cve_run, db_session, monkeypatch
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["current_page_url"] = "https://lists.debian.org/post"
+    state["page_observations"] = {
+        "https://lists.debian.org/post": {
+            "url": "https://lists.debian.org/post",
+            "depth": 0,
+            "fetch_status": "fetched",
+            "extracted_links": ["https://security-tracker.debian.org/tracker/gnutls28"],
+            "candidates": [],
+            "extracted": True,
+        }
+    }
+    state["browser_snapshots"] = {
+        "https://lists.debian.org/post": asdict(
+            _make_snapshot(
+                "https://lists.debian.org/post",
+                page_role_hint="mailing_list_page",
+                links=[
+                    PageLink(
+                        url="https://security-tracker.debian.org/tracker/gnutls28",
+                        text="tracker",
+                        context="follow tracker",
+                        is_cross_domain=True,
+                        estimated_target_role="tracker_page",
+                    )
+                ],
+            )
+        )
+    }
+    state["frontier"] = [
+        {
+            "url": "https://security-tracker.debian.org/tracker/gnutls28",
+            "depth": 1,
+            "score": 24,
+            "expanded": False,
+        }
+    ]
+
+    monkeypatch.setattr(
+        "app.cve.agent_nodes.call_browser_agent_navigation",
+        lambda navigation_context: {
+            "action": "needs_human_review",
+            "reason_summary": "当前页面没有直接 patch，需要人工看一下。",
+            "selected_urls": [],
+            "selected_candidate_keys": [],
+            "model_name": "fake-llm",
+            "chain_updates": [],
+            "new_chains": [],
+        },
+    )
+
+    result = agent_decide_node(state)
+
+    assert result["next_action"] == "expand_frontier"
+    assert result["selected_frontier_urls"] == [
+        "https://security-tracker.debian.org/tracker/gnutls28"
+    ]
+    assert result["decision_history"][-1]["decision_type"] == "expand_frontier"
+
+
+def test_extract_links_and_candidates_node_appends_frontier_edge_and_candidate(
+    seeded_cve_run, db_session, monkeypatch
+) -> None:
+    root_node = CVESearchNode(
+        run_id=seeded_cve_run.run_id,
+        url="https://example.com/root",
+        depth=0,
+        host="example.com",
+        page_role="frontier_page",
+        fetch_status="fetched",
+    )
+    db_session.add(root_node)
+    db_session.flush()
+
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["page_nodes"] = [
+        {
+            "node_id": str(root_node.node_id),
+            "url": root_node.url,
+            "depth": root_node.depth,
+            "host": root_node.host,
+            "fetch_status": root_node.fetch_status,
+            "page_role": root_node.page_role,
+        }
+    ]
+    state["page_observations"] = {
+        "https://example.com/root": {
+            "source_node_id": str(root_node.node_id),
+            "url": "https://example.com/root",
+            "depth": 0,
+            "fetch_status": "fetched",
+            "content": "<html></html>",
+            "content_type": "text/html",
+            "extracted_links": [],
+            "candidates": [],
+            "extracted": False,
+        }
+    }
+    state["browser_snapshots"] = {
+        "https://example.com/root": asdict(
+            _make_snapshot(
+                "https://example.com/root",
+                links=[
+                    PageLink(
+                        url="https://example.com/child",
+                        text="child",
+                        context="follow child",
+                        is_cross_domain=False,
+                        estimated_target_role="advisory_page",
+                    )
+                ],
+            )
+        )
+    }
+    monkeypatch.setattr(
+        "app.cve.agent_nodes.analyze_page",
+        lambda snapshot: [
+            {
+                "candidate_url": "https://example.com/fix.patch",
+                "patch_type": "patch",
+            }
+        ],
+    )
+
+    result = extract_links_and_candidates_node(state)
+    db_session.commit()
+
+    assert any(item["url"] == "https://example.com/child" for item in result["frontier"])
+    edge_count = db_session.execute(
+        select(CVESearchNode).where(CVESearchNode.run_id == seeded_cve_run.run_id)
+    ).scalars().all()
+    assert len(edge_count) == 2
+    candidate = db_session.execute(
+        select(CVECandidateArtifact).where(CVECandidateArtifact.run_id == seeded_cve_run.run_id)
+    ).scalar_one()
+    assert candidate.candidate_url == "https://example.com/fix.patch"
+
+
+def test_download_and_finalize_node_updates_run_summary(
+    seeded_cve_run, db_session, monkeypatch
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["seed_references"] = ["https://example.com/fix.patch"]
+    build_initial_frontier_node(state)
+
+    def _fake_download(session, *, run, candidate):
+        patch = CVEPatchArtifact(
+            run_id=run.run_id,
+            candidate_url=str(candidate["candidate_url"]),
+            patch_type=str(candidate["patch_type"]),
+            download_status="downloaded",
+            patch_meta_json={
+                "discovered_from_url": "https://example.com/root",
+                "discovered_from_host": "example.com",
+                "discovery_sources": [
+                    {
+                        "source_url": "https://example.com/root",
+                        "source_host": "example.com",
+                        "discovery_rule": "matcher",
+                        "source_kind": "page",
+                        "order": 0,
+                    }
+                ],
+            },
+        )
+        session.add(patch)
+        session.flush()
+        return patch
+
+    monkeypatch.setattr("app.cve.agent_nodes.download_patch_candidate", _fake_download)
+
+    downloaded_state = download_and_validate_node(state)
+    finalize_run_node(downloaded_state)
+    db_session.commit()
+
+    run = db_session.get(type(seeded_cve_run), seeded_cve_run.run_id)
+    assert run is not None
+    assert run.status == "succeeded"
+    assert run.stop_reason == "patches_downloaded"
+    assert run.summary_json["primary_patch_url"] == "https://example.com/fix.patch"
+
+
+def test_download_and_validate_node_prefers_selected_candidate_keys(monkeypatch) -> None:
+    run_id = uuid.uuid4()
+
+    class _FakeSession:
+        def __init__(self) -> None:
+            self.run = SimpleNamespace(
+                run_id=run_id,
+                phase="agent_decide",
+                status="running",
+                stop_reason=None,
+                summary_json={},
+            )
+            self.candidates = [
+                SimpleNamespace(
+                    candidate_url="https://example.com/fix-a.patch",
+                    candidate_type="patch",
+                    canonical_key="https://example.com/fix-a.patch",
+                    evidence_json={},
+                    download_status="discovered",
+                    validation_status="pending",
+                    artifact_id=None,
+                ),
+                SimpleNamespace(
+                    candidate_url="https://example.com/fix-b.patch",
+                    candidate_type="patch",
+                    canonical_key="https://example.com/fix-b.patch",
+                    evidence_json={},
+                    download_status="discovered",
+                    validation_status="pending",
+                    artifact_id=None,
+                ),
+            ]
+
+        def get(self, model, value):
+            if model is CVERun and value == run_id:
+                return self.run
+            return None
+
+        def execute(self, statement):
+            class _FakeScalars:
+                def __init__(self, candidates) -> None:
+                    self._candidates = candidates
+
+                def all(self):
+                    return list(self._candidates)
+
+            class _FakeResult:
+                def __init__(self, candidates) -> None:
+                    self._candidates = candidates
+
+                def scalars(self):
+                    return _FakeScalars(self._candidates)
+
+            return _FakeResult(self.candidates)
+
+        def flush(self) -> None:
+            return None
+
+    session = _FakeSession()
+    state = build_initial_agent_state(
+        run_id=str(run_id),
+        cve_id="CVE-2024-3094",
+    )
+    state["session"] = session
+    state["budget"]["max_download_attempts"] = 1
+    state["selected_candidate_keys"] = ["https://example.com/fix-b.patch"]
+
+    attempted_urls: list[str] = []
+
+    def _fake_download(session, *, run, candidate):
+        attempted_urls.append(str(candidate["candidate_url"]))
+        return SimpleNamespace(
+            patch_id=uuid.uuid4(),
+            artifact_id=uuid.uuid4(),
+            candidate_url=str(candidate["candidate_url"]),
+            patch_type=str(candidate["patch_type"]),
+            download_status="downloaded",
+            patch_meta_json={},
+        )
+
+    monkeypatch.setattr("app.cve.agent_nodes.download_patch_candidate", _fake_download)
+
+    download_and_validate_node(state)
+
+    assert attempted_urls == ["https://example.com/fix-b.patch"]

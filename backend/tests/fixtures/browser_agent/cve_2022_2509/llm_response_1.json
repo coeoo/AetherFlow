@@ -1,0 +1,17 @@
+{
+  "action": "expand_frontier",
+  "reason_summary": "NVD 页面给出了 Debian tracker，继续沿标准修复链路前进。",
+  "confirmed_page_role": "advisory_page",
+  "selected_urls": [
+    "https://security-tracker.debian.org/tracker/CVE-2022-2509"
+  ],
+  "selected_candidate_keys": [],
+  "cross_domain_justification": "从 NVD 跳到 Debian tracker 是标准漏洞修复追踪路径。",
+  "chain_updates": [
+    {
+      "action": "extend",
+      "new_step_role": "tracker_page"
+    }
+  ],
+  "new_chains": []
+}

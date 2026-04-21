@@ -1,0 +1,12 @@
+{
+  "action": "try_candidate_download",
+  "reason_summary": "页面已经给出 GitHub commit，可直接通过 reference matcher 生成 .patch 候选并下载。",
+  "confirmed_page_role": "advisory_page",
+  "selected_urls": [],
+  "selected_candidate_keys": [
+    "https://github.com/example/project/commit/abcdef123456.patch"
+  ],
+  "cross_domain_justification": "",
+  "chain_updates": [],
+  "new_chains": []
+}

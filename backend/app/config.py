@@ -40,10 +40,11 @@ class Settings:
     worker_name: str = "aetherflow-worker"
     runtime_heartbeat_interval_seconds: int = 10
     runtime_heartbeat_stale_seconds: int = 30
-    cve_llm_fallback_enabled: bool = False
-    cve_llm_fallback_max_candidates: int = 8
-    cve_llm_fallback_max_sources: int = 12
-    cve_llm_fallback_max_source_chars: int = 2400
+    cve_browser_backend: str = "playwright"
+    cve_browser_pool_size: int = 3
+    cve_browser_headless: bool = True
+    cve_browser_timeout_ms: int = 30_000
+    cve_browser_cdp_endpoint: str = ""
     llm_base_url: str = ""
     llm_api_key: str = ""
     llm_default_model: str = ""
@@ -51,6 +52,31 @@ class Settings:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "artifact_root", _resolve_artifact_root(self.artifact_root))
+
+    @property
+    def cve_agent_graph_enabled(self) -> bool:
+        # 兼容旧运行时访问；Phase 3 重写主链后删除。
+        return False
+
+    @property
+    def cve_llm_fallback_enabled(self) -> bool:
+        # 兼容旧 fallback 访问；Phase 3 删除该兼容入口。
+        return False
+
+    @property
+    def cve_llm_fallback_max_candidates(self) -> int:
+        # 兼容旧 fallback 访问；Phase 3 删除该兼容入口。
+        return 8
+
+    @property
+    def cve_llm_fallback_max_sources(self) -> int:
+        # 兼容旧 fallback 访问；Phase 3 删除该兼容入口。
+        return 12
+
+    @property
+    def cve_llm_fallback_max_source_chars(self) -> int:
+        # 兼容旧 fallback 访问；Phase 3 删除该兼容入口。
+        return 2400
 
 
 def load_settings() -> Settings:
@@ -67,22 +93,11 @@ def load_settings() -> Settings:
             "AETHERFLOW_RUNTIME_HEARTBEAT_STALE_SECONDS",
             30,
         ),
-        cve_llm_fallback_enabled=_load_bool_setting(
-            "AETHERFLOW_CVE_LLM_FALLBACK_ENABLED",
-            False,
-        ),
-        cve_llm_fallback_max_candidates=_load_int_setting(
-            "AETHERFLOW_CVE_LLM_FALLBACK_MAX_CANDIDATES",
-            8,
-        ),
-        cve_llm_fallback_max_sources=_load_int_setting(
-            "AETHERFLOW_CVE_LLM_FALLBACK_MAX_SOURCES",
-            12,
-        ),
-        cve_llm_fallback_max_source_chars=_load_int_setting(
-            "AETHERFLOW_CVE_LLM_FALLBACK_MAX_SOURCE_CHARS",
-            2400,
-        ),
+        cve_browser_backend=os.getenv("AETHERFLOW_CVE_BROWSER_BACKEND", "playwright").strip(),
+        cve_browser_pool_size=_load_int_setting("AETHERFLOW_CVE_BROWSER_POOL_SIZE", 3),
+        cve_browser_headless=_load_bool_setting("AETHERFLOW_CVE_BROWSER_HEADLESS", True),
+        cve_browser_timeout_ms=_load_int_setting("AETHERFLOW_CVE_BROWSER_TIMEOUT_MS", 30_000),
+        cve_browser_cdp_endpoint=os.getenv("AETHERFLOW_CVE_BROWSER_CDP_ENDPOINT", "").strip(),
         llm_base_url=os.getenv("LLM_BASE_URL", "").strip(),
         llm_api_key=os.getenv("LLM_API_KEY", "").strip(),
         llm_default_model=os.getenv("LLM_DEFAULT_MODEL", "").strip(),

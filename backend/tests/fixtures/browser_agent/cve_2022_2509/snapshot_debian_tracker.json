@@ -1,0 +1,20 @@
+{
+  "url": "https://security-tracker.debian.org/tracker/CVE-2022-2509",
+  "final_url": "https://security-tracker.debian.org/tracker/CVE-2022-2509",
+  "status_code": 200,
+  "title": "Debian Tracker - CVE-2022-2509",
+  "raw_html": "<html><body><h1>CVE-2022-2509</h1><a href=\"https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb\">upstream fix</a></body></html>",
+  "accessibility_tree": "heading \"CVE-2022-2509\"\n  link \"upstream fix\"",
+  "markdown_content": "Debian tracker points to the upstream GitLab commit that fixes the issue.",
+  "links": [
+    {
+      "url": "https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb",
+      "text": "upstream fix",
+      "context": "Fixed upstream in commit ce37f9eb.",
+      "is_cross_domain": true,
+      "estimated_target_role": "commit_page"
+    }
+  ],
+  "page_role_hint": "tracker_page",
+  "fetch_duration_ms": 85
+}

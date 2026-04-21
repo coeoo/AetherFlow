@@ -23,6 +23,12 @@ def _route_after_decide(state: AgentState) -> str:
     return "finalize_run"
 
 
+def _route_after_download(state: AgentState) -> str:
+    if state.get("next_action") == "fetch_next_batch":
+        return "fetch_next_batch"
+    return "finalize_run"
+
+
 def build_cve_patch_graph():
     graph = StateGraph(AgentState)
     graph.add_node("resolve_seeds", resolve_seeds_node)
@@ -47,7 +53,14 @@ def build_cve_patch_graph():
             "finalize_run": "finalize_run",
         },
     )
-    graph.add_edge("download_and_validate", "finalize_run")
+    graph.add_conditional_edges(
+        "download_and_validate",
+        _route_after_download,
+        {
+            "fetch_next_batch": "fetch_next_batch",
+            "finalize_run": "finalize_run",
+        },
+    )
     graph.add_edge("finalize_run", END)
 
     return graph.compile()

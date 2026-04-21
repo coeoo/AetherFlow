@@ -38,10 +38,11 @@ def test_phase2_settings_include_runtime_defaults() -> None:
     assert settings.artifact_root == str((root_dir / "backend/.runtime/artifacts").resolve())
     assert settings.runtime_heartbeat_interval_seconds == 10
     assert settings.runtime_heartbeat_stale_seconds == 30
-    assert settings.cve_llm_fallback_enabled is False
-    assert settings.cve_llm_fallback_max_candidates == 8
-    assert settings.cve_llm_fallback_max_sources == 12
-    assert settings.cve_llm_fallback_max_source_chars == 2400
+    assert settings.cve_browser_backend == "playwright"
+    assert settings.cve_browser_pool_size == 3
+    assert settings.cve_browser_headless is True
+    assert settings.cve_browser_timeout_ms == 30_000
+    assert settings.cve_browser_cdp_endpoint == ""
     assert settings.llm_base_url == ""
     assert settings.llm_api_key == ""
     assert settings.llm_default_model == ""

@@ -1,0 +1,20 @@
+{
+  "url": "https://gitlab.com/xz-backdoor/xz/-/commit/8f2c1a2",
+  "final_url": "https://gitlab.com/xz-backdoor/xz/-/commit/8f2c1a2",
+  "status_code": 200,
+  "title": "xz commit 8f2c1a2",
+  "raw_html": "<html><body><h1>commit 8f2c1a2</h1><a href=\"https://gitlab.com/xz-backdoor/xz/-/commit/8f2c1a2.patch\">download patch</a></body></html>",
+  "accessibility_tree": "heading \"commit 8f2c1a2\"\n  link \"download patch\"",
+  "markdown_content": "The commit page exposes a patch download suitable for validation.",
+  "links": [
+    {
+      "url": "https://gitlab.com/xz-backdoor/xz/-/commit/8f2c1a2.patch",
+      "text": "download patch",
+      "context": "Download the upstream patch.",
+      "is_cross_domain": false,
+      "estimated_target_role": "download_page"
+    }
+  ],
+  "page_role_hint": "commit_page",
+  "fetch_duration_ms": 76
+}

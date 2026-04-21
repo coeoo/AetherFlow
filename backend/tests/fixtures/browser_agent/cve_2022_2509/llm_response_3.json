@@ -1,0 +1,12 @@
+{
+  "action": "try_candidate_download",
+  "reason_summary": "commit 页面已经暴露出直接 patch 链接，可以立即下载校验。",
+  "confirmed_page_role": "commit_page",
+  "selected_urls": [],
+  "selected_candidate_keys": [
+    "https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb.patch"
+  ],
+  "cross_domain_justification": "",
+  "chain_updates": [],
+  "new_chains": []
+}

@@ -1,0 +1,14 @@
+{
+  "action": "stop_search",
+  "reason_summary": "厂商公告没有补丁、commit 或可继续跟进的链接，这条链路应收口为 dead_end。",
+  "confirmed_page_role": "advisory_page",
+  "selected_urls": [],
+  "selected_candidate_keys": [],
+  "cross_domain_justification": "",
+  "chain_updates": [
+    {
+      "action": "mark_dead_end"
+    }
+  ],
+  "new_chains": []
+}

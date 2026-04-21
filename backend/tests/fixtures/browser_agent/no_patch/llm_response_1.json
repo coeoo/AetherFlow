@@ -1,0 +1,17 @@
+{
+  "action": "expand_frontier",
+  "reason_summary": "先跟进厂商公告，确认是否有补丁或上游提交线索。",
+  "confirmed_page_role": "advisory_page",
+  "selected_urls": [
+    "https://vendor.example.com/security/CVE-2021-0001"
+  ],
+  "selected_candidate_keys": [],
+  "cross_domain_justification": "从 NVD 跳转到厂商公告是合理的补丁搜寻下一步。",
+  "chain_updates": [
+    {
+      "action": "extend",
+      "new_step_role": "advisory_page"
+    }
+  ],
+  "new_chains": []
+}

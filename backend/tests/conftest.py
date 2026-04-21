@@ -23,7 +23,7 @@ from app.models import CVERun, TaskJob
 def test_database_url() -> str:
     database_url = os.environ.get("TEST_DATABASE_URL")
     if not database_url:
-        pytest.fail("缺少 TEST_DATABASE_URL，无法运行 PostgreSQL 测试。")
+        pytest.skip("缺少 TEST_DATABASE_URL，跳过依赖 PostgreSQL 的测试。")
 
     return database_url
 
@@ -78,7 +78,7 @@ def seeded_cve_run(db_session: Session) -> CVERun:
     job = TaskJob(
         job_id=uuid.uuid4(),
         scene_name="cve",
-        job_type="cve_patch_fast_first",
+        job_type="cve_patch_agent_graph",
         trigger_kind="manual",
         status="queued",
         payload_json={},

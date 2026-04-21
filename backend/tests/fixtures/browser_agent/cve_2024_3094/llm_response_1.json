@@ -1,0 +1,14 @@
+{
+  "action": "stop_search",
+  "reason_summary": "Openwall 邮件列表在这个录制场景里没有直接的补丁线索，先关闭这条链路。",
+  "confirmed_page_role": "mailing_list_page",
+  "selected_urls": [],
+  "selected_candidate_keys": [],
+  "cross_domain_justification": "",
+  "chain_updates": [
+    {
+      "action": "mark_dead_end"
+    }
+  ],
+  "new_chains": []
+}

@@ -1,0 +1,20 @@
+{
+  "url": "https://nvd.nist.gov/vuln/detail/CVE-2021-0001",
+  "final_url": "https://nvd.nist.gov/vuln/detail/CVE-2021-0001",
+  "status_code": 200,
+  "title": "CVE-2021-0001 - NVD",
+  "raw_html": "<html><body><h1>CVE-2021-0001</h1><a href=\"https://vendor.example.com/security/CVE-2021-0001\">vendor advisory</a></body></html>",
+  "accessibility_tree": "heading \"CVE-2021-0001\"\n  link \"vendor advisory\"",
+  "markdown_content": "Only a vendor advisory link is available in this recording.",
+  "links": [
+    {
+      "url": "https://vendor.example.com/security/CVE-2021-0001",
+      "text": "vendor advisory",
+      "context": "Follow the vendor advisory for more details.",
+      "is_cross_domain": true,
+      "estimated_target_role": "advisory_page"
+    }
+  ],
+  "page_role_hint": "advisory_page",
+  "fetch_duration_ms": 72
+}

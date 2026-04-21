@@ -1,0 +1,17 @@
+{
+  "action": "expand_frontier",
+  "reason_summary": "继续访问 tracker 页面寻找补丁线索。",
+  "confirmed_page_role": "advisory_page",
+  "selected_urls": [
+    "https://tracker.example.com/CVE-2020-4242"
+  ],
+  "selected_candidate_keys": [],
+  "cross_domain_justification": "当前只剩 tracker 链路可继续推进。",
+  "chain_updates": [
+    {
+      "action": "extend",
+      "new_step_role": "tracker_page"
+    }
+  ],
+  "new_chains": []
+}

@@ -1,0 +1,20 @@
+{
+  "url": "https://access.redhat.com/security/cve/CVE-2024-3094",
+  "final_url": "https://access.redhat.com/security/cve/CVE-2024-3094",
+  "status_code": 200,
+  "title": "Red Hat CVE-2024-3094",
+  "raw_html": "<html><body><h1>CVE-2024-3094</h1><a href=\"https://gitlab.com/xz-backdoor/xz/-/commit/8f2c1a2\">upstream patch commit</a></body></html>",
+  "accessibility_tree": "heading \"CVE-2024-3094\"\n  link \"upstream patch commit\"",
+  "markdown_content": "Red Hat advisory points to the upstream GitLab commit that carries the patch.",
+  "links": [
+    {
+      "url": "https://gitlab.com/xz-backdoor/xz/-/commit/8f2c1a2",
+      "text": "upstream patch commit",
+      "context": "Follow the upstream commit containing the remediation.",
+      "is_cross_domain": true,
+      "estimated_target_role": "commit_page"
+    }
+  ],
+  "page_role_hint": "advisory_page",
+  "fetch_duration_ms": 88
+}

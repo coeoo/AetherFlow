@@ -1,0 +1,20 @@
+{
+  "url": "https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb",
+  "final_url": "https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb",
+  "status_code": 200,
+  "title": "gnutls commit ce37f9eb",
+  "raw_html": "<html><body><h1>commit ce37f9eb</h1><a href=\"https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb.patch\">download patch</a></body></html>",
+  "accessibility_tree": "heading \"commit ce37f9eb\"\n  link \"download patch\"",
+  "markdown_content": "The commit page exposes a direct patch download endpoint.",
+  "links": [
+    {
+      "url": "https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb.patch",
+      "text": "download patch",
+      "context": "Patch view for upstream commit ce37f9eb.",
+      "is_cross_domain": false,
+      "estimated_target_role": "download_page"
+    }
+  ],
+  "page_role_hint": "commit_page",
+  "fetch_duration_ms": 70
+}
