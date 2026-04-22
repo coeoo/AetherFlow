@@ -27,7 +27,7 @@ ALEMBIC_BIN = ROOT_DIR / ".venv/bin/alembic"
 def _get_test_database_url() -> str:
     database_url = os.environ.get("TEST_DATABASE_URL")
     if not database_url:
-        pytest.fail("缺少 TEST_DATABASE_URL，无法运行 PostgreSQL 测试。")
+        pytest.skip("缺少 TEST_DATABASE_URL，跳过 PostgreSQL 测试。")
     return database_url
 
 

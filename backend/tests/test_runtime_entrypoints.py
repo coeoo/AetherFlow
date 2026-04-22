@@ -4,6 +4,7 @@ import sys
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
+BACKEND_DIR = ROOT_DIR / "backend"
 BACKEND_GITIGNORE = ROOT_DIR / "backend/.gitignore"
 DEV_COMPOSE = ROOT_DIR / "infra/docker-compose.dev.yml"
 
@@ -11,7 +12,7 @@ DEV_COMPOSE = ROOT_DIR / "infra/docker-compose.dev.yml"
 def test_worker_help_exits_zero() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "app.worker.main", "--help"],
-        cwd="backend",
+        cwd=BACKEND_DIR,
         capture_output=True,
         text=True,
     )
@@ -22,7 +23,7 @@ def test_worker_help_exits_zero() -> None:
 def test_scheduler_help_exits_zero() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "app.scheduler.main", "--help"],
-        cwd="backend",
+        cwd=BACKEND_DIR,
         capture_output=True,
         text=True,
     )

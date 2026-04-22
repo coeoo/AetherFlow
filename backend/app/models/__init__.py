@@ -4,7 +4,14 @@ from app.models.announcement import (
     AnnouncementRun,
     AnnouncementSource,
 )
-from app.models.cve import CVERun, CVEPatchArtifact
+from app.models.cve import (
+    CVECandidateArtifact,
+    CVERun,
+    CVEPatchArtifact,
+    CVESearchDecision,
+    CVESearchEdge,
+    CVESearchNode,
+)
 from app.models.platform import (
     Artifact,
     DeliveryRecord,
@@ -22,8 +29,12 @@ __all__ = [
     "AnnouncementRun",
     "AnnouncementSource",
     "Artifact",
+    "CVECandidateArtifact",
     "CVERun",
     "CVEPatchArtifact",
+    "CVESearchDecision",
+    "CVESearchEdge",
+    "CVESearchNode",
     "DeliveryRecord",
     "DeliveryTarget",
     "RuntimeHeartbeat",

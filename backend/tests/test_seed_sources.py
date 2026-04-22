@@ -40,7 +40,7 @@ def test_cve_official_source_merges_cna_and_cve_program_references(monkeypatch) 
             },
         )
 
-    monkeypatch.setattr("app.cve.seed_sources.httpx.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.seed_sources.http_client.get", _fake_http_get)
 
     result = fetch_seed_source("cve_official", cve_id=cve_id)
     assert result.status == "success"
@@ -67,7 +67,7 @@ def test_source_result_marks_not_found_without_error(monkeypatch) -> None:
         assert kwargs["timeout"] == 10.0
         return _make_response(url=got_url, status_code=404, json_data={"code": 5, "message": "not found"})
 
-    monkeypatch.setattr("app.cve.seed_sources.httpx.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.seed_sources.http_client.get", _fake_http_get)
 
     result = fetch_seed_source("osv", cve_id=cve_id)
     assert result.status == "not_found"
@@ -95,7 +95,7 @@ def test_source_result_classifies_http_and_json_failures(monkeypatch) -> None:
             return _make_response(url=got_url, status_code=200, content=b"{")
         raise AssertionError(f"未知 URL: {got_url}")
 
-    monkeypatch.setattr("app.cve.seed_sources.httpx.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.seed_sources.http_client.get", _fake_http_get)
 
     http_failed = fetch_seed_source("nvd", cve_id=cve_id)
     assert http_failed.status == "failed"
@@ -121,11 +121,10 @@ def test_source_result_classifies_network_failures(monkeypatch) -> None:
         assert kwargs["timeout"] == 10.0
         raise httpx.ConnectError("connect failed", request=httpx.Request("GET", got_url))
 
-    monkeypatch.setattr("app.cve.seed_sources.httpx.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.seed_sources.http_client.get", _fake_http_get)
 
     result = fetch_seed_source("github_advisory", cve_id=cve_id)
     assert result.status == "failed"
     assert result.status_code is None
     assert result.error_kind == "network_error"
     assert "connect failed" in (result.error_message or "")
-
