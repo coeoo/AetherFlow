@@ -54,31 +54,6 @@ class Settings:
     def __post_init__(self) -> None:
         object.__setattr__(self, "artifact_root", _resolve_artifact_root(self.artifact_root))
 
-    @property
-    def cve_agent_graph_enabled(self) -> bool:
-        # 兼容旧运行时访问；Phase 3 重写主链后删除。
-        return False
-
-    @property
-    def cve_llm_fallback_enabled(self) -> bool:
-        # 兼容旧 fallback 访问；Phase 3 删除该兼容入口。
-        return False
-
-    @property
-    def cve_llm_fallback_max_candidates(self) -> int:
-        # 兼容旧 fallback 访问；Phase 3 删除该兼容入口。
-        return 8
-
-    @property
-    def cve_llm_fallback_max_sources(self) -> int:
-        # 兼容旧 fallback 访问；Phase 3 删除该兼容入口。
-        return 12
-
-    @property
-    def cve_llm_fallback_max_source_chars(self) -> int:
-        # 兼容旧 fallback 访问；Phase 3 删除该兼容入口。
-        return 2400
-
 
 def load_settings() -> Settings:
     return Settings(

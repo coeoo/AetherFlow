@@ -42,7 +42,7 @@ class StopEvaluation:
     reason: str
 
 
-def _count_consumed_pages(state) -> int:
+def count_consumed_pages(state) -> int:
     page_observations = dict(state.get("page_observations") or {})
     if page_observations:
         return sum(
@@ -62,7 +62,7 @@ def _active_chains(state) -> list[dict]:
     ]
 
 
-def _unexpanded_frontier_items(state) -> list[dict]:
+def unexpanded_frontier_items(state) -> list[dict]:
     return [
         item
         for item in list(state.get("frontier") or [])
@@ -72,7 +72,7 @@ def _unexpanded_frontier_items(state) -> list[dict]:
 
 def _remaining_page_budget(state) -> int:
     budget = dict(state.get("budget") or {})
-    return int(budget.get("max_pages_total", 0) or 0) - _count_consumed_pages(state)
+    return int(budget.get("max_pages_total", 0) or 0) - count_consumed_pages(state)
 
 
 def _has_chain_derived_cross_domain_candidates(state) -> bool:
@@ -124,7 +124,7 @@ def evaluate_stop_condition(state: dict) -> StopEvaluation:
     if direct_candidates and not active_chains:
         return StopEvaluation(should_stop=True, reason="all_chains_resolved")
 
-    if not active_chains and not _unexpanded_frontier_items(state) and not direct_candidates:
+    if not active_chains and not unexpanded_frontier_items(state) and not direct_candidates:
         return StopEvaluation(should_stop=True, reason="no_remaining_frontier_or_candidates")
 
     if _remaining_page_budget(state) <= 0:
@@ -142,7 +142,7 @@ def validate_needs_human_review(state: dict) -> bool:
     """
     if _active_chains(state):
         return False
-    if _unexpanded_frontier_items(state):
+    if unexpanded_frontier_items(state):
         return False
     if _has_chain_derived_cross_domain_candidates(state):
         return False
@@ -160,7 +160,7 @@ def validate_agent_decision(state, decision: dict) -> AgentValidationResult:
         )
 
     budget = dict(state.get("budget") or {})
-    consumed_pages = _count_consumed_pages(state)
+    consumed_pages = count_consumed_pages(state)
     if consumed_pages >= int(budget.get("max_pages_total", 0) or 0):
         return AgentValidationResult(
             accepted=False,

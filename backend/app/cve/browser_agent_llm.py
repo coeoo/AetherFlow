@@ -98,12 +98,14 @@ def build_navigation_context(state: dict, page_view: LLMPageView) -> NavigationC
         discovered_candidates=[dict(candidate) for candidate in list(state.get("direct_candidates", []))],
         visited_domains=_extract_visited_domains(visited_urls),
     )
-    # 验收日志钩子通过上下文对象携带，不改 LLM 调用函数签名。
-    object.__setattr__(context, "_llm_decision_log", state.get("_llm_decision_log"))
     return context
 
 
-def call_browser_agent_navigation(context: NavigationContext) -> dict[str, Any]:
+def call_browser_agent_navigation(
+    context: NavigationContext,
+    *,
+    llm_decision_log: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """调用 OpenAI 兼容接口获取浏览器导航决策。"""
     settings = load_settings()
     if not settings.llm_base_url or not settings.llm_api_key or not settings.llm_default_model:
@@ -142,7 +144,8 @@ def call_browser_agent_navigation(context: NavigationContext) -> dict[str, Any]:
             last_error = exc
             if attempt_index + 1 >= max_attempts:
                 _append_llm_failure_log(
-                    context,
+                    llm_decision_log,
+                    context=context,
                     error=exc,
                     model_name=settings.llm_default_model,
                     latency_ms=int((perf_counter() - started_at) * 1000),
@@ -164,7 +167,8 @@ def call_browser_agent_navigation(context: NavigationContext) -> dict[str, Any]:
         raise ValueError(f"browser_agent_navigation 缺少字段: {', '.join(missing_fields)}")
     decision["model_name"] = settings.llm_default_model
     _append_llm_decision_log(
-        context,
+        llm_decision_log,
+        context=context,
         decision=decision,
         model_name=settings.llm_default_model,
         latency_ms=int((perf_counter() - started_at) * 1000),
@@ -237,14 +241,14 @@ def _extract_visited_domains(visited_urls: list[str]) -> list[str]:
 
 
 def _append_llm_decision_log(
-    context: NavigationContext,
+    log: list[dict[str, Any]] | None,
     *,
+    context: NavigationContext,
     decision: dict[str, Any],
     model_name: str,
     latency_ms: int,
 ) -> None:
-    raw_log = getattr(context, "_llm_decision_log", None)
-    if not isinstance(raw_log, list):
+    if not isinstance(log, list):
         return
 
     selected_urls = [
@@ -253,10 +257,10 @@ def _append_llm_decision_log(
         if str(item).strip()
     ]
     page_domain = urlparse(context.current_page.url).netloc.lower()
-    raw_log.append(
+    log.append(
         {
             "cve_id": context.cve_id,
-            "step_index": len(raw_log) + 1,
+            "step_index": len(log) + 1,
             "page_url": context.current_page.url,
             "page_role": context.current_page.page_role,
             "action": str(decision.get("action", "")),
@@ -278,19 +282,19 @@ def _append_llm_decision_log(
 
 
 def _append_llm_failure_log(
-    context: NavigationContext,
+    log: list[dict[str, Any]] | None,
     *,
+    context: NavigationContext,
     error: Exception,
     model_name: str,
     latency_ms: int,
 ) -> None:
-    raw_log = getattr(context, "_llm_decision_log", None)
-    if not isinstance(raw_log, list):
+    if not isinstance(log, list):
         return
-    raw_log.append(
+    log.append(
         {
             "cve_id": context.cve_id,
-            "step_index": len(raw_log) + 1,
+            "step_index": len(log) + 1,
             "page_url": context.current_page.url,
             "page_role": context.current_page.page_role,
             "action": "llm_call_failed",

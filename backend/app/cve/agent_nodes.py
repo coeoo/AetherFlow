@@ -8,9 +8,9 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.config import load_settings
-from app.cve.agent_policy import _count_consumed_pages  # noqa: 仅内部复用
-from app.cve.agent_policy import _unexpanded_frontier_items  # noqa: 仅内部复用
+from app.cve.agent_policy import count_consumed_pages
 from app.cve.agent_policy import evaluate_stop_condition
+from app.cve.agent_policy import unexpanded_frontier_items
 from app.cve.agent_policy import validate_agent_decision
 from app.cve.agent_policy import validate_needs_human_review
 from app.cve.agent_state import AgentState
@@ -623,7 +623,7 @@ def _build_rule_fallback_decision(state: AgentState) -> dict[str, object]:
             "new_chains": [],
         }
 
-    fallback_urls = _select_fallback_frontier_urls(state, _unexpanded_frontier_items(state))
+    fallback_urls = _select_fallback_frontier_urls(state, unexpanded_frontier_items(state))
     if fallback_urls:
         return {
             "action": "expand_frontier",
@@ -720,6 +720,34 @@ def _count_page_roles(state: AgentState) -> dict[str, int]:
             continue
         counts[role] = counts.get(role, 0) + 1
     return counts
+
+
+def _build_budget_usage_summary(state: AgentState) -> dict[str, dict[str, int]]:
+    budget = dict(state.get("budget") or {})
+    initial_budget = dict(state.get("initial_budget") or {})
+    cross_domain_used = int(state.get("cross_domain_hops", 0) or 0)
+    cross_domain_remaining = int(budget.get("max_cross_domain_expansions", 0) or 0)
+    cross_domain_max = int(
+        initial_budget.get(
+            "max_cross_domain_expansions",
+            cross_domain_remaining + cross_domain_used,
+        )
+        or 0
+    )
+    return {
+        "pages": {
+            "used": count_consumed_pages(state),
+            "max": int(budget.get("max_pages_total", 0) or 0),
+        },
+        "llm_calls": {
+            "used": len(list(state.get("_llm_decision_log") or [])),
+            "max": int(budget.get("max_llm_calls", 0) or 0),
+        },
+        "cross_domain": {
+            "used": cross_domain_used,
+            "max": max(cross_domain_max, cross_domain_used),
+        },
+    }
 
 
 def _is_blocked_or_empty_page(snapshot: BrowserPageSnapshot) -> bool:
@@ -841,7 +869,7 @@ def fetch_next_batch_node(state: AgentState) -> AgentState:
     if state.get("stop_reason") == "no_seed_references":
         return state
 
-    remaining_budget = int(state["budget"].get("max_pages_total", 0)) - _count_consumed_pages(state)
+    remaining_budget = int(state["budget"].get("max_pages_total", 0)) - count_consumed_pages(state)
     if remaining_budget <= 0:
         state["stop_reason"] = "max_pages_total_exhausted"
         return state
@@ -1118,7 +1146,10 @@ def agent_decide_node(state: AgentState) -> AgentState:
         page_view = build_llm_page_view(snapshot, list(current_observation.get("candidates") or []))
         navigation_context = build_navigation_context(state, page_view)
         try:
-            decision = call_browser_agent_navigation(navigation_context)
+            decision = call_browser_agent_navigation(
+                navigation_context,
+                llm_decision_log=state.get("_llm_decision_log"),
+            )
             selected_candidate_keys = [
                 str(key) for key in list(decision.get("selected_candidate_keys") or [])
             ]
@@ -1199,7 +1230,7 @@ def agent_decide_node(state: AgentState) -> AgentState:
         selected_urls = list(validation.normalized_selected_urls) if validation.accepted else []
 
     if action == "needs_human_review" and not validate_needs_human_review(state):
-        fallback_urls = _select_fallback_frontier_urls(state, _unexpanded_frontier_items(state))
+        fallback_urls = _select_fallback_frontier_urls(state, unexpanded_frontier_items(state))
         if fallback_urls:
             action = "expand_frontier"
             selected_urls = fallback_urls
@@ -1210,7 +1241,7 @@ def agent_decide_node(state: AgentState) -> AgentState:
 
     evaluation = evaluate_stop_condition(state)
     if action == "stop_search" and not evaluation.should_stop:
-        fallback_urls = _select_fallback_frontier_urls(state, _unexpanded_frontier_items(state))
+        fallback_urls = _select_fallback_frontier_urls(state, unexpanded_frontier_items(state))
         if fallback_urls:
             action = "expand_frontier"
             selected_urls = fallback_urls
@@ -1360,7 +1391,9 @@ def finalize_run_node(state: AgentState) -> AgentState:
         "patch_count": len(downloaded_patches),
         "chain_summary": chain_tracker.to_dict_list(),
         "page_role_counts": _count_page_roles(state),
+        "pages_visited": count_consumed_pages(state),
         "cross_domain_hops": int(state.get("cross_domain_hops", 0)),
+        "budget_usage": _build_budget_usage_summary(state),
     }
     if downloaded_patches:
         summary["primary_patch_url"] = downloaded_patches[0].candidate_url

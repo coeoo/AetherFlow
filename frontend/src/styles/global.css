@@ -605,16 +605,23 @@ textarea:focus {
 .status-pill-succeeded,
 .status-pill-healthy,
 .cve-status-chip-succeeded,
-.cve-status-chip-downloaded {
+.cve-status-chip-downloaded,
+.cve-status-chip-completed {
   color: #118256;
   background: rgba(111, 251, 190, 0.18);
 }
 
 .status-pill-failed,
 .status-pill-down,
-.cve-status-chip-failed {
+.cve-status-chip-failed,
+.cve-status-chip-dead_end {
   color: #ba1a1a;
   background: rgba(255, 218, 214, 0.86);
+}
+
+.cve-status-chip-in_progress {
+  color: #1b5fa7;
+  background: rgba(209, 229, 255, 0.9);
 }
 
 .status-pill-degraded {
@@ -875,6 +882,177 @@ textarea:focus {
 
 .cve-trace-item-failed {
   background: rgba(255, 218, 214, 0.32);
+}
+
+.cve-chain-list,
+.cve-budget-list,
+.cve-search-graph-list,
+.cve-search-edge-list,
+.cve-search-decision-list {
+  display: grid;
+  gap: 16px;
+}
+
+.cve-chain-card,
+.cve-budget-item,
+.cve-search-node {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(251, 252, 253, 0.7) 0%, rgba(243, 246, 248, 0.7) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.cve-chain-timeline {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.cve-chain-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cve-chain-connector,
+.cve-search-edge-line {
+  width: 32px;
+  border-top: 2px solid rgba(61, 74, 91, 0.28);
+  flex-shrink: 0;
+}
+
+.cve-chain-connector-cross,
+.cve-search-edge-line-cross {
+  border-top-style: dashed;
+}
+
+.cve-chain-step-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  color: #1e293b;
+  background: rgba(255, 255, 255, 0.82);
+  cursor: default;
+  text-align: left;
+}
+
+.cve-chain-step-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.cve-chain-step-copy span {
+  color: #617084;
+  font-size: 0.88rem;
+}
+
+.cve-role-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #94a3b8;
+  flex-shrink: 0;
+}
+
+.cve-role-dot-advisory_page {
+  background: #2f5ed8;
+}
+
+.cve-role-dot-tracker_page {
+  background: #7e4fff;
+}
+
+.cve-role-dot-commit_page {
+  background: #118256;
+}
+
+.cve-role-dot-download_page {
+  background: #b07c00;
+}
+
+.cve-budget-track {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(217, 225, 234, 0.8);
+}
+
+.cve-budget-bar {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.cve-budget-bar-safe {
+  background: linear-gradient(90deg, #2eb872 0%, #6bffbe 100%);
+}
+
+.cve-budget-bar-warn {
+  background: linear-gradient(90deg, #d1a90f 0%, #ffd36d 100%);
+}
+
+.cve-budget-bar-danger {
+  background: linear-gradient(90deg, #c43c2f 0%, #ff8a7a 100%);
+}
+
+.cve-search-node-neutral {
+  background: linear-gradient(180deg, rgba(251, 252, 253, 0.7) 0%, rgba(243, 246, 248, 0.7) 100%);
+}
+
+.cve-search-node-advisory {
+  background: linear-gradient(180deg, rgba(225, 235, 255, 0.74) 0%, rgba(243, 247, 255, 0.82) 100%);
+  border-color: rgba(47, 94, 216, 0.14);
+}
+
+.cve-search-node-tracker {
+  background: linear-gradient(180deg, rgba(240, 233, 255, 0.76) 0%, rgba(248, 243, 255, 0.84) 100%);
+  border-color: rgba(126, 79, 255, 0.14);
+}
+
+.cve-search-node-commit {
+  background: linear-gradient(180deg, rgba(228, 248, 239, 0.78) 0%, rgba(243, 252, 247, 0.84) 100%);
+  border-color: rgba(17, 130, 86, 0.16);
+}
+
+.cve-search-node-download {
+  background: linear-gradient(180deg, rgba(255, 245, 218, 0.82) 0%, rgba(255, 250, 235, 0.9) 100%);
+  border-color: rgba(176, 124, 0, 0.18);
+}
+
+.cve-search-decision-list {
+  grid-template-columns: repeat(auto-fit, minmax(120px, max-content));
+}
+
+.cve-search-decision-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  color: #8b6300;
+  background: rgba(255, 237, 176, 0.9);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.cve-search-decision-chip-valid {
+  color: #118256;
+  background: rgba(111, 251, 190, 0.18);
+}
+
+.cve-search-edge-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .cve-diff-panel {

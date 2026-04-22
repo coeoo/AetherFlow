@@ -809,6 +809,104 @@ def test_agent_decide_node_fallback_limits_cross_domain_expansion(
     assert result["decision_history"][-1]["validated"] is True
 
 
+def test_select_fallback_frontier_urls_prefers_same_domain_when_scores_are_tied(
+    seeded_cve_run, db_session
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["current_page_url"] = "https://tracker.example.com/cve"
+    state["budget"]["max_children_per_node"] = 1
+    state["budget"]["max_cross_domain_expansions"] = 2
+
+    selected_urls = _select_fallback_frontier_urls(
+        state,
+        [
+            {
+                "url": "https://tracker.example.com/next-hop",
+                "depth": 1,
+                "score": 10,
+                "expanded": False,
+            },
+            {
+                "url": "https://git.example.net/commit/abc1234",
+                "depth": 1,
+                "score": 10,
+                "expanded": False,
+            },
+        ],
+    )
+
+    assert selected_urls == ["https://tracker.example.com/next-hop"]
+
+
+def test_select_fallback_frontier_urls_returns_empty_when_all_urls_are_noise(
+    seeded_cve_run, db_session
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["current_page_url"] = "https://nvd.nist.gov/vuln/detail/CVE-2022-2509"
+    state["budget"]["max_children_per_node"] = 2
+
+    selected_urls = _select_fallback_frontier_urls(
+        state,
+        [
+            {
+                "url": "https://nvd.nist.gov/general",
+                "depth": 1,
+                "score": 20,
+                "expanded": False,
+            },
+            {
+                "url": "https://github.com/login?return_to=/advisories/GHSA",
+                "depth": 1,
+                "score": 19,
+                "expanded": False,
+            },
+        ],
+    )
+
+    assert selected_urls == []
+
+
+def test_select_fallback_frontier_urls_skips_cross_domain_when_budget_is_zero(
+    seeded_cve_run, db_session
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["current_page_url"] = "https://lists.example.com/post"
+    state["budget"]["max_children_per_node"] = 2
+    state["budget"]["max_cross_domain_expansions"] = 0
+
+    selected_urls = _select_fallback_frontier_urls(
+        state,
+        [
+            {
+                "url": "https://redhat.example.com/advisory",
+                "depth": 1,
+                "score": 30,
+                "expanded": False,
+            },
+            {
+                "url": "https://git.example.net/commit/abc1234",
+                "depth": 1,
+                "score": 29,
+                "expanded": False,
+            },
+        ],
+    )
+
+    assert selected_urls == []
+
+
 def test_agent_decide_node_invalid_duplicate_llm_result_uses_filtered_fallback(
     seeded_cve_run, db_session, monkeypatch
 ) -> None:
@@ -1696,6 +1794,17 @@ def test_download_and_finalize_node_updates_run_summary(
     monkeypatch.setattr("app.cve.agent_nodes.download_patch_candidate", _fake_download)
 
     downloaded_state = download_and_validate_node(state)
+    downloaded_state["page_observations"] = {
+        "https://example.com/root": {
+            "url": "https://example.com/root",
+            "fetch_status": "fetched",
+        }
+    }
+    downloaded_state["_llm_decision_log"] = [
+        {"action": "expand_frontier"},
+        {"action": "try_candidate_download"},
+    ]
+    downloaded_state["cross_domain_hops"] = 1
     finalize_run_node(downloaded_state)
     db_session.commit()
 
@@ -1704,6 +1813,12 @@ def test_download_and_finalize_node_updates_run_summary(
     assert run.status == "succeeded"
     assert run.stop_reason == "patches_downloaded"
     assert run.summary_json["primary_patch_url"] == "https://example.com/fix.patch"
+    assert run.summary_json["pages_visited"] == 1
+    assert run.summary_json["budget_usage"] == {
+        "pages": {"used": 1, "max": 20},
+        "llm_calls": {"used": 2, "max": 15},
+        "cross_domain": {"used": 1, "max": 8},
+    }
 
 
 def test_download_and_validate_node_prefers_selected_candidate_keys(monkeypatch) -> None:
@@ -1791,3 +1906,78 @@ def test_download_and_validate_node_prefers_selected_candidate_keys(monkeypatch)
     download_and_validate_node(state)
 
     assert attempted_urls == ["https://example.com/fix-b.patch"]
+
+
+def test_finalize_run_node_includes_budget_usage_and_pages_visited() -> None:
+    run_id = uuid.uuid4()
+
+    class _FakePatchQuery:
+        def __init__(self, patches) -> None:
+            self._patches = patches
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return list(self._patches)
+
+    class _FakeSession:
+        def __init__(self) -> None:
+            self.run = SimpleNamespace(
+                run_id=run_id,
+                phase="agent_decide",
+                status="running",
+                stop_reason=None,
+                summary_json={},
+            )
+            self.patches = [
+                SimpleNamespace(
+                    candidate_url="https://example.com/fix.patch",
+                    download_status="downloaded",
+                    patch_meta_json={
+                        "discovered_from_url": "https://example.com/root",
+                        "discovered_from_host": "example.com",
+                        "discovery_sources": [
+                            {
+                                "source_url": "https://example.com/root",
+                                "source_host": "example.com",
+                            }
+                        ],
+                    },
+                )
+            ]
+
+        def get(self, model, value):
+            if model is CVERun and value == run_id:
+                return self.run
+            return None
+
+        def execute(self, statement):
+            return _FakePatchQuery(self.patches)
+
+        def flush(self) -> None:
+            return None
+
+    session = _FakeSession()
+    state = build_initial_agent_state(run_id=str(run_id), cve_id="CVE-2024-3094")
+    state["session"] = session
+    state["page_observations"] = {
+        "https://example.com/root": {
+            "url": "https://example.com/root",
+            "fetch_status": "fetched",
+        }
+    }
+    state["_llm_decision_log"] = [
+        {"action": "expand_frontier"},
+        {"action": "try_candidate_download"},
+    ]
+    state["cross_domain_hops"] = 1
+
+    finalize_run_node(state)
+
+    assert session.run.summary_json["pages_visited"] == 1
+    assert session.run.summary_json["budget_usage"] == {
+        "pages": {"used": 1, "max": 20},
+        "llm_calls": {"used": 2, "max": 15},
+        "cross_domain": {"used": 1, "max": 8},
+    }

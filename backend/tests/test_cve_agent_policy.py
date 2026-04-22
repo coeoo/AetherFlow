@@ -143,6 +143,48 @@ def test_evaluate_stop_condition_keeps_running_when_active_chains_exist() -> Non
     assert evaluation.reason == "active_chains_in_progress"
 
 
+def test_evaluate_stop_condition_stops_immediately_when_patch_downloaded() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2024-3094")
+    state["patches"] = [
+        {
+            "download_status": "downloaded",
+            "candidate_url": "https://example.com/fix.patch",
+        }
+    ]
+    state["navigation_chains"] = [
+        {
+            "chain_id": "chain-1",
+            "status": "in_progress",
+            "expected_next_roles": ["commit_page"],
+        }
+    ]
+    state["frontier"] = [{"url": "https://example.com/next", "expanded": False}]
+    state["page_observations"] = {}
+
+    evaluation = evaluate_stop_condition(state)
+
+    assert evaluation.should_stop is True
+    assert evaluation.reason == "patches_downloaded"
+
+
+def test_evaluate_stop_condition_does_not_stop_on_empty_patch_list() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2024-3094")
+    state["patches"] = []
+    state["navigation_chains"] = [
+        {
+            "chain_id": "chain-1",
+            "status": "in_progress",
+            "expected_next_roles": ["commit_page"],
+        }
+    ]
+    state["page_observations"] = {}
+
+    evaluation = evaluate_stop_condition(state)
+
+    assert evaluation.should_stop is False
+    assert evaluation.reason == "active_chains_in_progress"
+
+
 def test_validate_needs_human_review_rejects_when_active_chain_exists() -> None:
     state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2024-3094")
     state["navigation_chains"] = [

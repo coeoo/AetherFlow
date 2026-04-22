@@ -193,6 +193,15 @@ BrowserBackend (Protocol)
 SyncBrowserBridge                # async→sync 桥接，供 LangGraph 同步节点调用
 ```
 
+### Lightpanda CDP 验证状态
+
+| 能力 | 状态 | 备注 |
+|------|------|------|
+| CDP 连接 | 待验证 | 已补 `backend/scripts/verify_lightpanda_cdp.py`，当前工作区无可用 Lightpanda 端点 |
+| a11y snapshot | 待验证 | 脚本会调用 `page.accessibility.snapshot()` 并输出结果 |
+| DOM content | 待验证 | 脚本会调用 `page.content()` 并记录内容长度 |
+| JS 执行（链接提取） | 待验证 | 脚本复用 `_LINK_EXTRACTION_SCRIPT` 验证页面内 JS 执行能力 |
+
 **BrowserPageSnapshot** 是浏览器层的唯一输出物，包含：
 
 | 字段 | 说明 |

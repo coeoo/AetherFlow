@@ -71,14 +71,71 @@ export type CVEFixFamilyEvidenceSource = {
   order: number;
 };
 
+export type CVEChainStep = {
+  url: string;
+  page_role: string;
+  depth: number;
+};
+
+export type CVEChainSummary = {
+  chain_id: string;
+  chain_type: string;
+  status: string;
+  steps: CVEChainStep[];
+};
+
+export type CVEBudgetUsage = {
+  used: number;
+  max: number;
+};
+
+export type CVESearchNode = {
+  node_id: string;
+  url: string;
+  depth: number;
+  host: string;
+  page_role: string | null;
+  fetch_status: string;
+};
+
+export type CVESearchEdge = {
+  from_node_id: string;
+  to_node_id: string;
+  edge_type: string;
+  selected_by: string;
+};
+
+export type CVESearchDecision = {
+  decision_type: string;
+  validated: boolean;
+  model_name: string | null;
+  node_id: string | null;
+};
+
+export type CVEFrontierStatus = {
+  total_nodes: number;
+  max_depth: number;
+  active_node_count: number;
+};
+
 export type CVERunSummary = {
   patch_found?: boolean;
   patch_count?: number;
+  runtime_kind?: string;
   primary_patch_url?: string;
   primary_family_source_url?: string;
   primary_family_source_host?: string;
   primary_family_evidence_source_count?: number;
   primary_family_related_source_hosts?: string[];
+  chain_summary?: CVEChainSummary[];
+  page_role_counts?: Record<string, number>;
+  pages_visited?: number;
+  cross_domain_hops?: number;
+  budget_usage?: {
+    pages?: CVEBudgetUsage;
+    llm_calls?: CVEBudgetUsage;
+    cross_domain?: CVEBudgetUsage;
+  };
   llm_fallback_triggered?: boolean;
   llm_trigger_reason?: string;
   llm_invocation_status?: string;
@@ -117,6 +174,12 @@ export type CVERunDetail = {
   fix_families: CVEFixFamily[];
   recent_progress: CVERunRecentProgress[];
   source_traces: CVESourceTrace[];
+  search_graph?: {
+    nodes: CVESearchNode[];
+    edges: CVESearchEdge[];
+  };
+  frontier_status?: CVEFrontierStatus;
+  decision_history?: CVESearchDecision[];
   patches: CVEPatch[];
 };
 

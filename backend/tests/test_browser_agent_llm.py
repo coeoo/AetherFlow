@@ -127,6 +127,7 @@ def test_build_navigation_context_includes_chain_and_browser_state() -> None:
     assert context.discovered_candidates[0]["candidate_url"] == "https://example.com/fix.patch"
     assert "nvd.nist.gov" in context.visited_domains
     assert context.navigation_path[0].startswith("advisory_page:")
+    assert not hasattr(context, "_llm_decision_log")
 
 
 def test_build_initial_agent_state_initializes_llm_decision_log() -> None:
@@ -297,7 +298,10 @@ def test_call_browser_agent_navigation_appends_acceptance_log(monkeypatch) -> No
         monkeypatch.setenv("LLM_API_KEY", "demo-key")
         monkeypatch.setenv("LLM_DEFAULT_MODEL", "qwen3.6-plus")
 
-        decision = call_browser_agent_navigation(context)
+        decision = call_browser_agent_navigation(
+            context,
+            llm_decision_log=state["_llm_decision_log"],
+        )
 
     assert decision["action"] == "expand_frontier"
     assert len(state["_llm_decision_log"]) == 1
@@ -341,7 +345,10 @@ def test_call_browser_agent_navigation_retries_and_logs_timeout_failure(monkeypa
     monkeypatch.setattr("app.cve.browser_agent_llm.http_client.post", _raise_timeout)
 
     with pytest.raises(httpx.ReadTimeout):
-        call_browser_agent_navigation(context)
+        call_browser_agent_navigation(
+            context,
+            llm_decision_log=state["_llm_decision_log"],
+        )
 
     assert attempts["count"] == 2
     assert len(state["_llm_decision_log"]) == 1

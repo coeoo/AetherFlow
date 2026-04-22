@@ -2,9 +2,12 @@ import { Link, useParams } from "react-router-dom";
 import { useState } from "react";
 
 import { AppShell } from "../components/layout/AppShell";
+import { CVEBudgetPanel } from "../features/cve/components/CVEBudgetPanel";
+import { CVEChainTracker } from "../features/cve/components/CVEChainTracker";
 import { CVEDiffViewer } from "../features/cve/components/CVEDiffViewer";
 import { CVEFixFamilySummary } from "../features/cve/components/CVEFixFamilySummary";
 import { CVEPatchList } from "../features/cve/components/CVEPatchList";
+import { CVESearchGraphPanel } from "../features/cve/components/CVESearchGraphPanel";
 import { CVETraceTimeline } from "../features/cve/components/CVETraceTimeline";
 import { CVEVerdictHero } from "../features/cve/components/CVEVerdictHero";
 import { useCveRunDetail, usePatchContent } from "../features/cve/hooks";
@@ -60,6 +63,8 @@ export function CVERunDetailPage() {
   }
 
   const hasEvidencePayload = detail.source_traces.length > 0 || detail.patches.length > 0;
+  const hasAgentChains = Boolean(detail.summary.chain_summary && detail.summary.chain_summary.length > 0);
+  const hasSearchGraph = Boolean(detail.search_graph && detail.search_graph.nodes.length > 0);
 
   return (
     <AppShell
@@ -107,6 +112,17 @@ export function CVERunDetailPage() {
           </p>
         ) : null}
       </section>
+
+      {hasAgentChains ? <CVEChainTracker chains={detail.summary.chain_summary ?? []} /> : null}
+      {detail.summary.budget_usage ? <CVEBudgetPanel budget={detail.summary.budget_usage} /> : null}
+      {hasSearchGraph ? (
+        <CVESearchGraphPanel
+          nodes={detail.search_graph?.nodes ?? []}
+          edges={detail.search_graph?.edges ?? []}
+          decisions={detail.decision_history ?? []}
+          frontierStatus={detail.frontier_status}
+        />
+      ) : null}
 
       <section className="cve-detail-grid">
         <div className="cve-detail-main">

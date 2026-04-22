@@ -63,6 +63,7 @@ class AgentState(TypedDict, total=False):
     run_id: str
     cve_id: str
     budget: dict[str, int]
+    initial_budget: dict[str, int]
     seed_references: list[str]
     frontier: list[AgentFrontierItem]
     direct_candidates: list[AgentCandidateRecord]
@@ -87,10 +88,12 @@ class AgentState(TypedDict, total=False):
 
 
 def build_initial_agent_state(*, run_id: str, cve_id: str) -> AgentState:
+    budget = build_default_budget()
     return {
         "run_id": run_id,
         "cve_id": cve_id,
-        "budget": build_default_budget(),
+        "budget": dict(budget),
+        "initial_budget": dict(budget),
         "seed_references": [],
         "frontier": [],
         "direct_candidates": [],
