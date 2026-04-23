@@ -1146,6 +1146,17 @@ def test_acceptance_gate_main_writes_json_and_returns_failure_on_regression(
     assert written["failures"][0]["signal"] == "patch_quality_degraded"
 
 
+def test_acceptance_regression_gate_module_exposes_cli_entrypoint() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "acceptance_regression_gate.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'if __name__ == "__main__":' in source
+    assert "raise SystemExit(main())" in source
+
+
 def test_acceptance_gate_generates_candidate_for_all_baseline_scenarios(
     tmp_path: Path,
     monkeypatch,

@@ -141,3 +141,7 @@ def _evaluate_gate_result(comparison: dict[str, object]) -> dict[str, object]:
         "failures": failures,
         "warnings": warnings,
     }
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
