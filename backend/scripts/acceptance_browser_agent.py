@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 from typing import Any
+from unittest.mock import patch
 
 from sqlalchemy import text
 from sqlalchemy import select
@@ -32,6 +33,15 @@ from app.models.cve import CVESearchNode
 class AcceptanceScenario:
     cve_id: str
     description: str
+
+
+@dataclass(frozen=True)
+class AcceptanceProfile:
+    name: str
+    llm_wall_clock_timeout_seconds: int | None = None
+    diagnostic_timeout_seconds: int | None = None
+    max_llm_calls: int | None = None
+    max_pages_total: int | None = None
 
 
 SCENARIOS = {
@@ -57,6 +67,33 @@ _NETWORK_ERROR_MARKERS = (
     "Timeout",
     "net::",
 )
+ACCEPTANCE_PROFILES = {
+    "dashscope-stable": AcceptanceProfile(
+        name="dashscope-stable",
+        llm_wall_clock_timeout_seconds=90,
+        diagnostic_timeout_seconds=360,
+        max_llm_calls=4,
+        max_pages_total=12,
+    ),
+    "dashscope-fast": AcceptanceProfile(
+        name="dashscope-fast",
+        llm_wall_clock_timeout_seconds=45,
+        diagnostic_timeout_seconds=240,
+        max_llm_calls=2,
+        max_pages_total=10,
+    ),
+    "rule-fallback-only": AcceptanceProfile(
+        name="rule-fallback-only",
+        llm_wall_clock_timeout_seconds=1,
+        diagnostic_timeout_seconds=180,
+        max_llm_calls=1,
+        max_pages_total=12,
+    ),
+}
+MOCK_MODES = {
+    "none",
+    "llm-timeout-forced",
+}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -79,6 +116,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--results-dir",
         default="results",
         help="报告输出目录，默认相对当前工作目录的 results。",
+    )
+    parser.add_argument(
+        "--profile",
+        choices=sorted(ACCEPTANCE_PROFILES),
+        default=None,
+        help="使用预设预算 profile。",
+    )
+    parser.add_argument(
+        "--mock-mode",
+        choices=sorted(MOCK_MODES - {"none"}),
+        default=None,
+        help="启用本地 mock 验收模式，不依赖真实供应商。",
     )
     parser.add_argument(
         "--llm-wall-clock-timeout-seconds",
@@ -131,10 +180,20 @@ def main(argv: list[str] | None = None) -> int:
     with _temporary_acceptance_env(args):
         for scenario_id in scenario_ids:
             with session_factory() as session:
-                report, scenario_llm_logs = _run_scenario(
-                    session,
-                    scenario=SCENARIOS[scenario_id],
-                )
+                if args.mock_mode:
+                    report, scenario_llm_logs = _run_mock_scenario(
+                        session,
+                        scenario=SCENARIOS[scenario_id],
+                        mock_mode=args.mock_mode,
+                        profile_name=args.profile,
+                    )
+                else:
+                    report, scenario_llm_logs = _run_scenario(
+                        session,
+                        scenario=SCENARIOS[scenario_id],
+                        profile_name=args.profile,
+                        mock_mode=args.mock_mode,
+                    )
                 session.commit()
             scenario_reports.append(report)
             llm_logs.extend(scenario_llm_logs)
@@ -159,7 +218,13 @@ def _prepare_database(engine) -> None:
     Base.metadata.create_all(engine)
 
 
-def _run_scenario(session, *, scenario: AcceptanceScenario) -> tuple[dict[str, object], list[dict[str, object]]]:
+def _run_scenario(
+    session,
+    *,
+    scenario: AcceptanceScenario,
+    profile_name: str | None,
+    mock_mode: str | None,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
     run = create_cve_run(session, cve_id=scenario.cve_id)
     session.commit()
 
@@ -203,12 +268,36 @@ def _run_scenario(session, *, scenario: AcceptanceScenario) -> tuple[dict[str, o
         duration_seconds=round(perf_counter() - started_at, 2),
         memory_peak_mb=round(current_peak / (1024 * 1024), 2),
         runtime_error=runtime_error,
+        profile_name=profile_name,
+        mock_mode=mock_mode,
     )
     verdict, verdict_reason = _determine_verdict(report)
     report["verdict"] = verdict
     if verdict_reason:
         report["verdict_reason"] = verdict_reason
     return report, llm_logs
+
+
+def _run_mock_scenario(
+    session,
+    *,
+    scenario: AcceptanceScenario,
+    mock_mode: str,
+    profile_name: str | None,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    if mock_mode != "llm-timeout-forced":
+        raise ValueError(f"未知 mock_mode: {mock_mode}")
+
+    def _raise_timeout(*args, **kwargs):
+        raise TimeoutError("forced llm timeout for acceptance regression")
+
+    with patch("app.cve.agent_nodes.call_browser_agent_navigation", _raise_timeout):
+        return _run_scenario(
+            session,
+            scenario=scenario,
+            profile_name=profile_name,
+            mock_mode=mock_mode,
+        )
 
 
 def _build_scenario_report(
@@ -225,6 +314,8 @@ def _build_scenario_report(
     duration_seconds: float,
     memory_peak_mb: float,
     runtime_error: str | None,
+    profile_name: str | None,
+    mock_mode: str | None,
 ) -> dict[str, object]:
     summary = dict(run.summary_json or {})
     chain_summary = [
@@ -246,6 +337,14 @@ def _build_scenario_report(
         for patch in patches
         if patch.download_status == "downloaded"
     ]
+    selected_patch_types = list(
+        dict.fromkeys(
+            str(patch.patch_type)
+            for patch in patches
+            if str(patch.patch_type).strip()
+        )
+    )
+    navigation_path = _build_navigation_path(final_state, decisions)
     browser_snapshots = dict(final_state.get("browser_snapshots") or {})
     page_fetch_durations = [
         int(snapshot.get("fetch_duration_ms") or 0)
@@ -253,6 +352,15 @@ def _build_scenario_report(
         if isinstance(snapshot, dict)
     ]
     cross_domain_edges_count = sum(1 for edge in edges if "cross_domain" in edge.edge_type)
+    llm_failure_count = sum(1 for item in llm_logs if str(item.get("action") or "") == "llm_call_failed")
+    rule_fallback_count = sum(
+        1 for decision in decisions if str(decision.decision_type or "") == "rule_fallback"
+    )
+    url_fallback_candidate_count = sum(
+        1
+        for candidate in candidates
+        if str(dict(candidate.evidence_json or {}).get("discovery_rule") or "") == "url_fallback"
+    )
     report = {
         "cve_id": scenario.cve_id,
         "description": scenario.description,
@@ -274,13 +382,25 @@ def _build_scenario_report(
             or final_state.get("cross_domain_hops")
             or 0
         ),
+        "llm_call_count": len(llm_logs),
+        "llm_failure_count": llm_failure_count,
+        "rule_fallback_count": rule_fallback_count,
+        "url_fallback_candidate_count": url_fallback_candidate_count,
         "llm_calls_count": len(llm_logs),
         "avg_llm_latency_ms": _average(
             [int(item.get("latency_ms") or 0) for item in llm_logs]
         ),
         "avg_page_load_ms": _average(page_fetch_durations),
-        "effective_budget": _build_effective_budget_report(final_state),
+        "effective_budget": _build_effective_budget_report(
+            final_state,
+            profile_name=profile_name,
+            mock_mode=mock_mode,
+        ),
         "page_roles_visited": page_roles_visited,
+        "visited_page_roles": page_roles_visited,
+        "selected_patch_types": selected_patch_types,
+        "navigation_path": navigation_path,
+        "final_patch_urls": patch_urls,
         "db_validation": _validate_database_records(
             run=run,
             nodes=nodes,
@@ -473,10 +593,18 @@ def _average(values: list[int]) -> float:
     return round(sum(values) / len(values), 2)
 
 
-def _build_effective_budget_report(final_state: dict[str, object]) -> dict[str, int]:
+def _build_effective_budget_report(
+    final_state: dict[str, object],
+    *,
+    profile_name: str | None,
+    mock_mode: str | None,
+) -> dict[str, int | str | None]:
     settings = load_settings()
     state_budget = dict(final_state.get("budget") or {})
-    effective_budget: dict[str, int] = {}
+    effective_budget: dict[str, int | str | None] = {
+        "profile": profile_name,
+        "mock_mode": mock_mode,
+    }
     for key in ("max_pages_total", "max_llm_calls"):
         value = state_budget.get(key)
         if value is None:
@@ -491,13 +619,62 @@ def _build_effective_budget_report(final_state: dict[str, object]) -> dict[str, 
     return effective_budget
 
 
+def _build_navigation_path(
+    final_state: dict[str, object],
+    decisions: list[CVESearchDecision],
+) -> list[str]:
+    page_role_history = [
+        item
+        for item in list(final_state.get("page_role_history") or [])
+        if isinstance(item, dict)
+    ]
+    path_from_state = [
+        f"{str(item.get('role') or '').strip()}: {str(item.get('url') or '').strip()}"
+        for item in page_role_history
+        if str(item.get("role") or "").strip() and str(item.get("url") or "").strip()
+    ]
+    if path_from_state:
+        return path_from_state
+
+    for decision in decisions:
+        input_json = dict(decision.input_json or {})
+        raw_path = input_json.get("navigation_path")
+        if not isinstance(raw_path, list):
+            continue
+        normalized_path = [
+            str(item).strip()
+            for item in raw_path
+            if str(item).strip()
+        ]
+        if normalized_path:
+            return normalized_path
+    return []
+
+
 @contextmanager
 def _temporary_acceptance_env(args: argparse.Namespace):
+    profile = ACCEPTANCE_PROFILES.get(str(args.profile or "").strip())
     overrides = {
-        "LLM_WALL_CLOCK_TIMEOUT_SECONDS": args.llm_wall_clock_timeout_seconds,
-        "AETHERFLOW_CVE_RUNTIME_DIAGNOSTIC_TIMEOUT_SECONDS": args.diagnostic_timeout_seconds,
-        "AETHERFLOW_CVE_MAX_LLM_CALLS": args.max_llm_calls,
-        "AETHERFLOW_CVE_MAX_PAGES_TOTAL": args.max_pages_total,
+        "LLM_WALL_CLOCK_TIMEOUT_SECONDS": (
+            args.llm_wall_clock_timeout_seconds
+            if args.llm_wall_clock_timeout_seconds is not None
+            else (profile.llm_wall_clock_timeout_seconds if profile else None)
+        ),
+        "AETHERFLOW_CVE_RUNTIME_DIAGNOSTIC_TIMEOUT_SECONDS": (
+            args.diagnostic_timeout_seconds
+            if args.diagnostic_timeout_seconds is not None
+            else (profile.diagnostic_timeout_seconds if profile else None)
+        ),
+        "AETHERFLOW_CVE_MAX_LLM_CALLS": (
+            args.max_llm_calls
+            if args.max_llm_calls is not None
+            else (profile.max_llm_calls if profile else None)
+        ),
+        "AETHERFLOW_CVE_MAX_PAGES_TOTAL": (
+            args.max_pages_total
+            if args.max_pages_total is not None
+            else (profile.max_pages_total if profile else None)
+        ),
     }
     previous_values = {key: os.getenv(key) for key in overrides}
     try:
