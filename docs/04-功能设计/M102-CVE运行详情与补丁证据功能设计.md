@@ -44,7 +44,7 @@
 
 **用户操作流程**：
 
-1. 打开 `/cve/runs/{run_id}`
+1. 打开 `/patch/runs/{run_id}`
 2. 查看 Verdict Hero
 3. 查看 patch 收敛链与来源图
 4. 打开 diff 内容核查
@@ -77,7 +77,7 @@
 
 ```mermaid
 flowchart TD
-    A["进入 /cve/runs/run_id"] --> B["加载 run 完整数据"]
+    A["进入 /patch/runs/run_id"] --> B["加载 run 完整数据"]
     B --> C{"run 存在？"}
     C -->|否| D["展示空态并允许返回"]
     C -->|是| E["展示 Verdict Hero"]
@@ -109,7 +109,7 @@ flowchart TD
 
 ### 页面1：CVE 运行详情页
 
-**页面路径**：`/cve/runs/:runId`
+**页面路径**：`/patch/runs/:runId`
 
 **页面元素**：
 
@@ -324,6 +324,11 @@ detail_ready
 
 ## 🔄 变更记录
 
+### v2.2 - 2026-04-23
+
+- 将详情页前端页面路径同步为 `/patch/runs/:runId`
+- 将用户操作示例中的详情入口同步为 `/patch/runs/{run_id}`
+
 ### v2.1 - 2026-04-23
 
 - 补充浏览器 Agent 的 `navigation_chains`、页面角色与 acceptance / gate 详情语义
@@ -331,7 +336,7 @@ detail_ready
 
 ---
 
-**文档版本**：v2.0
+**文档版本**：v2.2
 **创建日期**：2026-04-09  
-**最后更新**：2026-04-20
+**最后更新**：2026-04-23
 **维护人**：AI + 开发团队

@@ -1,6 +1,7 @@
 # AetherFlow
 
 AetherFlow 是一个面向安全情报处理的智能体平台。
+当前仓库已经形成三条并存的现实链路：平台底座、CVE 浏览器 Agent、公告场景。
 平台以统一任务执行、文档采集、图运行时、证据留存与结果投递为共用底座，
 承载两个首批业务场景：
 
@@ -11,6 +12,7 @@ AetherFlow 是一个面向安全情报处理的智能体平台。
 ## 产品主线
 
 - `Patch Agent` 是当前产品主叙事。
+- 平台底座、CVE 浏览器 Agent 与公告场景三条链路并存，文档和入口以当前代码为准。
 - `LangGraph` 负责编排 Patch 搜索中的状态流转、循环决策、预算控制与收敛。
 - 规则库不再承担主搜索策略，而是作为页面角色识别、候选校验、风险约束和
   模型护栏存在。
@@ -74,6 +76,10 @@ timeout 60s make phase1-verify
 
 ## 最小运行入口
 
+后端当前保留 `API / Worker / Scheduler` 三个运行角色。`API` 提供 HTTP 接口，
+`Worker` 消费 CVE 与公告场景任务，`Scheduler` 仍保持最小职责：写入运行时
+heartbeat，并处理已到期的投递记录，不代表完整调度平台已经收口。
+
 启动本地 PostgreSQL：
 
 ```bash
@@ -105,8 +111,8 @@ npm --prefix frontend run dev -- --host 0.0.0.0 --port 5180
 前端主要入口：
 
 - `/`：平台首页，展示场景入口、最近任务、最近投递与系统状态摘要
-- `/cve`：CVE Patch 搜索工作台
-- `/cve/runs/{run_id}`：Patch 搜索详情页，查看搜索图、预算、patch 收敛与 diff
+- `/patch`：CVE Patch 搜索工作台
+- `/patch/runs/{run_id}`：Patch 搜索详情页，查看搜索图、预算、patch 收敛与 diff
 - `/announcements`：安全公告提取工作台
 - `/announcements?tab=monitoring`：公告监控批次与关联 run 详情
 - `/deliveries`：投递中心
