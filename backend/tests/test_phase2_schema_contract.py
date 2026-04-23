@@ -30,23 +30,34 @@ def test_runtime_heartbeats_uses_role_and_instance_as_identity() -> None:
     assert primary_key_names == {"role", "instance_name"}
 
 
-def test_phase2_settings_include_runtime_defaults() -> None:
-    settings = load_settings()
+def test_phase2_settings_include_runtime_defaults(monkeypatch) -> None:
     root_dir = Path(__file__).resolve().parents[2]
+    env_local_path = root_dir / ".env.local"
+    original_content = env_local_path.read_text(encoding="utf-8") if env_local_path.exists() else None
 
-    assert settings.database_url == ""
-    assert settings.artifact_root == str((root_dir / "backend/.runtime/artifacts").resolve())
-    assert settings.runtime_heartbeat_interval_seconds == 10
-    assert settings.runtime_heartbeat_stale_seconds == 30
-    assert settings.cve_browser_backend == "playwright"
-    assert settings.cve_browser_pool_size == 3
-    assert settings.cve_browser_headless is True
-    assert settings.cve_browser_timeout_ms == 30_000
-    assert settings.cve_browser_cdp_endpoint == ""
-    assert settings.llm_base_url == ""
-    assert settings.llm_api_key == ""
-    assert settings.llm_default_model == ""
-    assert settings.llm_timeout_seconds == 20
+    if env_local_path.exists():
+        env_local_path.unlink()
+    for key in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_DEFAULT_MODEL"):
+        monkeypatch.delenv(key, raising=False)
+    settings = load_settings()
+
+    try:
+        assert settings.database_url == ""
+        assert settings.artifact_root == str((root_dir / "backend/.runtime/artifacts").resolve())
+        assert settings.runtime_heartbeat_interval_seconds == 10
+        assert settings.runtime_heartbeat_stale_seconds == 30
+        assert settings.cve_browser_backend == "playwright"
+        assert settings.cve_browser_pool_size == 3
+        assert settings.cve_browser_headless is True
+        assert settings.cve_browser_timeout_ms == 30_000
+        assert settings.cve_browser_cdp_endpoint == ""
+        assert settings.llm_base_url == ""
+        assert settings.llm_api_key == ""
+        assert settings.llm_default_model == ""
+        assert settings.llm_timeout_seconds == 20
+    finally:
+        if original_content is not None:
+            env_local_path.write_text(original_content, encoding="utf-8")
 
 
 def test_default_artifact_root_is_stable_across_cwd(monkeypatch) -> None:
@@ -63,6 +74,46 @@ def test_default_artifact_root_is_stable_across_cwd(monkeypatch) -> None:
     expected = str((root_dir / "backend/.runtime/artifacts").resolve())
     assert from_root == expected
     assert from_backend == expected
+
+
+def test_load_settings_reads_root_env_local_without_overriding_existing_env(monkeypatch) -> None:
+    root_dir = Path(__file__).resolve().parents[2]
+    env_local_path = root_dir / ".env.local"
+    original_content = env_local_path.read_text(encoding="utf-8") if env_local_path.exists() else None
+
+    for key in (
+        "LLM_BASE_URL",
+        "LLM_API_KEY",
+        "LLM_DEFAULT_MODEL",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    env_local_path.write_text(
+        "\n".join(
+            [
+                "LLM_BASE_URL=https://example.com/compatible-mode/v1",
+                "LLM_API_KEY=env-local-key",
+                "LLM_DEFAULT_MODEL=qwen-test-model",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    try:
+        settings = load_settings()
+
+        assert settings.llm_base_url == "https://example.com/compatible-mode/v1"
+        assert settings.llm_api_key == "env-local-key"
+        assert settings.llm_default_model == "qwen-test-model"
+
+        monkeypatch.setenv("LLM_API_KEY", "runtime-env-key")
+        settings_with_runtime_override = load_settings()
+        assert settings_with_runtime_override.llm_api_key == "runtime-env-key"
+    finally:
+        if original_content is None:
+            env_local_path.unlink(missing_ok=True)
+        else:
+            env_local_path.write_text(original_content, encoding="utf-8")
 
 
 def test_engine_and_session_factory_are_cached_by_database_url() -> None:

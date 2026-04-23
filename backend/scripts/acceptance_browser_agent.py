@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import json
+import os
 import tracemalloc
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -78,6 +80,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="results",
         help="报告输出目录，默认相对当前工作目录的 results。",
     )
+    parser.add_argument(
+        "--llm-wall-clock-timeout-seconds",
+        type=int,
+        default=None,
+        help="覆盖 LLM 总时限预算（秒）。",
+    )
+    parser.add_argument(
+        "--diagnostic-timeout-seconds",
+        type=int,
+        default=None,
+        help="覆盖诊断模式总时限预算（秒）。",
+    )
+    parser.add_argument(
+        "--max-llm-calls",
+        type=int,
+        default=None,
+        help="覆盖单次 run 的 LLM 调用上限。",
+    )
+    parser.add_argument(
+        "--max-pages-total",
+        type=int,
+        default=None,
+        help="覆盖单次 run 的页面抓取总上限。",
+    )
     args = parser.parse_args(argv)
     if not args.all and not args.cve:
         parser.error("必须提供 --all 或至少一个 --cve。")
@@ -102,15 +128,16 @@ def main(argv: list[str] | None = None) -> int:
 
     scenario_reports: list[dict[str, object]] = []
     llm_logs: list[dict[str, object]] = []
-    for scenario_id in scenario_ids:
-        with session_factory() as session:
-            report, scenario_llm_logs = _run_scenario(
-                session,
-                scenario=SCENARIOS[scenario_id],
-            )
-            session.commit()
-        scenario_reports.append(report)
-        llm_logs.extend(scenario_llm_logs)
+    with _temporary_acceptance_env(args):
+        for scenario_id in scenario_ids:
+            with session_factory() as session:
+                report, scenario_llm_logs = _run_scenario(
+                    session,
+                    scenario=SCENARIOS[scenario_id],
+                )
+                session.commit()
+            scenario_reports.append(report)
+            llm_logs.extend(scenario_llm_logs)
 
     _write_jsonl(llm_log_path, llm_logs)
     final_report = {
@@ -252,6 +279,7 @@ def _build_scenario_report(
             [int(item.get("latency_ms") or 0) for item in llm_logs]
         ),
         "avg_page_load_ms": _average(page_fetch_durations),
+        "effective_budget": _build_effective_budget_report(final_state),
         "page_roles_visited": page_roles_visited,
         "db_validation": _validate_database_records(
             run=run,
@@ -443,6 +471,47 @@ def _average(values: list[int]) -> float:
     if not values:
         return 0.0
     return round(sum(values) / len(values), 2)
+
+
+def _build_effective_budget_report(final_state: dict[str, object]) -> dict[str, int]:
+    settings = load_settings()
+    state_budget = dict(final_state.get("budget") or {})
+    effective_budget: dict[str, int] = {}
+    for key in ("max_pages_total", "max_llm_calls"):
+        value = state_budget.get(key)
+        if value is None:
+            continue
+        effective_budget[key] = int(value)
+    effective_budget["llm_wall_clock_timeout_seconds"] = int(
+        settings.llm_wall_clock_timeout_seconds
+    )
+    effective_budget["diagnostic_timeout_seconds"] = int(
+        settings.cve_runtime_diagnostic_timeout_seconds
+    )
+    return effective_budget
+
+
+@contextmanager
+def _temporary_acceptance_env(args: argparse.Namespace):
+    overrides = {
+        "LLM_WALL_CLOCK_TIMEOUT_SECONDS": args.llm_wall_clock_timeout_seconds,
+        "AETHERFLOW_CVE_RUNTIME_DIAGNOSTIC_TIMEOUT_SECONDS": args.diagnostic_timeout_seconds,
+        "AETHERFLOW_CVE_MAX_LLM_CALLS": args.max_llm_calls,
+        "AETHERFLOW_CVE_MAX_PAGES_TOTAL": args.max_pages_total,
+    }
+    previous_values = {key: os.getenv(key) for key in overrides}
+    try:
+        for key, value in overrides.items():
+            if value is None:
+                continue
+            os.environ[key] = str(value)
+        yield
+    finally:
+        for key, previous_value in previous_values.items():
+            if previous_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous_value
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:

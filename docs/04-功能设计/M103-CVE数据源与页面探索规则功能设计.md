@@ -432,10 +432,35 @@ Agent 停止时必须明确属于以下之一：
 
 ### 集成测试（Phase 4）
 
-- [ ] CVE-2022-2509：通过 Debian tracker → GitLab commit 链路找到 patch
-- [ ] CVE-2024-3094：多链路多域场景
-- [ ] 链路完成率 ≥ 80%
-- [ ] 单次运行 ≤ 3 分钟
+- [x] CVE-2022-2509：通过 Debian tracker → GitLab commit 链路找到 patch
+- [x] CVE-2024-3094：多链路多域场景
+- [x] 链路完成率 ≥ 80%
+- [x] 单次运行 ≤ 3 分钟
+
+### 真实验收结果（2026-04-23 收口）
+
+- `CVE-2022-2509` 已在真实 DashScope OpenAI 兼容配置下通过：
+  `mailing_list_page -> tracker_page -> commit_page -> patch download`
+- `CVE-2024-3094` 已在真实多链路跨域场景下通过：
+  从 `tracker_page` 跨域进入 `oss-security`，直接收敛到上游 GitHub commit patch
+- 当前推荐预算：
+  - `CVE-2022-2509`：`max_llm_calls=4`、`max_pages_total=12`
+  - `CVE-2024-3094`：`max_llm_calls=6`、`max_pages_total=16`
+  - 共用：`LLM_WALL_CLOCK_TIMEOUT_SECONDS=90`、`AETHERFLOW_CVE_RUNTIME_DIAGNOSTIC_TIMEOUT_SECONDS=360`
+
+### 本轮确认的关键实现路径
+
+1. `mailing_list_page` 或 `tracker_page` 进入目标 `tracker_page`
+2. `tracker_page` 必须优先保留并提升 `commit_page` / `download_page` 类型链接
+3. 当真实 `commit_page` 被 Cloudflare challenge 拦截时，不能依赖正文提取；必须从 commit URL 自身派生 `.patch` 候选
+4. 一旦存在高质量上游 patch 候选，允许直接 `try_candidate_download`
+
+### 之前没有打通的根因
+
+1. `tracker_page` 的 frontier 打分中过度偏向 NVD / bugtracker / 其它 tracker 噪声，导致真实上游 `commit_page` 在 children 上限下被挤掉
+2. 早期 acceptance 预算过低，`max_llm_calls=2` 只够走到目标 tracker，还来不及进入 commit
+3. 真实 GitLab `commit_page` 会遇到 Cloudflare challenge；如果只依赖页面正文，系统无法产出 patch candidate
+4. 真实供应商配置最初未固化到本地配置文件，导致 acceptance 容易停在环境缺失而非业务逻辑
 
 ---
 
@@ -468,6 +493,12 @@ Agent 停止时必须明确属于以下之一：
 - 废弃 httpx 抓取、关键词打分导航、同域限制、fast-first 路径
 - 引入浏览器基础设施（BrowserBackend Protocol + PlaywrightPool + SyncBrowserBridge）
 - 引入 a11y 树作为 LLM 主输入
+
+### 2026-04-23
+
+- 真实验收确认 `CVE-2022-2509` 与 `CVE-2024-3094` 均已通过
+- 明确收口根因：`tracker_page` 对 `commit_page` 优先级不足、`commit_page` challenge 场景缺少 URL 级 patch fallback
+- 将集成测试勾选项从设计目标更新为已验证事实
 - 引入链路意识模型（NavigationChain）
 - 引入链路感知停止条件
 - 所有节点改造为浏览器 + chain-aware LLM

@@ -7,6 +7,9 @@ import app.cve.agent_graph as agent_graph_module
 from app.cve.agent_graph import build_cve_patch_graph
 from app.cve.agent_state import build_initial_agent_state
 from app.cve.agent_nodes import (
+    _build_rule_fallback_decision,
+    _build_frontier_candidate_records,
+    _filter_candidate_matches_for_page,
     _filter_frontier_links,
     _select_fallback_frontier_urls,
     agent_decide_node,
@@ -379,6 +382,239 @@ def test_fetch_next_batch_node_honors_selected_frontier_urls(
     assert expanded_urls == ["https://example.com/frontier-b"]
 
 
+def test_extract_links_and_candidates_node_materializes_llm_visible_tracker_link(
+    seeded_cve_run, db_session
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    current_url = "https://security-tracker.debian.org/tracker/source-package/gnutls28"
+    source_node = CVESearchNode(
+        run_id=seeded_cve_run.run_id,
+        url=current_url,
+        depth=1,
+        host="security-tracker.debian.org",
+        page_role="tracker_page",
+        fetch_status="fetched",
+    )
+    db_session.add(source_node)
+    db_session.flush()
+    state["page_observations"] = {
+        current_url: {
+            "url": current_url,
+            "depth": 1,
+            "fetch_status": "fetched",
+            "source_node_id": str(source_node.node_id),
+            "candidates": [],
+            "extracted": False,
+            "chain_id": "chain-1",
+        }
+    }
+    state["browser_snapshots"] = {
+        current_url: asdict(
+            _make_snapshot(
+                current_url,
+                page_role_hint="tracker_page",
+                links=[
+                    PageLink(
+                        url="https://bugs.debian.org/cgi-bin/pkgreport.cgi?pkg=gnutls28",
+                        text="BTS",
+                        context="package bug tracker",
+                        is_cross_domain=True,
+                        estimated_target_role="unknown_page",
+                    ),
+                    PageLink(
+                        url="https://sources.debian.org/src/gnutls28/",
+                        text="source code",
+                        context="source code",
+                        is_cross_domain=True,
+                        estimated_target_role="unknown_page",
+                    ),
+                    PageLink(
+                        url="https://qa.debian.org/excuses.php?package=gnutls28",
+                        text="migration checker",
+                        context="migration checker",
+                        is_cross_domain=True,
+                        estimated_target_role="unknown_page",
+                    ),
+                    PageLink(
+                        url="https://security-tracker.debian.org/tracker/CVE-2011-3389",
+                        text="CVE-2011-3389",
+                        context="older issue",
+                        is_cross_domain=False,
+                        estimated_target_role="tracker_page",
+                    ),
+                    PageLink(
+                        url="https://tracker.debian.org/pkg/gnutls28",
+                        text="tracker package",
+                        context="package tracker",
+                        is_cross_domain=True,
+                        estimated_target_role="unknown_page",
+                    ),
+                    PageLink(
+                        url="https://security-tracker.debian.org/tracker/CVE-2022-2509",
+                        text="CVE-2022-2509",
+                        context="target issue",
+                        is_cross_domain=False,
+                        estimated_target_role="tracker_page",
+                    ),
+                ],
+            )
+        )
+    }
+    state["current_page_url"] = current_url
+    state["current_node_id"] = str(source_node.node_id)
+    state["current_chain_id"] = "chain-1"
+    state["budget"]["max_children_per_node"] = 5
+
+    result = extract_links_and_candidates_node(state)
+
+    current_observation = result["page_observations"][current_url]
+    frontier_urls = {item["url"] for item in result["frontier"]}
+
+    assert any(
+        candidate["url"] == "https://security-tracker.debian.org/tracker/CVE-2022-2509"
+        for candidate in current_observation["frontier_candidates"]
+    )
+    assert "https://security-tracker.debian.org/tracker/CVE-2022-2509" in frontier_urls
+
+
+def test_extract_links_and_candidates_node_prioritizes_target_cve_frontier_candidate(
+    seeded_cve_run, db_session
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id="CVE-2022-2509",
+    )
+    state["session"] = db_session
+    current_url = "https://security-tracker.debian.org/tracker/source-package/gnutls28"
+    source_node = CVESearchNode(
+        run_id=seeded_cve_run.run_id,
+        url=current_url,
+        depth=1,
+        host="security-tracker.debian.org",
+        page_role="tracker_page",
+        fetch_status="fetched",
+    )
+    db_session.add(source_node)
+    db_session.flush()
+    state["page_observations"] = {
+        current_url: {
+            "url": current_url,
+            "depth": 1,
+            "fetch_status": "fetched",
+            "source_node_id": str(source_node.node_id),
+            "candidates": [],
+            "extracted": False,
+            "chain_id": "chain-1",
+        }
+    }
+    state["browser_snapshots"] = {
+        current_url: asdict(
+            _make_snapshot(
+                current_url,
+                page_role_hint="tracker_page",
+                links=[
+                    PageLink(
+                        url="https://security-tracker.debian.org/tracker/CVE-2011-3389",
+                        text="CVE-2011-3389",
+                        context="older issue",
+                        is_cross_domain=False,
+                        estimated_target_role="tracker_page",
+                    ),
+                    PageLink(
+                        url="https://security-tracker.debian.org/tracker/CVE-2026-1584",
+                        text="CVE-2026-1584",
+                        context="future issue",
+                        is_cross_domain=False,
+                        estimated_target_role="tracker_page",
+                    ),
+                    PageLink(
+                        url="https://security-tracker.debian.org/tracker/CVE-2022-2509",
+                        text="CVE-2022-2509",
+                        context="target issue",
+                        is_cross_domain=False,
+                        estimated_target_role="tracker_page",
+                    ),
+                ],
+            )
+        )
+    }
+    state["current_page_url"] = current_url
+    state["current_node_id"] = str(source_node.node_id)
+    state["current_chain_id"] = "chain-1"
+
+    result = extract_links_and_candidates_node(state)
+
+    frontier_candidates = result["page_observations"][current_url]["frontier_candidates"]
+
+    assert frontier_candidates[0]["url"] == "https://security-tracker.debian.org/tracker/CVE-2022-2509"
+
+
+def test_extract_links_and_candidates_node_ignores_patch_candidates_from_off_target_tracker_page(
+    seeded_cve_run, db_session
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id="CVE-2022-2509",
+    )
+    state["session"] = db_session
+    current_url = "https://security-tracker.debian.org/tracker/CVE-2026-1584"
+    source_node = CVESearchNode(
+        run_id=seeded_cve_run.run_id,
+        url=current_url,
+        depth=2,
+        host="security-tracker.debian.org",
+        page_role="tracker_page",
+        fetch_status="fetched",
+    )
+    db_session.add(source_node)
+    db_session.flush()
+    state["page_observations"] = {
+        current_url: {
+            "url": current_url,
+            "depth": 2,
+            "fetch_status": "fetched",
+            "source_node_id": str(source_node.node_id),
+            "candidates": [],
+            "extracted": False,
+            "chain_id": "chain-1",
+        }
+    }
+    state["browser_snapshots"] = {
+        current_url: asdict(
+            _make_snapshot(
+                current_url,
+                page_role_hint="tracker_page",
+                title="CVE-2026-1584",
+                links=[],
+            )
+        )
+    }
+    state["direct_candidates"] = []
+
+    def _fake_analyze_page(_payload):
+        return [
+            {
+                "candidate_url": "https://gitlab.com/gnutls/gnutls/-/commit/acf67a4a68bc6d9ab7b882469c67f6cf28db56a0.patch",
+                "patch_type": "gitlab_commit_patch",
+            }
+        ]
+
+    from app.cve import agent_nodes as agent_nodes_module
+
+    original_analyze_page = agent_nodes_module.analyze_page
+    agent_nodes_module.analyze_page = _fake_analyze_page
+    try:
+        result = extract_links_and_candidates_node(state)
+    finally:
+        agent_nodes_module.analyze_page = original_analyze_page
+
+    assert result["direct_candidates"] == []
+
+
 def test_fetch_next_batch_node_prefers_meaningful_page_as_current_page_when_nvd_shell_is_present(
     seeded_cve_run, db_session
 ) -> None:
@@ -503,6 +739,93 @@ def test_fetch_next_batch_node_leaves_current_page_empty_when_only_blocked_shell
     result = fetch_next_batch_node(state)
 
     assert result["current_page_url"] is None
+
+
+def test_extract_links_and_candidates_node_derives_commit_patch_candidate_from_blocked_commit_page(
+    monkeypatch,
+) -> None:
+    run_id = uuid.uuid4()
+
+    class _FakeRun:
+        def __init__(self) -> None:
+            self.run_id = run_id
+            self.phase = "extract_links_and_candidates"
+            self.status = "running"
+            self.stop_reason = None
+            self.summary_json = {}
+
+    fake_run = _FakeRun()
+
+    class _FakeSession:
+        def get(self, model, value):
+            if model is CVERun and value == run_id:
+                return fake_run
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    state = build_initial_agent_state(
+        run_id=str(run_id),
+        cve_id="CVE-2022-2509",
+    )
+    commit_url = "https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb265dbe9b6d597f5767449e8ee95848e2"
+    state["session"] = _FakeSession()
+    state["browser_snapshots"] = {
+        commit_url: asdict(
+            BrowserPageSnapshot(
+                url=commit_url,
+                final_url=commit_url,
+                status_code=200,
+                title="Just a moment...",
+                raw_html="<html><body><h1>Just a moment...</h1><p>Checking your browser before accessing</p></body></html>",
+                accessibility_tree='heading "Just a moment..."',
+                markdown_content="# Just a moment...\nChecking your browser before accessing",
+                links=[],
+                page_role_hint="commit_page",
+                fetch_duration_ms=500,
+            )
+        )
+    }
+    state["page_observations"] = {
+        commit_url: {
+            "source_node_id": str(uuid.uuid4()),
+            "url": commit_url,
+            "depth": 3,
+            "fetch_status": "fetched",
+            "final_url": commit_url,
+            "content_type": "text/html",
+            "content": "<html></html>",
+            "extracted_links": [],
+            "frontier_candidates": [],
+            "candidates": [],
+            "extracted": False,
+            "title": "Just a moment...",
+            "page_role": "commit_page",
+            "chain_id": "chain-1",
+        }
+    }
+    state["frontier"] = [
+        {
+            "url": commit_url,
+            "depth": 3,
+            "score": 200,
+            "expanded": True,
+            "fetch_status": "fetched",
+            "page_role": "commit_page",
+            "chain_id": "chain-1",
+        }
+    ]
+    monkeypatch.setattr("app.cve.agent_nodes.analyze_page", lambda snapshot: [])
+    monkeypatch.setattr("app.cve.agent_nodes.record_search_node", lambda *args, **kwargs: SimpleNamespace(node_id=uuid.uuid4()))
+    monkeypatch.setattr("app.cve.agent_nodes.record_search_edge", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.cve.agent_nodes._upsert_candidate_artifact", lambda *args, **kwargs: SimpleNamespace(evidence_json={"evidence_source_count": 1, "discovery_sources": []}))
+
+    result = extract_links_and_candidates_node(state)
+
+    assert [candidate["candidate_url"] for candidate in result["direct_candidates"]] == [
+        f"{commit_url}.patch"
+    ]
 
 
 def test_patch_agent_graph_routes_expand_frontier_back_to_fetch_batch(monkeypatch) -> None:
@@ -1202,6 +1525,108 @@ def test_filter_frontier_links_skips_mailing_list_navigation_noise_and_keeps_hig
     assert [link.url for link in filtered_links] == [
         "https://security-tracker.debian.org/tracker/CVE-2022-2509",
         "https://salsa.debian.org/gnutls-team/gnutls/-/commit/abcdef1234567890",
+    ]
+
+
+def test_build_frontier_candidate_records_prioritizes_target_cve_tracker_link_without_db() -> None:
+    state = build_initial_agent_state(
+        run_id="run-1",
+        cve_id="CVE-2022-2509",
+    )
+    snapshot = _make_snapshot(
+        "https://security-tracker.debian.org/tracker/source-package/gnutls28",
+        page_role_hint="tracker_page",
+        title="source package gnutls28",
+        links=[
+            PageLink(
+                url="https://security-tracker.debian.org/tracker/CVE-2011-3389",
+                text="CVE-2011-3389",
+                context="older issue",
+                is_cross_domain=False,
+                estimated_target_role="tracker_page",
+            ),
+            PageLink(
+                url="https://security-tracker.debian.org/tracker/CVE-2026-1584",
+                text="CVE-2026-1584",
+                context="future issue",
+                is_cross_domain=False,
+                estimated_target_role="tracker_page",
+            ),
+            PageLink(
+                url="https://security-tracker.debian.org/tracker/CVE-2022-2509",
+                text="CVE-2022-2509",
+                context="target issue",
+                is_cross_domain=False,
+                estimated_target_role="tracker_page",
+            ),
+        ],
+    )
+
+    candidates = _build_frontier_candidate_records(state, snapshot=snapshot, depth=2)
+
+    assert candidates[0]["url"] == "https://security-tracker.debian.org/tracker/CVE-2022-2509"
+    assert {
+        "https://security-tracker.debian.org/tracker/CVE-2011-3389",
+        "https://security-tracker.debian.org/tracker/CVE-2026-1584",
+    }.isdisjoint({candidate["url"] for candidate in candidates})
+
+
+def test_filter_candidate_matches_for_page_blocks_off_target_tracker_patch_candidates_without_db() -> None:
+    state = build_initial_agent_state(
+        run_id="run-1",
+        cve_id="CVE-2022-2509",
+    )
+    snapshot = _make_snapshot(
+        "https://security-tracker.debian.org/tracker/CVE-2026-1584",
+        page_role_hint="tracker_page",
+        title="CVE-2026-1584",
+    )
+
+    filtered = _filter_candidate_matches_for_page(
+        state,
+        snapshot=snapshot,
+        candidate_matches=[
+            {
+                "candidate_url": "https://gitlab.com/gnutls/gnutls/-/commit/acf67a4a68bc6d9ab7b882469c67f6cf28db56a0.patch",
+                "patch_type": "gitlab_commit_patch",
+            }
+        ],
+    )
+
+    assert filtered == []
+
+
+def test_filter_candidate_matches_for_page_keeps_tracker_commit_link_as_frontier_instead_of_direct_candidate() -> None:
+    state = build_initial_agent_state(
+        run_id="run-1",
+        cve_id="CVE-2022-2509",
+    )
+    snapshot = _make_snapshot(
+        "https://security-tracker.debian.org/tracker/CVE-2022-2509",
+        page_role_hint="tracker_page",
+        title="CVE-2022-2509",
+    )
+
+    filtered = _filter_candidate_matches_for_page(
+        state,
+        snapshot=snapshot,
+        candidate_matches=[
+            {
+                "candidate_url": "https://salsa.debian.org/gnutls-team/gnutls/-/commit/abcdef1234567890.patch",
+                "patch_type": "gitlab_commit_patch",
+            },
+            {
+                "candidate_url": "https://patches.ubuntu.com/example.patch",
+                "patch_type": "patch",
+            },
+        ],
+    )
+
+    assert filtered == [
+        {
+            "candidate_url": "https://patches.ubuntu.com/example.patch",
+            "patch_type": "patch",
+        }
     ]
 
 
@@ -1981,3 +2406,432 @@ def test_finalize_run_node_includes_budget_usage_and_pages_visited() -> None:
         "llm_calls": {"used": 2, "max": 15},
         "cross_domain": {"used": 1, "max": 8},
     }
+
+
+def test_rule_fallback_downloads_high_quality_immediately() -> None:
+    state = {
+        "direct_candidates": [
+            {
+                "canonical_key": "k1",
+                "patch_type": "github_commit_patch",
+            }
+        ],
+        "frontier": [],
+        "budget": {},
+    }
+
+    decision = _build_rule_fallback_decision(state)
+
+    assert decision["action"] == "try_candidate_download"
+    assert decision["selected_candidate_keys"] == ["k1"]
+
+
+def test_rule_fallback_explores_when_only_low_quality_and_has_frontier() -> None:
+    state = {
+        "direct_candidates": [
+            {
+                "canonical_key": "k1",
+                "patch_type": "debdiff",
+            }
+        ],
+        "frontier": [
+            {
+                "url": "https://example.com/a",
+                "expanded": False,
+            }
+        ],
+        "budget": {
+            "max_pages_total": 20,
+            "max_children_per_node": 5,
+            "max_cross_domain_expansions": 8,
+        },
+        "visited_urls": [],
+        "page_observations": {},
+        "browser_snapshots": {},
+    }
+
+    decision = _build_rule_fallback_decision(state)
+
+    assert decision["action"] == "expand_frontier"
+    assert decision["selected_urls"] == ["https://example.com/a"]
+    assert decision["selected_candidate_keys"] == []
+
+
+def test_rule_fallback_downloads_low_quality_when_no_frontier() -> None:
+    state = {
+        "direct_candidates": [
+            {
+                "canonical_key": "k1",
+                "patch_type": "debdiff",
+            }
+        ],
+        "frontier": [],
+        "budget": {},
+    }
+
+    decision = _build_rule_fallback_decision(state)
+
+    assert decision["action"] == "try_candidate_download"
+    assert decision["selected_candidate_keys"] == ["k1"]
+
+
+def test_rule_fallback_prefers_active_chain_expected_commit_page_over_same_domain_tracker() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2022-2509")
+    state["current_page_url"] = "https://security-tracker.debian.org/tracker/CVE-2022-2509"
+    state["budget"]["max_children_per_node"] = 1
+    state["budget"]["max_cross_domain_expansions"] = 1
+    state["navigation_chains"] = [
+        {
+            "chain_id": "chain-1",
+            "status": "in_progress",
+            "expected_next_roles": ["commit_page", "download_page"],
+        }
+    ]
+    state["frontier"] = [
+        {
+            "url": "https://security-tracker.debian.org/tracker/CVE-2022-2509",
+            "depth": 1,
+            "score": 200,
+            "expanded": False,
+            "page_role": "tracker_page",
+        },
+        {
+            "url": "https://gitlab.com/org/proj/-/commit/abc1234",
+            "depth": 1,
+            "score": 80,
+            "expanded": False,
+            "page_role": "commit_page",
+        },
+    ]
+
+    decision = _build_rule_fallback_decision(state)
+
+    assert decision["action"] == "expand_frontier"
+    assert decision["selected_urls"] == ["https://gitlab.com/org/proj/-/commit/abc1234"]
+
+
+def test_agent_decide_node_skips_llm_when_llm_budget_is_exhausted(monkeypatch) -> None:
+    run_id = uuid.uuid4()
+
+    class _FakeRun:
+        def __init__(self) -> None:
+            self.run_id = run_id
+            self.phase = "fetch_next_batch"
+            self.status = "running"
+            self.stop_reason = None
+            self.summary_json = {}
+
+    fake_run = _FakeRun()
+
+    class _FakeSession:
+        def get(self, model, value):
+            if model is CVERun and value == run_id:
+                return fake_run
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    state = build_initial_agent_state(
+        run_id=str(run_id),
+        cve_id="CVE-2022-2509",
+    )
+    state["session"] = _FakeSession()
+    state["current_page_url"] = "https://security-tracker.debian.org/tracker/CVE-2022-2509"
+    state["budget"]["max_llm_calls"] = 1
+    state["_llm_decision_log"] = [
+        {
+            "action": "expand_frontier",
+            "step_index": 1,
+        }
+    ]
+    state["navigation_chains"] = [
+        {
+            "chain_id": "chain-1",
+            "status": "in_progress",
+            "expected_next_roles": ["commit_page", "download_page"],
+        }
+    ]
+    state["browser_snapshots"] = {
+        state["current_page_url"]: asdict(
+            _make_snapshot(
+                state["current_page_url"],
+                page_role_hint="tracker_page",
+                title="CVE-2022-2509",
+                links=[
+                    PageLink(
+                        url="https://gitlab.com/org/proj/-/commit/abc1234",
+                        text="upstream fix",
+                        context="tracker -> commit",
+                        is_cross_domain=True,
+                        estimated_target_role="commit_page",
+                    )
+                ],
+            )
+        )
+    }
+    state["page_observations"] = {
+        state["current_page_url"]: {
+            "depth": 0,
+            "fetch_status": "fetched",
+            "frontier_candidates": [
+                {
+                    "url": "https://gitlab.com/org/proj/-/commit/abc1234",
+                    "anchor_text": "upstream fix",
+                    "link_context": "tracker -> commit",
+                    "page_role": "commit_page",
+                    "score": 120,
+                }
+            ],
+            "candidates": [],
+        }
+    }
+    state["frontier"] = [
+        {
+            "url": "https://gitlab.com/org/proj/-/commit/abc1234",
+            "depth": 1,
+            "score": 120,
+            "expanded": False,
+            "page_role": "commit_page",
+        }
+    ]
+
+    def _unexpected_llm_call(*args, **kwargs):
+        raise AssertionError("LLM 预算耗尽后不应继续调用 LLM")
+
+    monkeypatch.setattr("app.cve.agent_nodes.call_browser_agent_navigation", _unexpected_llm_call)
+    monkeypatch.setattr("app.cve.agent_nodes.record_search_decision", lambda *args, **kwargs: None)
+
+    result = agent_decide_node(state)
+
+    assert result["next_action"] == "expand_frontier"
+    assert result["selected_frontier_urls"] == ["https://gitlab.com/org/proj/-/commit/abc1234"]
+
+
+def test_build_frontier_candidate_records_keeps_commit_page_on_tracker_page_even_when_children_limit_is_small() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2022-2509")
+    state["budget"]["max_children_per_node"] = 5
+
+    snapshot = _make_snapshot(
+        "https://deb.freexian.com/extended-lts/tracker/CVE-2022-2509",
+        page_role_hint="tracker_page",
+        title="CVE-2022-2509",
+        links=[
+            PageLink(
+                url="https://deb.freexian.com/extended-lts/tracker/DLA-3070-1",
+                text="DLA-3070-1",
+                context="References DLA-3070-1",
+                is_cross_domain=False,
+                estimated_target_role="tracker_page",
+            ),
+            PageLink(
+                url="https://deb.freexian.com/extended-lts/tracker/DSA-5203-1",
+                text="DSA-5203-1",
+                context="References DSA-5203-1",
+                is_cross_domain=False,
+                estimated_target_role="tracker_page",
+            ),
+            PageLink(
+                url="https://bugs.gentoo.org/show_bug.cgi?id=CVE-2022-2509",
+                text="Gentoo",
+                context="Source Gentoo",
+                is_cross_domain=True,
+                estimated_target_role="bugtracker_page",
+            ),
+            PageLink(
+                url="https://bugzilla.redhat.com/show_bug.cgi?id=CVE-2022-2509",
+                text="Red Hat",
+                context="Source Red Hat",
+                is_cross_domain=True,
+                estimated_target_role="bugtracker_page",
+            ),
+            PageLink(
+                url="https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb265dbe9b6d597f5767449e8ee95848e2",
+                text="https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb265dbe9b6d597f5767449e8ee95848e2",
+                context="Notes upstream fix commit",
+                is_cross_domain=True,
+                estimated_target_role="commit_page",
+            ),
+            PageLink(
+                url="https://tracker.debian.org/pkg/gnutls28",
+                text="PTS",
+                context="source package tracker",
+                is_cross_domain=True,
+                estimated_target_role="unknown_page",
+            ),
+        ],
+    )
+
+    records = _build_frontier_candidate_records(state, snapshot=snapshot, depth=1)
+
+    record_urls = [record["url"] for record in records]
+    assert (
+        "https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb265dbe9b6d597f5767449e8ee95848e2"
+        in record_urls
+    )
+
+
+def test_agent_decide_node_accepts_commit_url_selected_from_tracker_page_key_links(
+    monkeypatch,
+) -> None:
+    run_id = uuid.uuid4()
+
+    class _FakeRun:
+        def __init__(self) -> None:
+            self.run_id = run_id
+            self.phase = "agent_decide"
+            self.status = "running"
+            self.stop_reason = None
+            self.summary_json = {}
+
+    fake_run = _FakeRun()
+
+    class _FakeSession:
+        def get(self, model, value):
+            if model is CVERun and value == run_id:
+                return fake_run
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    commit_url = "https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb265dbe9b6d597f5767449e8ee95848e2"
+    state = build_initial_agent_state(run_id=str(run_id), cve_id="CVE-2022-2509")
+    state["session"] = _FakeSession()
+    state["current_page_url"] = "https://deb.freexian.com/extended-lts/tracker/CVE-2022-2509"
+    state["navigation_chains"] = [
+        {
+            "chain_id": "chain-1",
+            "status": "in_progress",
+            "expected_next_roles": ["commit_page", "download_page"],
+        }
+    ]
+    state["browser_snapshots"] = {
+        state["current_page_url"]: asdict(
+            _make_snapshot(
+                state["current_page_url"],
+                page_role_hint="tracker_page",
+                title="CVE-2022-2509",
+                links=[
+                    PageLink(
+                        url=commit_url,
+                        text=commit_url,
+                        context="Notes upstream fix commit",
+                        is_cross_domain=True,
+                        estimated_target_role="commit_page",
+                    )
+                ],
+            )
+        )
+    }
+    state["page_observations"] = {
+        state["current_page_url"]: {
+            "depth": 3,
+            "fetch_status": "fetched",
+            "frontier_candidates": [],
+            "candidates": [],
+        }
+    }
+    state["frontier"] = [
+        {
+            "url": commit_url,
+            "depth": 4,
+            "score": 80,
+            "expanded": False,
+            "page_role": "commit_page",
+        }
+    ]
+
+    monkeypatch.setattr(
+        "app.cve.agent_nodes.call_browser_agent_navigation",
+        lambda navigation_context: {
+            "action": "expand_frontier",
+            "reason_summary": "tracker 直接进入上游 commit",
+            "selected_urls": [commit_url],
+            "selected_candidate_keys": [],
+            "model_name": "fake-llm",
+            "chain_updates": [],
+            "new_chains": [],
+        },
+    )
+    monkeypatch.setattr("app.cve.agent_nodes.record_search_decision", lambda *args, **kwargs: None)
+
+    result = agent_decide_node(state)
+
+    assert result["next_action"] == "expand_frontier"
+    assert result["selected_frontier_urls"] == [commit_url]
+
+
+def test_build_frontier_candidate_records_prioritizes_commit_page_over_bugtracker_and_tracker_noise_on_tracker_page() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2022-2509")
+    state["budget"]["max_children_per_node"] = 5
+
+    commit_url = "https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb265dbe9b6d597f5767449e8ee95848e2"
+    snapshot = _make_snapshot(
+        "https://deb.freexian.com/extended-lts/tracker/CVE-2022-2509",
+        page_role_hint="tracker_page",
+        title="CVE-2022-2509",
+        links=[
+            PageLink(
+                url="https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+                text="NVD",
+                context="Source NVD",
+                is_cross_domain=True,
+                estimated_target_role="advisory_page",
+            ),
+            PageLink(
+                url="https://bugzilla.redhat.com/show_bug.cgi?id=CVE-2022-2509",
+                text="Red Hat",
+                context="Source Red Hat",
+                is_cross_domain=True,
+                estimated_target_role="bugtracker_page",
+            ),
+            PageLink(
+                url="https://bugs.gentoo.org/show_bug.cgi?id=CVE-2022-2509",
+                text="Gentoo",
+                context="Source Gentoo",
+                is_cross_domain=True,
+                estimated_target_role="bugtracker_page",
+            ),
+            PageLink(
+                url="https://bugzilla.suse.com/show_bug.cgi?id=CVE-2022-2509",
+                text="SUSE bugzilla",
+                context="Source SUSE",
+                is_cross_domain=True,
+                estimated_target_role="bugtracker_page",
+            ),
+            PageLink(
+                url="https://deb.freexian.com/extended-lts/tracker/DLA-3070-1",
+                text="DLA-3070-1",
+                context="References DLA-3070-1",
+                is_cross_domain=False,
+                estimated_target_role="tracker_page",
+            ),
+            PageLink(
+                url="https://deb.freexian.com/extended-lts/tracker/DSA-5203-1",
+                text="DSA-5203-1",
+                context="References DSA-5203-1",
+                is_cross_domain=False,
+                estimated_target_role="tracker_page",
+            ),
+            PageLink(
+                url=commit_url,
+                text=commit_url,
+                context="Notes upstream fix commit",
+                is_cross_domain=True,
+                estimated_target_role="commit_page",
+            ),
+            PageLink(
+                url="https://tracker.debian.org/pkg/gnutls28",
+                text="PTS",
+                context="source package tracker",
+                is_cross_domain=True,
+                estimated_target_role="unknown_page",
+            ),
+        ],
+    )
+
+    records = _build_frontier_candidate_records(state, snapshot=snapshot, depth=1)
+    record_urls = [record["url"] for record in records]
+
+    assert record_urls[0] == commit_url

@@ -10,6 +10,28 @@ def _project_root() -> Path:
 DEFAULT_ARTIFACT_ROOT = str((_project_root() / "backend/.runtime/artifacts").resolve())
 
 
+def _load_local_env_file() -> None:
+    env_path = _project_root() / ".env.local"
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key or key in os.environ:
+            continue
+        normalized_value = value.strip()
+        if (
+            len(normalized_value) >= 2
+            and normalized_value[0] == normalized_value[-1]
+            and normalized_value[0] in {'"', "'"}
+        ):
+            normalized_value = normalized_value[1:-1]
+        os.environ[key] = normalized_value
+
+
 def _resolve_artifact_root(raw_path: str) -> str:
     candidate = Path(raw_path).expanduser()
     if candidate.is_absolute():
@@ -49,13 +71,16 @@ class Settings:
     llm_api_key: str = ""
     llm_default_model: str = ""
     llm_timeout_seconds: int = 20
+    llm_wall_clock_timeout_seconds: int = 120
     llm_retry_attempts: int = 2
+    cve_runtime_diagnostic_timeout_seconds: int = 180
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "artifact_root", _resolve_artifact_root(self.artifact_root))
 
 
 def load_settings() -> Settings:
+    _load_local_env_file()
     return Settings(
         app_name=os.getenv("AETHERFLOW_APP_NAME", "AetherFlow API"),
         database_url=os.getenv("AETHERFLOW_DATABASE_URL", os.getenv("DATABASE_URL", "")),
@@ -78,5 +103,13 @@ def load_settings() -> Settings:
         llm_api_key=os.getenv("LLM_API_KEY", "").strip(),
         llm_default_model=os.getenv("LLM_DEFAULT_MODEL", "").strip(),
         llm_timeout_seconds=_load_int_setting("LLM_TIMEOUT_SECONDS", 20),
+        llm_wall_clock_timeout_seconds=_load_int_setting(
+            "LLM_WALL_CLOCK_TIMEOUT_SECONDS",
+            120,
+        ),
         llm_retry_attempts=_load_int_setting("LLM_RETRY_ATTEMPTS", 2),
+        cve_runtime_diagnostic_timeout_seconds=_load_int_setting(
+            "AETHERFLOW_CVE_RUNTIME_DIAGNOSTIC_TIMEOUT_SECONDS",
+            180,
+        ),
     )

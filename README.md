@@ -39,6 +39,21 @@ AetherFlow 是一个面向安全情报处理的智能体平台。
 make backend-install frontend-install
 ```
 
+## 本地模型配置
+
+浏览器 Agent 的真实验收默认从仓库根目录的 `.env.local` 读取 OpenAI 兼容模型配置。
+该文件已被 Git 忽略，适合存放本机私有配置，不会进入版本控制。
+
+建议在仓库根目录维护：
+
+```env
+LLM_BASE_URL=<YOUR_OPENAI_COMPATIBLE_BASE_URL>
+LLM_API_KEY=<YOUR_API_KEY>
+LLM_DEFAULT_MODEL=<YOUR_MODEL_NAME>
+```
+
+运行时如果显式设置了同名环境变量，会覆盖 `.env.local` 中的值。
+
 ## 关键验证命令
 
 Phase 0 规范与 SQL 初始化顺序验证：
@@ -98,6 +113,46 @@ npm --prefix frontend run dev -- --host 0.0.0.0 --port 5180
 - `/deliveries?tab=records`：投递记录、立即发送、计划发送、失败重试
 - `/system/health`：系统状态页
 - `/system/tasks`：任务中心
+
+## 浏览器 Agent 真实验收
+
+当前仓库已经在真实 DashScope OpenAI 兼容配置下完成两条浏览器 Agent 验收：
+
+- `CVE-2022-2509`：`mailing_list_page -> tracker_page -> commit_page -> patch download`
+- `CVE-2024-3094`：多链路跨域场景，可直接从 `oss-security` 收敛到上游 commit patch
+
+推荐的本地验收命令：
+
+```bash
+cd backend
+
+DATABASE_URL=postgresql+psycopg://postgres:postgres@127.0.0.1:55432/aetherflow_dev \
+AETHERFLOW_CVE_RUNTIME_DIAGNOSTIC_MODE=true \
+python -m scripts.acceptance_browser_agent \
+  --cve CVE-2022-2509 \
+  --llm-wall-clock-timeout-seconds 90 \
+  --diagnostic-timeout-seconds 360 \
+  --max-llm-calls 4 \
+  --max-pages-total 12 \
+  --results-dir results/live-acceptance-cve-2022-2509
+```
+
+```bash
+cd backend
+
+DATABASE_URL=postgresql+psycopg://postgres:postgres@127.0.0.1:55432/aetherflow_dev \
+AETHERFLOW_CVE_RUNTIME_DIAGNOSTIC_MODE=true \
+python -m scripts.acceptance_browser_agent \
+  --cve CVE-2024-3094 \
+  --llm-wall-clock-timeout-seconds 90 \
+  --diagnostic-timeout-seconds 360 \
+  --max-llm-calls 6 \
+  --max-pages-total 16 \
+  --results-dir results/live-acceptance-cve-2024-3094
+```
+
+验收报告会输出到 `backend/results/<run-name>/acceptance_report.json` 与
+`backend/results/<run-name>/llm_decisions_log.jsonl`。
 
 ## 文档阅读入口
 

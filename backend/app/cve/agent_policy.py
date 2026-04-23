@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from urllib.parse import urlparse
 
 
@@ -25,7 +26,25 @@ ALLOWED_AGENT_ACTIONS = {
 
 
 def build_default_budget() -> dict[str, int]:
-    return dict(DEFAULT_PATCH_AGENT_BUDGET)
+    budget = dict(DEFAULT_PATCH_AGENT_BUDGET)
+    env_mapping = {
+        "max_pages_total": "AETHERFLOW_CVE_MAX_PAGES_TOTAL",
+        "max_depth": "AETHERFLOW_CVE_MAX_DEPTH",
+        "max_cross_domain_expansions": "AETHERFLOW_CVE_MAX_CROSS_DOMAIN_EXPANSIONS",
+        "max_children_per_node": "AETHERFLOW_CVE_MAX_CHILDREN_PER_NODE",
+        "max_parallel_frontier": "AETHERFLOW_CVE_MAX_PARALLEL_FRONTIER",
+        "max_agent_iterations": "AETHERFLOW_CVE_MAX_AGENT_ITERATIONS",
+        "max_llm_calls": "AETHERFLOW_CVE_MAX_LLM_CALLS",
+        "max_llm_tokens": "AETHERFLOW_CVE_MAX_LLM_TOKENS",
+        "max_download_attempts": "AETHERFLOW_CVE_MAX_DOWNLOAD_ATTEMPTS",
+        "max_chains": "AETHERFLOW_CVE_MAX_CHAINS",
+    }
+    for budget_key, env_name in env_mapping.items():
+        raw_value = os.getenv(env_name)
+        if raw_value is None:
+            continue
+        budget[budget_key] = int(raw_value)
+    return budget
 
 
 @dataclass(frozen=True)
@@ -179,34 +198,35 @@ def validate_agent_decision(state, decision: dict) -> AgentValidationResult:
     if not current_page_url and page_observations:
         current_page_url = str(next(iter(page_observations.keys())))
 
-    page_links: set[str] = set()
     current_observation = dict(page_observations.get(current_page_url) or {})
-    for raw_url in list(current_observation.get("extracted_links") or []):
-        if isinstance(raw_url, str) and raw_url.strip():
-            page_links.add(raw_url)
-    for raw_observation in page_observations.values():
-        if not isinstance(raw_observation, dict):
-            continue
-        for raw_url in list(raw_observation.get("extracted_links") or []):
-            if isinstance(raw_url, str) and raw_url.strip():
-                page_links.add(raw_url)
+    current_page_candidate_urls = {
+        str(item.get("url") or "").strip()
+        for item in list(current_observation.get("frontier_candidates") or [])
+        if isinstance(item, dict) and str(item.get("url") or "").strip()
+    }
+    if not current_page_candidate_urls:
+        current_page_candidate_urls = {
+            str(url).strip()
+            for url in list(current_observation.get("extracted_links") or [])
+            if isinstance(url, str) and str(url).strip()
+        }
 
-    browser_snapshots = dict(state.get("browser_snapshots") or {})
-    for raw_snapshot in browser_snapshots.values():
-        if not isinstance(raw_snapshot, dict):
-            continue
-        for raw_link in list(raw_snapshot.get("links") or []):
-            if isinstance(raw_link, dict):
-                link_url = str(raw_link.get("url") or "").strip()
-                if link_url:
-                    page_links.add(link_url)
-
-    allowed_urls = frontier_urls | page_links
+    allowed_urls = frontier_urls | current_page_candidate_urls
     selected_urls = [
         str(url).strip()
         for url in list(decision.get("selected_urls") or [])
         if str(url).strip()
     ]
+    selected_candidate_keys = [
+        str(key).strip()
+        for key in list(decision.get("selected_candidate_keys") or [])
+        if str(key).strip()
+    ]
+    available_candidate_keys = {
+        str(candidate.get("canonical_key") or "").strip()
+        for candidate in list(state.get("direct_candidates") or [])
+        if isinstance(candidate, dict) and str(candidate.get("canonical_key") or "").strip()
+    }
 
     for selected_url in selected_urls:
         if selected_url not in allowed_urls:
@@ -214,7 +234,7 @@ def validate_agent_decision(state, decision: dict) -> AgentValidationResult:
                 accepted=False,
                 normalized_action="stop_search",
                 normalized_selected_urls=[],
-                rejection_reason="selected_url_not_in_frontier_or_page",
+                rejection_reason="selected_url_not_in_current_page_or_frontier",
             )
 
     visited_urls = {str(url) for url in list(state.get("visited_urls") or [])}
@@ -225,6 +245,23 @@ def validate_agent_decision(state, decision: dict) -> AgentValidationResult:
                 normalized_action="stop_search",
                 normalized_selected_urls=[],
                 rejection_reason="duplicate_url",
+            )
+
+    if action == "try_candidate_download" and not selected_candidate_keys:
+        return AgentValidationResult(
+            accepted=False,
+            normalized_action="stop_search",
+            normalized_selected_urls=[],
+            rejection_reason="missing_selected_candidate_keys",
+        )
+
+    for selected_candidate_key in selected_candidate_keys:
+        if selected_candidate_key not in available_candidate_keys:
+            return AgentValidationResult(
+                accepted=False,
+                normalized_action="stop_search",
+                normalized_selected_urls=[],
+                rejection_reason="selected_candidate_key_not_in_candidates",
             )
 
     current_host = urlparse(current_page_url).hostname or current_page_url

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import logging
+import re
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -25,6 +26,7 @@ from app.cve.chain_tracker import ChainTracker
 from app.cve.frontier_planner import normalize_frontier_url, plan_frontier, score_frontier_url
 from app.cve.page_analyzer import analyze_page
 from app.cve.patch_downloader import download_patch_candidate
+from app.cve.reference_matcher import get_candidate_priority
 from app.cve.reference_matcher import match_reference_url
 from app.cve.search_graph_service import (
     record_candidate_artifact,
@@ -32,7 +34,7 @@ from app.cve.search_graph_service import (
     record_search_edge,
     record_search_node,
 )
-from app.cve.seed_resolver import resolve_seed_references
+from app.cve.seed_resolver import SeedReference, resolve_seed_references
 from app.models import CVERun
 from app.models.cve import CVECandidateArtifact, CVEPatchArtifact, CVESearchNode
 
@@ -74,6 +76,14 @@ _MAILING_LIST_NOISE_PATH_FRAGMENTS = (
     "/next-date.html",
     "/thrd",
 )
+_CVE_ID_RE = re.compile(r"\bCVE-\d{4}-\d{4,}\b", re.IGNORECASE)
+_HIGH_PRIORITY_UPSTREAM_PATCH_TYPES = {
+    "github_commit_patch",
+    "gitlab_commit_patch",
+    "kernel_commit_patch",
+    "github_pull_patch",
+    "gitlab_merge_request_patch",
+}
 
 
 def _require_session(state: AgentState):
@@ -459,6 +469,111 @@ def _append_page_role_history(state: AgentState, *, url: str, role: str, title: 
     state["page_role_history"] = page_role_history
 
 
+def _extract_cve_ids(*values: str) -> set[str]:
+    matched_ids: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        matched_ids.update(match.upper() for match in _CVE_ID_RE.findall(value))
+    return matched_ids
+
+
+def _target_cve_id(state: AgentState) -> str:
+    return str(state.get("cve_id") or "").strip().upper()
+
+
+def _classify_tracker_page_relevance(
+    snapshot: BrowserPageSnapshot,
+    *,
+    target_cve_id: str,
+) -> str:
+    if snapshot.page_role_hint != "tracker_page" or not target_cve_id:
+        return "unknown"
+    observed_cve_ids = _extract_cve_ids(
+        snapshot.final_url or snapshot.url,
+        snapshot.title,
+        snapshot.accessibility_tree,
+        snapshot.markdown_content,
+    )
+    if not observed_cve_ids:
+        return "unknown"
+    if target_cve_id in observed_cve_ids:
+        return "target"
+    return "off_target"
+
+
+def _score_frontier_candidate(
+    *,
+    normalized_url: str,
+    link: PageLink,
+    target_cve_id: str,
+    source_page_role: str = "",
+) -> int:
+    target_role = link.estimated_target_role or classify_page_role(normalized_url)
+    score = score_frontier_url(normalized_url)
+    role_bonus = {
+        "commit_page": 40,
+        "download_page": 25,
+        "tracker_page": 15,
+        "bugtracker_page": 10,
+    }
+    score += role_bonus.get(target_role, 0)
+    if source_page_role == "tracker_page":
+        tracker_source_bonus = {
+            "commit_page": 220,
+            "download_page": 180,
+            "tracker_page": 20,
+            "bugtracker_page": -20,
+            "advisory_page": -40,
+        }
+        score += tracker_source_bonus.get(target_role, 0)
+    matched_cve_ids = _extract_cve_ids(normalized_url, link.text, link.context)
+    if target_cve_id:
+        if target_cve_id in matched_cve_ids:
+            score += 120
+        elif matched_cve_ids:
+            score -= 160
+    return score
+
+
+def _should_keep_reference_link_in_frontier(
+    *,
+    source_page_role: str,
+    normalized_url: str,
+    link: PageLink,
+) -> bool:
+    target_role = link.estimated_target_role or classify_page_role(normalized_url)
+    return source_page_role == "tracker_page" and target_role == "commit_page"
+
+
+def _filter_candidate_matches_for_page(
+    state: AgentState,
+    *,
+    snapshot: BrowserPageSnapshot,
+    candidate_matches: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    if not candidate_matches:
+        return []
+
+    target_cve_id = _target_cve_id(state)
+    tracker_relevance = _classify_tracker_page_relevance(
+        snapshot,
+        target_cve_id=target_cve_id,
+    )
+    filtered_candidates: list[dict[str, str]] = []
+    for candidate in candidate_matches:
+        patch_type = str(candidate.get("patch_type") or "")
+        if snapshot.page_role_hint == "tracker_page":
+            if tracker_relevance == "off_target":
+                continue
+            if patch_type in _HIGH_PRIORITY_UPSTREAM_PATCH_TYPES:
+                # tracker 页应先进入 commit/PR/MR 页面，再从源码托管页下载 patch，
+                # 否则会在证据层绕过 commit_page。
+                continue
+        filtered_candidates.append(candidate)
+    return filtered_candidates
+
+
 def _is_navigation_noise_url(url: str) -> bool:
     normalized = url.lower()
     parsed = urlparse(normalized)
@@ -548,6 +663,81 @@ def _filter_frontier_links(source_page_role: str, links: list[PageLink]) -> list
     return filtered_links
 
 
+def _build_frontier_candidate_records(
+    state: AgentState,
+    *,
+    snapshot: BrowserPageSnapshot,
+    depth: int,
+) -> list[dict[str, object]]:
+    filtered_links = _filter_frontier_links(snapshot.page_role_hint, snapshot.links)
+    max_children_per_node = int(state["budget"].get("max_children_per_node", 5) or 5)
+    target_cve_id = _target_cve_id(state)
+    tracker_relevance = _classify_tracker_page_relevance(
+        snapshot,
+        target_cve_id=target_cve_id,
+    )
+    candidate_records_with_meta: list[tuple[dict[str, object], set[str]]] = []
+    seen_urls: set[str] = set()
+    for link in filtered_links:
+        normalized_link = normalize_frontier_url(link.url)
+        if normalized_link is None or normalized_link in seen_urls:
+            continue
+        matched_cve_ids = _extract_cve_ids(normalized_link, link.text, link.context)
+        if (
+            snapshot.page_role_hint == "tracker_page"
+            and tracker_relevance == "off_target"
+            and target_cve_id
+            and target_cve_id not in matched_cve_ids
+        ):
+            continue
+        if (
+            match_reference_url(normalized_link) is not None
+            and not _should_keep_reference_link_in_frontier(
+                source_page_role=snapshot.page_role_hint,
+                normalized_url=normalized_link,
+                link=link,
+            )
+        ):
+            continue
+        seen_urls.add(normalized_link)
+        candidate_records_with_meta.append(
+            (
+                {
+                    "url": normalized_link,
+                    "anchor_text": link.text,
+                    "link_context": link.context,
+                    "page_role": link.estimated_target_role or classify_page_role(normalized_link),
+                    "score": _score_frontier_candidate(
+                        normalized_url=normalized_link,
+                        link=link,
+                        target_cve_id=target_cve_id,
+                        source_page_role=snapshot.page_role_hint,
+                    ),
+                    "depth": depth,
+                },
+                matched_cve_ids,
+            )
+        )
+    if snapshot.page_role_hint == "tracker_page" and target_cve_id:
+        has_target_tracker_link = any(
+            record.get("page_role") == "tracker_page" and target_cve_id in matched_cve_ids
+            for record, matched_cve_ids in candidate_records_with_meta
+        )
+        if has_target_tracker_link:
+            candidate_records_with_meta = [
+                (record, matched_cve_ids)
+                for record, matched_cve_ids in candidate_records_with_meta
+                if not (
+                    record.get("page_role") == "tracker_page"
+                    and matched_cve_ids
+                    and target_cve_id not in matched_cve_ids
+                )
+            ]
+    candidate_records = [record for record, _ in candidate_records_with_meta]
+    candidate_records.sort(key=lambda item: int(item.get("score", 0) or 0), reverse=True)
+    return candidate_records[:max_children_per_node]
+
+
 def _select_fallback_frontier_urls(
     state: AgentState,
     frontier_items: list[dict[str, object]],
@@ -609,27 +799,92 @@ def _select_fallback_frontier_urls(
     return selected_urls
 
 
+def _candidate_priority(candidate: dict) -> int:
+    """从候选 dict 获取质量优先级。"""
+    patch_type = str(candidate.get("patch_type") or candidate.get("candidate_type") or "")
+    candidate_url = str(candidate.get("candidate_url") or "")
+    return get_candidate_priority(patch_type, candidate_url)
+
+
+def _select_chain_guided_frontier_urls(
+    state: AgentState,
+    frontier_items: list[dict[str, object]],
+) -> list[str]:
+    active_chains = [
+        chain
+        for chain in list(state.get("navigation_chains") or [])
+        if isinstance(chain, dict) and str(chain.get("status") or "") == "in_progress"
+    ]
+    expected_roles = {
+        str(role).strip()
+        for chain in active_chains
+        for role in list(chain.get("expected_next_roles") or [])
+        if str(role).strip()
+    }
+    if not expected_roles:
+        return []
+
+    prioritized_items = [
+        item
+        for item in frontier_items
+        if isinstance(item, dict) and str(item.get("page_role") or "").strip() in expected_roles
+    ]
+    if not prioritized_items:
+        return []
+    return _select_fallback_frontier_urls(state, prioritized_items)
+
+
 def _build_rule_fallback_decision(state: AgentState) -> dict[str, object]:
     direct_candidates = list(state.get("direct_candidates", []))
-    if direct_candidates:
+    high_quality = [c for c in direct_candidates if _candidate_priority(c) >= 90]
+    low_quality = [c for c in direct_candidates if _candidate_priority(c) < 90]
+
+    if high_quality:
         return {
             "action": "try_candidate_download",
-            "reason_summary": "规则回退：已有 patch 候选，优先下载校验。",
+            "reason_summary": "规则回退：发现高质量 patch 候选（上游 commit），优先下载。",
             "selected_urls": [],
             "selected_candidate_keys": [
-                str(candidate.get("canonical_key")) for candidate in direct_candidates
+                str(candidate.get("canonical_key")) for candidate in high_quality
             ],
             "chain_updates": [],
             "new_chains": [],
         }
 
-    fallback_urls = _select_fallback_frontier_urls(state, unexpanded_frontier_items(state))
+    frontier_items = unexpanded_frontier_items(state)
+    fallback_urls = _select_chain_guided_frontier_urls(state, frontier_items)
+    if not fallback_urls:
+        fallback_urls = _select_fallback_frontier_urls(state, frontier_items)
     if fallback_urls:
         return {
             "action": "expand_frontier",
-            "reason_summary": "规则回退：继续扩展未访问 frontier。",
+            "reason_summary": (
+                "规则回退：仅有低质量候选，按活跃链路继续探索寻找上游 commit。"
+                if low_quality and _select_chain_guided_frontier_urls(state, frontier_items)
+                else (
+                    "规则回退：仅有低质量候选，继续探索寻找上游 commit。"
+                    if low_quality
+                    else (
+                        "规则回退：按活跃链路优先扩展期望角色 frontier。"
+                        if _select_chain_guided_frontier_urls(state, frontier_items)
+                        else "规则回退：继续扩展未访问 frontier。"
+                    )
+                )
+            ),
             "selected_urls": fallback_urls,
             "selected_candidate_keys": [],
+            "chain_updates": [],
+            "new_chains": [],
+        }
+
+    if low_quality:
+        return {
+            "action": "try_candidate_download",
+            "reason_summary": "规则回退：无更多 frontier 可探索，下载现有低质量候选。",
+            "selected_urls": [],
+            "selected_candidate_keys": [
+                str(candidate.get("canonical_key")) for candidate in low_quality
+            ],
             "chain_updates": [],
             "new_chains": [],
         }
@@ -768,6 +1023,12 @@ def _is_blocked_or_empty_page(snapshot: BrowserPageSnapshot) -> bool:
         return True
     if "i challenge thee" in normalized_title:
         return True
+    if "just a moment" in normalized_title:
+        return True
+    if "checking your browser before accessing" in normalized_markdown:
+        return True
+    if "checking your browser before accessing" in normalized_html:
+        return True
     return False
 
 
@@ -790,11 +1051,17 @@ def build_initial_frontier_node(state: AgentState) -> AgentState:
     session.flush()
 
     run_id = UUID(state["run_id"])
+    seed_references: list[SeedReference] = list(state.get("seed_references", []))
+    seed_authority_by_url: dict[str, int] = {}
     direct_candidates: list[dict[str, object]] = []
-    for reference in state.get("seed_references", []):
-        normalized_reference = normalize_frontier_url(reference)
+    for reference in seed_references:
+        normalized_reference = normalize_frontier_url(reference.url)
         if normalized_reference is None:
             continue
+        seed_authority_by_url[normalized_reference] = max(
+            seed_authority_by_url.get(normalized_reference, 0),
+            int(reference.authority_score),
+        )
         matched_candidate = match_reference_url(normalized_reference)
         if matched_candidate is None:
             continue
@@ -829,7 +1096,7 @@ def build_initial_frontier_node(state: AgentState) -> AgentState:
 
     tracker = _load_chain_tracker(state)
     frontier: list[dict[str, object]] = []
-    for url in plan_frontier(state.get("seed_references", [])):
+    for url in plan_frontier(seed_references):
         page_role = classify_page_role(url)
         chain_id = None
         try:
@@ -847,7 +1114,10 @@ def build_initial_frontier_node(state: AgentState) -> AgentState:
             {
                 "url": url,
                 "depth": 0,
-                "score": score_frontier_url(url),
+                "score": score_frontier_url(
+                    url,
+                    authority_score=seed_authority_by_url.get(url, 0),
+                ),
                 "expanded": False,
                 "fetch_status": "queued",
                 "page_role": page_role,
@@ -929,6 +1199,7 @@ def fetch_next_batch_node(state: AgentState) -> AgentState:
                 "content_type": "text/html",
                 "content": snapshot.raw_html,
                 "extracted_links": [],
+                "frontier_candidates": [],
                 "candidates": [],
                 "extracted": False,
                 "title": snapshot.title,
@@ -958,6 +1229,7 @@ def fetch_next_batch_node(state: AgentState) -> AgentState:
                 "fetch_status": "failed",
                 "error": str(exc),
                 "extracted_links": [],
+                "frontier_candidates": [],
                 "candidates": [],
                 "extracted": True,
                 "chain_id": frontier_item.get("chain_id"),
@@ -1003,7 +1275,12 @@ def extract_links_and_candidates_node(state: AgentState) -> AgentState:
         if not raw_snapshot:
             continue
         snapshot = _deserialize_browser_snapshot(raw_snapshot)
-        extracted_links = [link.url for link in snapshot.links]
+        frontier_candidates = _build_frontier_candidate_records(
+            state,
+            snapshot=snapshot,
+            depth=int(observation.get("depth", 0)) + 1,
+        )
+        extracted_links = [str(candidate["url"]) for candidate in frontier_candidates]
         candidate_matches: list[dict[str, str]] = list(
             analyze_page(
                 {
@@ -1017,6 +1294,15 @@ def extract_links_and_candidates_node(state: AgentState) -> AgentState:
             matched_candidate = match_reference_url(link.url)
             if matched_candidate is not None:
                 candidate_matches.append(matched_candidate)
+        if snapshot.page_role_hint == "commit_page":
+            commit_candidate = match_reference_url(snapshot.final_url or snapshot.url)
+            if commit_candidate is not None:
+                candidate_matches.append(commit_candidate)
+        candidate_matches = _filter_candidate_matches_for_page(
+            state,
+            snapshot=snapshot,
+            candidate_matches=candidate_matches,
+        )
 
         deduped_candidates: list[dict[str, str]] = []
         seen_candidate_keys: set[str] = set()
@@ -1028,6 +1314,7 @@ def extract_links_and_candidates_node(state: AgentState) -> AgentState:
             deduped_candidates.append(candidate)
 
         observation["extracted_links"] = extracted_links
+        observation["frontier_candidates"] = frontier_candidates
         observation["candidates"] = deduped_candidates
         observation["extracted"] = True
         page_observations[observation_key] = observation
@@ -1037,37 +1324,33 @@ def extract_links_and_candidates_node(state: AgentState) -> AgentState:
 
         source_node_id = observation.get("source_node_id")
         source_node_uuid = UUID(str(source_node_id)) if source_node_id else None
-        next_depth = int(observation.get("depth", 0)) + 1
-        if next_depth <= int(state["budget"].get("max_depth", 0) or 0):
-            filtered_links = _filter_frontier_links(snapshot.page_role_hint, snapshot.links)
-            for link in filtered_links[:max_children_per_node]:
-                normalized_link = normalize_frontier_url(link.url)
-                if normalized_link is None:
-                    continue
-                if match_reference_url(normalized_link) is not None:
-                    continue
+        if int(observation.get("depth", 0)) + 1 <= int(state["budget"].get("max_depth", 0) or 0):
+            for candidate in frontier_candidates:
+                normalized_link = str(candidate["url"])
                 frontier_item = _find_frontier_item(state, normalized_link, frontier)
                 if frontier_item is None:
                     child_node = record_search_node(
                         session,
                         run_id=run_id,
                         url=normalized_link,
-                        depth=next_depth,
+                        depth=int(candidate["depth"]),
                         host=urlparse(normalized_link).hostname or normalized_link,
-                        page_role=link.estimated_target_role or classify_page_role(normalized_link),
+                        page_role=str(candidate.get("page_role") or classify_page_role(normalized_link)),
                         fetch_status="queued",
-                        heuristic_features={"frontier_score": score_frontier_url(normalized_link)},
+                        heuristic_features={"frontier_score": int(candidate.get("score", 0) or 0)},
                         flush=True,
                     )
                     frontier_item = {
                         "url": normalized_link,
-                        "depth": next_depth,
-                        "score": score_frontier_url(normalized_link),
+                        "depth": int(candidate["depth"]),
+                        "score": int(candidate.get("score", 0) or 0),
                         "expanded": False,
                         "fetch_status": "queued",
                         "source_node_id": str(child_node.node_id),
                         "chain_id": observation.get("chain_id"),
-                        "page_role": link.estimated_target_role or classify_page_role(normalized_link),
+                        "page_role": str(candidate.get("page_role") or classify_page_role(normalized_link)),
+                        "anchor_text": str(candidate.get("anchor_text") or ""),
+                        "link_context": str(candidate.get("link_context") or ""),
                     }
                     frontier.append(frontier_item)
                     _upsert_page_node_state(state, child_node)
@@ -1079,12 +1362,13 @@ def extract_links_and_candidates_node(state: AgentState) -> AgentState:
                         to_node_id=UUID(str(frontier_item["source_node_id"])),
                         edge_type=(
                             "follow_link_cross_domain"
-                            if link.is_cross_domain
+                            if (urlparse(normalized_link).hostname or normalized_link)
+                            != (urlparse(snapshot.final_url or snapshot.url).hostname or snapshot.final_url or snapshot.url)
                             else "follow_link"
                         ),
                         selected_by="browser",
-                        anchor_text=link.text,
-                        link_context=link.context,
+                        anchor_text=str(candidate.get("anchor_text") or ""),
+                        link_context=str(candidate.get("link_context") or ""),
                         flush=True,
                     )
 
@@ -1138,65 +1422,85 @@ def agent_decide_node(state: AgentState) -> AgentState:
     current_observation = dict((state.get("page_observations") or {}).get(current_page_url) or {})
     decision: dict[str, object] | None = None
     selected_candidate_keys: list[str] = []
+    selected_urls: list[str] = []
     reason_summary = "规则回退"
+    navigation_context = None
+    validation = None
+    action = "stop_search"
+    needs_rule_fallback = True
     model_name: str | None = None
 
     if raw_snapshot:
         snapshot = _deserialize_browser_snapshot(raw_snapshot)
-        page_view = build_llm_page_view(snapshot, list(current_observation.get("candidates") or []))
+        page_view = build_llm_page_view(
+            snapshot,
+            list(current_observation.get("candidates") or []),
+            cve_id=str(state.get("cve_id") or ""),
+            frontier_candidates=list(current_observation.get("frontier_candidates") or []),
+        )
         navigation_context = build_navigation_context(state, page_view)
-        try:
-            decision = call_browser_agent_navigation(
-                navigation_context,
-                llm_decision_log=state.get("_llm_decision_log"),
+        max_llm_calls = int(state["budget"].get("max_llm_calls", 0) or 0)
+        llm_call_count = len(list(state.get("_llm_decision_log") or []))
+        if max_llm_calls > 0 and llm_call_count >= max_llm_calls:
+            _logger.info(
+                "LLM 决策预算已耗尽，跳过 LLM 调用并回退规则引擎: used=%d max=%d",
+                llm_call_count,
+                max_llm_calls,
             )
-            selected_candidate_keys = [
-                str(key) for key in list(decision.get("selected_candidate_keys") or [])
-            ]
-            model_name = str(decision.get("model_name") or "") or None
-            reason_summary = str(decision.get("reason_summary") or "LLM 导航决策")
-            validation = validate_agent_decision(state, decision)
-            record_search_decision(
-                session,
-                run_id=UUID(state["run_id"]),
-                node_id=UUID(state["current_node_id"]) if state.get("current_node_id") else None,
-                decision_type=str(decision.get("action") or "stop_search"),
-                input_payload=asdict(navigation_context),
-                output_payload={
-                    "selected_urls": validation.normalized_selected_urls,
-                    "selected_candidate_keys": selected_candidate_keys,
-                },
-                validated=validation.accepted,
-                model_name=model_name,
-                rejection_reason=validation.rejection_reason,
-                flush=True,
-            )
-            if validation.accepted:
-                tracker = _load_chain_tracker(state)
-                _apply_chain_updates(
-                    state,
-                    tracker=tracker,
-                    decision=decision,
-                    selected_urls=validation.normalized_selected_urls,
-                    current_depth=int(current_observation.get("depth", 0) or 0),
+            reason_summary = "LLM 调用预算已耗尽，回退规则引擎。"
+        else:
+            try:
+                decision = call_browser_agent_navigation(
+                    navigation_context,
+                    llm_decision_log=state.get("_llm_decision_log"),
                 )
-                _store_chain_tracker(state, tracker)
-                action = validation.normalized_action
-                selected_urls = list(validation.normalized_selected_urls)
-            else:
-                action = "stop_search"
-                selected_urls = []
-        except Exception:
-            _logger.warning("LLM 导航决策调用失败，回退到规则引擎", exc_info=True)
-            validation = None
-            action = "stop_search"
-            selected_urls = []
-    else:
-        validation = None
-        action = "stop_search"
-        selected_urls = []
+                selected_candidate_keys = [
+                    str(key) for key in list(decision.get("selected_candidate_keys") or [])
+                ]
+                model_name = str(decision.get("model_name") or "") or None
+                reason_summary = str(decision.get("reason_summary") or "LLM 导航决策")
+                validation = validate_agent_decision(state, decision)
+                record_search_decision(
+                    session,
+                    run_id=UUID(state["run_id"]),
+                    node_id=UUID(state["current_node_id"]) if state.get("current_node_id") else None,
+                    decision_type=str(decision.get("action") or "stop_search"),
+                    input_payload=asdict(navigation_context),
+                    output_payload={
+                        "selected_urls": validation.normalized_selected_urls,
+                        "selected_candidate_keys": selected_candidate_keys,
+                    },
+                    validated=validation.accepted,
+                    model_name=model_name,
+                    rejection_reason=validation.rejection_reason,
+                    flush=True,
+                )
+                if validation.accepted:
+                    normalized_action = validation.normalized_action
+                    if normalized_action == "needs_human_review" and not validate_needs_human_review(
+                        state
+                    ):
+                        selected_candidate_keys = []
+                    else:
+                        tracker = _load_chain_tracker(state)
+                        _apply_chain_updates(
+                            state,
+                            tracker=tracker,
+                            decision=decision,
+                            selected_urls=validation.normalized_selected_urls,
+                            current_depth=int(current_observation.get("depth", 0) or 0),
+                        )
+                        _store_chain_tracker(state, tracker)
+                        action = normalized_action
+                        selected_urls = list(validation.normalized_selected_urls)
+                        needs_rule_fallback = False
+                else:
+                    selected_candidate_keys = []
+            except Exception:
+                _logger.warning("LLM 导航决策调用失败，回退到规则引擎", exc_info=True)
+                selected_candidate_keys = []
 
-    if action == "stop_search" and validation is None:
+    if needs_rule_fallback:
         decision = _build_rule_fallback_decision(state)
         selected_candidate_keys = [
             str(key) for key in list(decision.get("selected_candidate_keys") or [])
@@ -1209,9 +1513,21 @@ def agent_decide_node(state: AgentState) -> AgentState:
             node_id=UUID(state["current_node_id"]) if state.get("current_node_id") else None,
             decision_type="rule_fallback",
             input_payload={
-                "current_page": asdict(navigation_context.current_page) if raw_snapshot else {},
-                "navigation_path": list(navigation_context.navigation_path) if raw_snapshot else [],
-                "active_chains": list(navigation_context.active_chains) if raw_snapshot else [],
+                "current_page": (
+                    asdict(navigation_context.current_page)
+                    if navigation_context is not None
+                    else {}
+                ),
+                "navigation_path": (
+                    list(navigation_context.navigation_path)
+                    if navigation_context is not None
+                    else []
+                ),
+                "active_chains": (
+                    list(navigation_context.active_chains)
+                    if navigation_context is not None
+                    else []
+                ),
                 "frontier_count": len(state.get("frontier", [])),
                 "direct_candidate_count": len(state.get("direct_candidates", [])),
                 "current_page_url": current_page_url,
@@ -1226,18 +1542,13 @@ def agent_decide_node(state: AgentState) -> AgentState:
             rejection_reason=validation.rejection_reason,
             flush=True,
         )
-        action = validation.normalized_action if validation.accepted else "stop_search"
-        selected_urls = list(validation.normalized_selected_urls) if validation.accepted else []
-
-    if action == "needs_human_review" and not validate_needs_human_review(state):
-        fallback_urls = _select_fallback_frontier_urls(state, unexpanded_frontier_items(state))
-        if fallback_urls:
-            action = "expand_frontier"
-            selected_urls = fallback_urls
-            reason_summary = "存在活跃链路或可扩展 frontier，覆盖 needs_human_review 继续探索。"
-        elif state.get("direct_candidates"):
-            action = "try_candidate_download"
+        if validation.accepted:
+            action = validation.normalized_action
+            selected_urls = list(validation.normalized_selected_urls)
+        else:
+            action = "stop_search"
             selected_urls = []
+            selected_candidate_keys = []
 
     evaluation = evaluate_stop_condition(state)
     if action == "stop_search" and not evaluation.should_stop:
@@ -1248,7 +1559,9 @@ def agent_decide_node(state: AgentState) -> AgentState:
             reason_summary = "仍有活跃链路或 frontier，覆盖 stop_search 继续探索。"
         elif state.get("direct_candidates"):
             action = "try_candidate_download"
+            selected_candidate_keys = []
             selected_urls = []
+            reason_summary = "仍有候选可校验，覆盖 stop_search 继续下载。"
 
     state["next_action"] = action
     state["selected_frontier_urls"] = selected_urls if action == "expand_frontier" else []
@@ -1305,6 +1618,15 @@ def download_and_validate_node(state: AgentState) -> AgentState:
                 filtered_candidates,
                 key=lambda candidate: selected_key_order[str(candidate.canonical_key)],
             )
+    else:
+        persisted_candidates = sorted(
+            persisted_candidates,
+            key=lambda candidate: get_candidate_priority(
+                candidate.candidate_type,
+                candidate.candidate_url,
+            ),
+            reverse=True,
+        )
 
     patches: list[dict[str, object]] = []
     downloaded_count = 0

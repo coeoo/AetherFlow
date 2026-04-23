@@ -1,12 +1,61 @@
 from __future__ import annotations
 
+import os
 import uuid
 
+from app.cve.agent_policy import build_default_budget
 from app.models.cve import CVESearchNode
+from scripts.acceptance_browser_agent import parse_args
 from scripts.acceptance_browser_agent import _build_navigation_context_presence
 from scripts.acceptance_browser_agent import _build_scenario_report
 from scripts.acceptance_browser_agent import _build_performance_summary
 from scripts.acceptance_browser_agent import _determine_verdict
+
+
+def test_parse_args_accepts_runtime_budget_overrides() -> None:
+    args = parse_args(
+        [
+            "--cve",
+            "CVE-2022-2509",
+            "--llm-wall-clock-timeout-seconds",
+            "75",
+            "--diagnostic-timeout-seconds",
+            "240",
+            "--max-llm-calls",
+            "3",
+            "--max-pages-total",
+            "12",
+        ]
+    )
+
+    assert args.llm_wall_clock_timeout_seconds == 75
+    assert args.diagnostic_timeout_seconds == 240
+    assert args.max_llm_calls == 3
+    assert args.max_pages_total == 12
+
+
+def test_build_default_budget_allows_environment_overrides(monkeypatch) -> None:
+    monkeypatch.setenv("AETHERFLOW_CVE_MAX_PAGES_TOTAL", "9")
+    monkeypatch.setenv("AETHERFLOW_CVE_MAX_LLM_CALLS", "2")
+    monkeypatch.setenv("AETHERFLOW_CVE_MAX_CHILDREN_PER_NODE", "4")
+
+    budget = build_default_budget()
+
+    assert budget["max_pages_total"] == 9
+    assert budget["max_llm_calls"] == 2
+    assert budget["max_children_per_node"] == 4
+
+
+def test_build_default_budget_uses_defaults_when_env_missing(monkeypatch) -> None:
+    monkeypatch.delenv("AETHERFLOW_CVE_MAX_PAGES_TOTAL", raising=False)
+    monkeypatch.delenv("AETHERFLOW_CVE_MAX_LLM_CALLS", raising=False)
+    monkeypatch.delenv("AETHERFLOW_CVE_MAX_CHILDREN_PER_NODE", raising=False)
+
+    budget = build_default_budget()
+
+    assert budget["max_pages_total"] == 20
+    assert budget["max_llm_calls"] == 15
+    assert budget["max_children_per_node"] == 5
 
 
 def test_determine_verdict_marks_cve_2022_2509_as_pass_when_patch_chain_is_complete() -> None:
@@ -206,3 +255,62 @@ def test_build_scenario_report_only_counts_fetched_page_roles() -> None:
     )
 
     assert report["page_roles_visited"] == ["advisory_page"]
+
+
+def test_build_scenario_report_records_effective_runtime_budget() -> None:
+    previous_values = {
+        "LLM_WALL_CLOCK_TIMEOUT_SECONDS": os.getenv("LLM_WALL_CLOCK_TIMEOUT_SECONDS"),
+        "AETHERFLOW_CVE_RUNTIME_DIAGNOSTIC_TIMEOUT_SECONDS": os.getenv(
+            "AETHERFLOW_CVE_RUNTIME_DIAGNOSTIC_TIMEOUT_SECONDS"
+        ),
+    }
+    try:
+        os.environ["LLM_WALL_CLOCK_TIMEOUT_SECONDS"] = "75"
+        os.environ["AETHERFLOW_CVE_RUNTIME_DIAGNOSTIC_TIMEOUT_SECONDS"] = "240"
+        run = type(
+            "_Run",
+            (),
+            {
+                "run_id": uuid.uuid4(),
+                "status": "failed",
+                "stop_reason": "diagnostic_timeout",
+                "summary_json": {
+                    "patch_found": False,
+                    "chain_summary": [],
+                },
+            },
+        )()
+        final_state = {
+            "budget": {
+                "max_pages_total": 9,
+                "max_llm_calls": 2,
+            }
+        }
+
+        report = _build_scenario_report(
+            scenario=type("_Scenario", (), {"cve_id": "CVE-2022-2509", "description": "test"})(),
+            run=run,
+            final_state=final_state,
+            nodes=[],
+            edges=[],
+            decisions=[],
+            candidates=[],
+            patches=[],
+            llm_logs=[],
+            duration_seconds=1.0,
+            memory_peak_mb=1.0,
+            runtime_error=None,
+        )
+
+        assert report["effective_budget"] == {
+            "max_pages_total": 9,
+            "max_llm_calls": 2,
+            "llm_wall_clock_timeout_seconds": 75,
+            "diagnostic_timeout_seconds": 240,
+        }
+    finally:
+        for key, value in previous_values.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
