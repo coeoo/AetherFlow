@@ -10,8 +10,8 @@
 **模块编号**：M103  
 **优先级**：P0  
 **负责人**：AI + 开发团队  
-**状态**：Phase 1-4 实现完成，离线集成测试通过（81 passed），待真实网络验收  
-**权威规格**：[2026-04-21-cve-browser-agent-design.md](/opt/projects/demo/aetherflow/docs/superpowers/specs/2026-04-21-cve-browser-agent-design.md)
+**状态**：当前主链、真实 acceptance baseline 与 regression gate 已落地  
+**历史重设计规格参考**：[2026-04-21-cve-browser-agent-design.md](/opt/projects/demo/aetherflow/docs/superpowers/specs/2026-04-21-cve-browser-agent-design.md)
 
 ---
 
@@ -19,9 +19,9 @@
 
 ### 业务目标
 
-将 CVE 场景的后端主链从"`httpx 文本抓取 + 规则打分 + 局部 LLM 策略器`"重设计为"`Playwright 浏览器驱动型 AI Agent`"。
+当前 CVE 场景的后端主链已经收口为 `Playwright 浏览器驱动型 AI Agent`。
 
-新的主链目标：
+主链长期目标：
 
 - 用真实浏览器打开页面，获取完整 DOM 和可访问性树
 - 让 LLM 看到页面的结构化语义表示，而非 HTML 截断
@@ -76,15 +76,13 @@ NVD advisory → Red Hat errata → Bugzilla → upstream commit
 oss-security 邮件列表 → GitHub commit → .patch 下载
 ```
 
-**当前系统缺陷**：`navigation.py` 的同域限制阻断了跨域链路。
-
-**新系统能力**：LLM 在链路上下文中做跨域导航决策，受跨域预算控制。
+**当前能力**：LLM 在链路上下文中做跨域导航决策，受跨域预算控制。
 
 ### 场景3：动态页面处理
 
 **场景描述**：部分安全 tracker 和 advisory 页面使用 JavaScript 渲染内容，httpx 无法获取有效信息。
 
-**新系统能力**：Playwright 浏览器执行 JS 后获取完整 DOM 和 a11y 树。
+**当前能力**：Playwright 浏览器执行 JS 后获取完整 DOM 和 a11y 树。
 
 ### 场景4：搜索未收敛但需要解释
 
@@ -130,25 +128,25 @@ flowchart TD
 
 ## 📊 功能清单
 
-| 功能点 | 功能描述 | 优先级 | 阶段 |
-|--------|---------|--------|------|
-| Seed 解析 | 从多源聚合 seed references，保留来源级 trace | P0 | Phase 1 |
-| 直达候选识别 | 识别 seed 中显式 `.patch/.diff/.debdiff` 与 commit / PR / MR patch 候选 | P0 | Phase 1 |
-| 浏览器基础设施 | BrowserBackend 协议、PlaywrightPool、SyncBrowserBridge | P0 | Phase 1 |
-| 页面角色分类 | URL 启发式分类（advisory / tracker / commit / download 等） | P0 | Phase 1 |
-| a11y 树裁剪 | 从 Playwright 快照提取裁剪后的可访问性树（≤6000 字符） | P0 | Phase 1 |
-| Markdown 提取 | 浏览器内 Readability 提取纯文本 markdown（≤2000 字符） | P0 | Phase 1 |
-| 结构化链接提取 | 从 a11y 树提取带上下文的 PageLink 列表 | P0 | Phase 1 |
-| LLM 导航接口 | 构建 LLMPageView + NavigationContext，调用 LLM 返回结构化决策 | P0 | Phase 2 |
-| 链路追踪 | NavigationChain 创建/扩展/关闭/查询 | P0 | Phase 2 |
-| 导航提示词 | browser_agent_navigation.md 系统提示词 | P0 | Phase 2 |
-| 节点重写 | agent_nodes.py 全部节点使用浏览器 + chain-aware LLM | P0 | Phase 3 |
-| 条件路由 | download_and_validate 后可路由回 fetch（活跃链路时） | P0 | Phase 3 |
-| 链路感知停止 | 基于链路状态的停止评估（替代简单的"无 frontier 则停"） | P0 | Phase 3 |
-| 单路径运行时 | runtime.py 精简为唯一路径，删除 fast-first 与 httpx agent | P0 | Phase 3 |
-| 搜索图落库 | 持久化搜索节点、边、决策和候选收敛（复用现有表） | P0 | Phase 3 |
-| 集成测试 | 5 个真实 CVE 场景端到端验证 | P0 | Phase 4 |
-| 详情页图回放 | 展示链路追踪、frontier、budget、决策记录 | P1 | Phase 4 |
+| 功能点 | 功能描述 | 优先级 | 当前状态 |
+|--------|---------|--------|----------|
+| Seed 解析 | 从多源聚合 seed references，保留来源级 trace | P0 | 已落地 |
+| 直达候选识别 | 识别 seed 中显式 `.patch/.diff/.debdiff` 与 commit / PR / MR patch 候选 | P0 | 已落地 |
+| 浏览器基础设施 | BrowserBackend 协议、PlaywrightPool、SyncBrowserBridge | P0 | 已落地 |
+| 页面角色分类 | URL 启发式分类（advisory / tracker / commit / download 等） | P0 | 已落地 |
+| a11y 树裁剪 | 从 Playwright 快照提取裁剪后的可访问性树（≤6000 字符） | P0 | 已落地 |
+| Markdown 提取 | 浏览器内 Readability 提取纯文本 markdown（≤2000 字符） | P0 | 已落地 |
+| 结构化链接提取 | 从 a11y 树提取带上下文的 PageLink 列表 | P0 | 已落地 |
+| LLM 导航接口 | 构建 LLMPageView + NavigationContext，调用 LLM 返回结构化决策 | P0 | 已落地 |
+| 链路追踪 | NavigationChain 创建/扩展/关闭/查询 | P0 | 已落地 |
+| 导航提示词 | browser_agent_navigation.md 系统提示词 | P0 | 已落地 |
+| 节点主链 | agent_nodes.py 使用浏览器 + chain-aware LLM 驱动主链 | P0 | 已落地 |
+| 条件路由 | download_and_validate 后可回到 fetch（活跃链路时） | P0 | 已落地 |
+| 链路感知停止 | 基于链路状态的停止评估（替代简单的“无 frontier 则停”） | P0 | 已落地 |
+| 单路径运行时 | runtime.py 保持单主路径，移除 fast-first 与 httpx 页面主链 | P0 | 已落地 |
+| 搜索图落库 | 持久化搜索节点、边、决策和候选收敛（复用现有表） | P0 | 已落地 |
+| acceptance baseline / gate | compare、baseline 与 regression gate 形成稳定回归约束 | P0 | 已落地 |
+| 详情页图回放 | 展示链路追踪、frontier、budget、决策记录 | P1 | 已接入详情页语义，持续随详情能力演进 |
 
 ---
 
@@ -182,6 +180,37 @@ flowchart TD
 
 ## 🏗️ 核心架构
 
+### 长期定义主落点
+
+- 本文档是当前浏览器 Agent 搜索主链的长期功能定义主落点。
+- `docs/superpowers/specs/2026-04-21-cve-browser-agent-design.md` 保留为浏览器 Agent 重设计阶段的规格与历史背景说明。
+- 当阶段性 spec 与本文档存在表述差异时，以本文档和当前代码实现为准。
+
+### 执行架构
+
+浏览器 Agent 当前长期架构只有一条主路径：
+
+```text
+CVE ID -> seed 解析 -> 浏览器 Agent 搜索图 -> patch 结果
+```
+
+- 运行时入口位于 `backend/app/cve/runtime.py`，由 `PlaywrightBackend + SyncBrowserBridge` 驱动。
+- 执行图位于 `backend/app/cve/agent_graph.py`，主节点顺序为：
+  `resolve_seeds -> build_initial_frontier -> fetch_next_batch -> extract_links_and_candidates -> agent_decide -> download_and_validate/finalize_run`
+- `download_and_validate` 在存在活跃链路且预算未耗尽时，可以返回 `fetch_next_batch` 继续探索。
+- 不存在并行主链、fast-first 规则执行器、httpx 页面抓取主路径或 feature flag 主链切换。
+
+### 主运行时与节点职责
+
+| 位置 | 当前职责 |
+|------|---------|
+| `backend/app/cve/runtime.py` | 创建浏览器桥接、构建初始状态、执行 LangGraph、处理诊断模式 |
+| `backend/app/cve/agent_graph.py` | 定义单主路径拓扑和条件路由 |
+| `backend/app/cve/agent_nodes.py` | 页面抓取、候选识别、LLM 决策、规则保底、下载校验、结果收口 |
+| `backend/app/cve/agent_policy.py` | 预算约束、决策校验、停止条件、人审语义收紧 |
+| `backend/app/cve/browser_agent_llm.py` | LLM 页面视图、导航上下文和结构化导航决策调用 |
+| `backend/app/cve/chain_tracker.py` | 链路状态管理与预期下一步角色约束 |
+
 ### 浏览器层
 
 ```
@@ -192,6 +221,12 @@ BrowserBackend (Protocol)
 
 SyncBrowserBridge                # async→sync 桥接，供 LangGraph 同步节点调用
 ```
+
+浏览器层当前长期约束如下：
+
+- 页面内容获取统一通过浏览器层完成，不再以 `httpx` 文本抓取作为页面主获取方式。
+- 浏览器层对上游节点暴露的唯一核心快照对象是 `BrowserPageSnapshot`。
+- `httpx` 当前只保留给 seed 解析 API 调用和 patch 文件下载，不承担页面主抓取职责。
 
 ### Lightpanda CDP 验证状态
 
@@ -233,6 +268,25 @@ NavigationContext
     └── visited_domains
 ```
 
+#### 当前稳定数据对象
+
+当前代码中已经稳定落地的浏览器 Agent 数据对象包括：
+
+| 对象 | 位置 | 当前用途 |
+|------|------|---------|
+| `BrowserPageSnapshot` | `backend/app/cve/browser/base.py` | 浏览器层对节点输出的标准页面快照 |
+| `PageLink` | `backend/app/cve/browser/base.py` | 页面中的结构化链接与上下文 |
+| `LLMPageView` | `backend/app/cve/browser_agent_llm.py` | 发给 LLM 的当前页面视图 |
+| `NavigationContext` | `backend/app/cve/browser_agent_llm.py` | LLM 导航决策输入上下文 |
+| `NavigationChain` / `ChainStep` | `backend/app/cve/chain_tracker.py` | 链路追踪、状态转换、预期下一步角色 |
+
+#### LLM 导航主决策器定位
+
+- LLM 是当前浏览器 Agent 的导航主决策器。
+- LLM 输入以 `BrowserPageSnapshot` 派生出的 `LLMPageView` 和 `NavigationContext` 为核心，不再以 HTML 截断为主输入。
+- `agent_nodes.py` 当前通过 `build_llm_page_view`、`build_navigation_context`、`call_browser_agent_navigation` 形成完整导航决策链。
+- LLM 负责做结构化导航判断，规则层负责预算、合法性和停止条件校验，不与 LLM 形成并列主架构。
+
 ### 链路追踪层
 
 ```
@@ -243,6 +297,18 @@ NavigationChain
     ├── status                   # in_progress / completed / dead_end
     └── expected_next_roles      # 预期下一步的页面角色
 ```
+
+当前实现已经稳定表达以下链路模式：
+
+- `advisory_to_patch`
+- `tracker_to_commit`
+- `mailing_list_to_fix`
+
+链路追踪当前承担三类长期职责：
+
+1. 记录从 seed 到 patch 的真实页面路径和页面角色变化。
+2. 为 LLM 提供“从哪来、现在在哪、下一步应该去哪类页面”的链路上下文。
+3. 与停止条件、下载后继续探索、详情页回放和 acceptance baseline 共同构成可解释性边界。
 
 ---
 
@@ -271,6 +337,13 @@ NavigationChain
 | `page_role_history` | `list[dict]` | 页面角色记录 `[{url, role, title, depth}]` |
 | `cross_domain_hops` | `int` | 已用跨域次数 |
 | `browser_snapshots` | `dict[str, dict]` | URL → BrowserPageSnapshot 序列化 |
+
+这些字段当前已经是运行时事实，而不是阶段性设计占位：
+
+- `navigation_chains` 驱动链路状态与停止判断
+- `page_role_history` 驱动导航路径、父页面摘要与详情页解释
+- `cross_domain_hops` 驱动跨域预算与回归观察
+- `browser_snapshots` 驱动页面加载耗时、页面摘要与证据回放
 
 ---
 
@@ -369,12 +442,32 @@ Agent 停止时必须明确属于以下之一：
 
 - `patches_downloaded`
 - `no_seed_references`
-- `search_budget_exhausted`
+- `max_pages_total_exhausted`
 - `all_chains_resolved`
-- `no_viable_frontier`
-- `patch_download_failed`
+- `no_remaining_frontier_or_candidates`
 - `needs_human_review`
-- `run_failed`
+- `resolve_seeds_failed`
+- `build_initial_frontier_failed`
+- `fetch_next_batch_failed`
+- `extract_links_and_candidates_failed`
+- `agent_decide_failed`
+- `download_and_validate_failed`
+- `finalize_run_failed`
+
+### 规则11：停止条件以链路与预算事实为准
+
+`backend/app/cve/agent_policy.py` 中当前长期有效的停止逻辑包括：
+
+- 已有下载成功的 patch 时，收口为 `patches_downloaded`
+- 只要仍有活跃链路且页面预算未耗尽，就不能停止
+- 存在候选且所有链路已终止时，收口为 `all_chains_resolved`
+- 无活跃链路、无未扩展 frontier、无候选时，收口为 `no_remaining_frontier_or_candidates`
+- 页面预算耗尽时，收口为 `max_pages_total_exhausted`
+
+`needs_human_review` 当前也已被收紧为受限语义：
+
+- 必须同时满足“没有活跃链路”“没有未扩展 frontier”“没有链路推导出的跨域候选”才允许成立
+- 它是单主路径内部的保底收口，不代表存在另一条执行主链
 
 ---
 
@@ -443,7 +536,7 @@ Agent 停止时必须明确属于以下之一：
 - [ ] 搜索图节点、边、决策可正确落库
 - [ ] 预算耗尽时返回可解释 stop reason
 
-### 集成测试（Phase 4）
+### 集成测试（当前已验证）
 
 - [x] CVE-2022-2509：通过 Debian tracker → GitLab commit 链路找到 patch
 - [x] CVE-2024-3094：多链路多域场景
@@ -461,6 +554,42 @@ Agent 停止时必须明确属于以下之一：
   - `CVE-2024-3094`：`max_llm_calls=6`、`max_pages_total=16`
   - 共用：`LLM_WALL_CLOCK_TIMEOUT_SECONDS=90`、`AETHERFLOW_CVE_RUNTIME_DIAGNOSTIC_TIMEOUT_SECONDS=360`
 
+### acceptance baseline / compare / gate
+
+当前浏览器 Agent 的 acceptance 已经不是阶段性补充，而是长期回归基线的一部分。
+
+#### baseline 报告定位
+
+- `backend/scripts/acceptance_browser_agent.py` 负责生成 `acceptance_report.json`
+- `backend/scripts/acceptance_regression_gate.py` 负责消费 baseline report 与 candidate report，输出 gate 结果
+- `backend/tests/test_acceptance_browser_agent.py` 负责验证 baseline schema、compare 与 gate 的本地稳定性
+
+#### baseline_sample 当前长期语义
+
+`baseline_sample` 当前采用以下结构：
+
+- `execution_architecture`
+- `chain_patterns`
+- `resilience_modes`
+- `stable_fields`
+- `volatile_fields`
+
+其中：
+
+- `execution_architecture` 固定表达单主路径，例如 `single_browser_agent_path`
+- `chain_patterns` 表达真实互联网链路模式样本
+- `resilience_modes` 表达单主路径内部的受限鲁棒性保底模式
+- `stable_fields` 与 `volatile_fields` 用于 compare/gate 的可比性边界
+
+#### regression gate 当前长期角色
+
+- regression gate 比较 baseline report 与 candidate report，不改写浏览器 Agent 主逻辑
+- gate 当前关注的核心退化信号是：
+  - `patch_quality_degraded`
+  - `high_value_path_regressed`
+- 其余如 `patch_url_changed`、`navigation_path_changed`、`more_rule_fallback`、`new_page_roles` 当前是 warning 级观察信号
+- gate 语义当前服务于“防止主链退化”，而不是定义新的执行模式
+
 ### 本轮确认的关键实现路径
 
 1. `mailing_list_page` 或 `tracker_page` 进入目标 `tracker_page`
@@ -474,17 +603,6 @@ Agent 停止时必须明确属于以下之一：
 2. 早期 acceptance 预算过低，`max_llm_calls=2` 只够走到目标 tracker，还来不及进入 commit
 3. 真实 GitLab `commit_page` 会遇到 Cloudflare challenge；如果只依赖页面正文，系统无法产出 patch candidate
 4. 真实供应商配置最初未固化到本地配置文件，导致 acceptance 容易停在环境缺失而非业务逻辑
-
----
-
-## 📅 开发计划
-
-| 阶段 | 任务 | 预计工时 | 状态 |
-|------|------|---------|------|
-| Phase 1 | 浏览器基础设施（browser/ 包、配置） | 2天 | ⏳ |
-| Phase 2 | LLM 接口 + 链路追踪（browser_agent_llm、chain_tracker、提示词） | 2天 | ⏳ |
-| Phase 3 | 节点重写 + 图改造 + 单路径运行时 | 3天 | ⏳ |
-| Phase 4 | 集成测试与调优 | 2天 | ⏳ |
 
 ---
 
@@ -515,6 +633,8 @@ Agent 停止时必须明确属于以下之一：
 - 引入链路意识模型（NavigationChain）
 - 引入链路感知停止条件
 - 所有节点改造为浏览器 + chain-aware LLM
+- 将浏览器 Agent 的长期定义进一步收口到 `docs/04-功能设计/` 主文档
+- 明确 acceptance baseline / compare / regression gate 属于长期回归语义，而非阶段性验收附录
 
 ### 2026-04-20
 
