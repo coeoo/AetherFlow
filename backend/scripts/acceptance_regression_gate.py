@@ -73,10 +73,15 @@ def _generate_candidate_report(args: argparse.Namespace) -> Path:
     output_dir = Path(args.output).resolve().parent if args.output else Path.cwd()
     results_dir = output_dir / ".acceptance-gate"
     results_dir.mkdir(parents=True, exist_ok=True)
+    baseline_report = _load_baseline_report(Path(args.baseline_report))
+    cve_args = [
+        item
+        for cve_id in _extract_baseline_cve_ids(baseline_report)
+        for item in ("--cve", cve_id)
+    ]
     exit_code = acceptance_module.main(
         [
-            "--cve",
-            "CVE-2022-2509",
+            *cve_args,
             "--profile",
             "rule-fallback-only",
             "--mock-mode",
@@ -88,6 +93,15 @@ def _generate_candidate_report(args: argparse.Namespace) -> Path:
     if exit_code != 0:
         raise RuntimeError(f"生成 candidate acceptance report 失败: exit_code={exit_code}")
     return results_dir / "acceptance_report.json"
+
+
+def _extract_baseline_cve_ids(baseline_report: dict[str, object]) -> list[str]:
+    cve_ids = [
+        str(scenario.get("cve_id") or "").strip()
+        for scenario in list(baseline_report.get("scenarios") or [])
+        if isinstance(scenario, dict)
+    ]
+    return list(dict.fromkeys(cve_id for cve_id in cve_ids if cve_id))
 
 
 def _evaluate_gate_result(comparison: dict[str, object]) -> dict[str, object]:

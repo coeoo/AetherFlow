@@ -27,6 +27,44 @@ from scripts.acceptance_regression_gate import _evaluate_gate_result
 from scripts.acceptance_regression_gate import _load_baseline_report
 
 
+ACCEPTANCE_BASELINE_DIR = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "browser_agent"
+    / "acceptance_baselines"
+)
+ACCEPTANCE_STABLE_FIELDS = {
+    "stop_reason",
+    "llm_call_count",
+    "llm_failure_count",
+    "rule_fallback_count",
+    "url_fallback_candidate_count",
+    "visited_page_roles",
+    "selected_patch_types",
+    "navigation_path",
+    "final_patch_urls",
+}
+ACCEPTANCE_VOLATILE_FIELDS = {
+    "run_id",
+    "duration_seconds",
+    "memory_peak_mb",
+    "timestamp",
+}
+REPRESENTATIVE_BASELINE_SAMPLE_TYPES = {
+    "tracker_mailing_list_commit_patch",
+    "bugtracker_commit_patch",
+    "deterministic_url_fallback_patch",
+    "rule_fallback_timeout_high_value_patch",
+}
+
+
+def _load_all_acceptance_baselines() -> list[tuple[Path, dict[str, object]]]:
+    return [
+        (path, _load_baseline_report(path))
+        for path in sorted(ACCEPTANCE_BASELINE_DIR.glob("*.json"))
+    ]
+
+
 def test_parse_args_accepts_runtime_budget_overrides() -> None:
     args = parse_args(
         [
@@ -608,6 +646,97 @@ def test_build_baseline_sample_marks_rule_fallback_timeout_contract() -> None:
     assert "llm_failure_count" in baseline["stable_fields"]
 
 
+def test_build_baseline_sample_marks_representative_real_world_link_types() -> None:
+    tracker_to_mailing_list_commit = _build_baseline_sample(
+        {
+            "stop_reason": "patches_downloaded",
+            "llm_call_count": 1,
+            "llm_failure_count": 0,
+            "rule_fallback_count": 0,
+            "url_fallback_candidate_count": 0,
+            "visited_page_roles": ["tracker_page", "mailing_list_page", "commit_page"],
+            "selected_patch_types": ["github_commit_patch"],
+            "navigation_path": [
+                "tracker_page: https://security-tracker.debian.org/tracker/CVE-2024-3094",
+                "mailing_list_page: https://www.openwall.com/lists/oss-security/2024/03/29/4",
+                "commit_page: https://github.com/tukaani-project/xz/commit/cf44e4b7f5dfdbf8c78aef377c10f71e274f63c0",
+            ],
+            "final_patch_urls": [
+                "https://github.com/tukaani-project/xz/commit/cf44e4b7f5dfdbf8c78aef377c10f71e274f63c0.patch"
+            ],
+            "effective_budget": {
+                "mock_mode": None,
+            },
+        }
+    )
+    bugtracker_to_commit = _build_baseline_sample(
+        {
+            "stop_reason": "patches_downloaded",
+            "llm_call_count": 1,
+            "llm_failure_count": 0,
+            "rule_fallback_count": 0,
+            "url_fallback_candidate_count": 0,
+            "visited_page_roles": ["bugtracker_page", "commit_page"],
+            "selected_patch_types": ["github_commit_patch"],
+            "navigation_path": [
+                "bugtracker_page: https://bugzilla.redhat.com/show_bug.cgi?id=1937364",
+                "commit_page: https://github.com/netty/netty/commit/89c241e3b1795ff257af4ad6eadc616cb2fb3dc4",
+            ],
+            "final_patch_urls": [
+                "https://github.com/netty/netty/commit/89c241e3b1795ff257af4ad6eadc616cb2fb3dc4.patch"
+            ],
+            "effective_budget": {
+                "mock_mode": None,
+            },
+        }
+    )
+    deterministic_url_fallback = _build_baseline_sample(
+        {
+            "stop_reason": "patches_downloaded",
+            "llm_call_count": 1,
+            "llm_failure_count": 0,
+            "rule_fallback_count": 0,
+            "url_fallback_candidate_count": 1,
+            "visited_page_roles": ["tracker_page", "pull_request_page"],
+            "selected_patch_types": ["github_pull_patch"],
+            "navigation_path": [
+                "tracker_page: https://security-tracker.debian.org/tracker/CVE-2025-47256",
+                "pull_request_page: https://github.com/libxmp/libxmp/pull/848",
+            ],
+            "final_patch_urls": ["https://github.com/libxmp/libxmp/pull/848.patch"],
+            "effective_budget": {
+                "mock_mode": None,
+            },
+        }
+    )
+    timeout_high_value = _build_baseline_sample(
+        {
+            "stop_reason": "patches_downloaded",
+            "llm_call_count": 1,
+            "llm_failure_count": 1,
+            "rule_fallback_count": 2,
+            "url_fallback_candidate_count": 0,
+            "visited_page_roles": ["bugtracker_page", "commit_page"],
+            "selected_patch_types": ["gitlab_commit_patch"],
+            "navigation_path": [
+                "bugtracker_page: https://bugzilla.redhat.com/show_bug.cgi?id=2387588",
+                "commit_page: https://gitlab.com/qemu-project/qemu/-/commit/f757d9d90d19b914d4023663bfc4da73bbbf007e",
+            ],
+            "final_patch_urls": [
+                "https://gitlab.com/qemu-project/qemu/-/commit/f757d9d90d19b914d4023663bfc4da73bbbf007e.patch"
+            ],
+            "effective_budget": {
+                "mock_mode": "llm-timeout-forced",
+            },
+        }
+    )
+
+    assert "tracker_mailing_list_commit_patch" in tracker_to_mailing_list_commit["sample_types"]
+    assert "bugtracker_commit_patch" in bugtracker_to_commit["sample_types"]
+    assert "deterministic_url_fallback_patch" in deterministic_url_fallback["sample_types"]
+    assert "rule_fallback_timeout_high_value_patch" in timeout_high_value["sample_types"]
+
+
 def test_compare_acceptance_reports_marks_patch_and_path_changes() -> None:
     baseline_report = {
         "timestamp": "2026-04-23T00:00:00+00:00",
@@ -830,6 +959,53 @@ def test_acceptance_gate_baseline_fixture_contains_required_sample_types() -> No
     )
 
 
+def test_acceptance_baseline_fixtures_are_loadable_reports() -> None:
+    baselines = _load_all_acceptance_baselines()
+
+    assert len(baselines) >= 5
+    for path, baseline in baselines:
+        assert baseline.get("timestamp"), path.name
+        scenarios = baseline.get("scenarios")
+        assert isinstance(scenarios, list), path.name
+        assert scenarios, path.name
+
+
+def test_acceptance_baseline_fixtures_have_complete_sample_metadata() -> None:
+    for path, baseline in _load_all_acceptance_baselines():
+        for scenario in list(baseline["scenarios"]):
+            assert isinstance(scenario, dict), path.name
+            baseline_sample = scenario.get("baseline_sample")
+            assert isinstance(baseline_sample, dict), scenario.get("cve_id")
+            assert baseline_sample.get("sample_types"), scenario.get("cve_id")
+            assert set(baseline_sample.get("stable_fields") or []) == ACCEPTANCE_STABLE_FIELDS
+            assert set(baseline_sample.get("volatile_fields") or []) == ACCEPTANCE_VOLATILE_FIELDS
+
+
+def test_representative_real_world_baselines_cover_link_type_gaps() -> None:
+    sample_types = {
+        sample_type
+        for _, baseline in _load_all_acceptance_baselines()
+        for scenario in baseline["scenarios"]
+        for sample_type in scenario["baseline_sample"]["sample_types"]
+    }
+
+    assert REPRESENTATIVE_BASELINE_SAMPLE_TYPES.issubset(sample_types)
+
+
+def test_acceptance_compare_and_gate_consume_all_baseline_fixtures() -> None:
+    for path, baseline in _load_all_acceptance_baselines():
+        comparison = _compare_acceptance_reports(baseline, baseline)
+        result = _evaluate_gate_result(comparison)
+
+        assert result["passed"] is True, path.name
+        assert result["failures"] == []
+        assert len(comparison["scenario_diffs"]) == len(baseline["scenarios"])
+        assert all(
+            scenario_diff["baseline_present"] and scenario_diff["candidate_present"]
+            for scenario_diff in comparison["scenario_diffs"]
+        )
+
+
 def test_acceptance_gate_fails_on_high_value_regression() -> None:
     comparison = {
         "scenario_diffs": [
@@ -968,6 +1144,86 @@ def test_acceptance_gate_main_writes_json_and_returns_failure_on_regression(
     assert output_path.exists()
     written = json.loads(output_path.read_text(encoding="utf-8"))
     assert written["failures"][0]["signal"] == "patch_quality_degraded"
+
+
+def test_acceptance_gate_generates_candidate_for_all_baseline_scenarios(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    baseline_report = {
+        "timestamp": "2026-04-23T00:00:00+00:00",
+        "scenarios": [
+            {
+                "cve_id": "CVE-2022-2509",
+                "baseline_sample": {
+                    "sample_types": ["tracker_commit_patch"],
+                    "stable_fields": list(ACCEPTANCE_STABLE_FIELDS),
+                    "volatile_fields": list(ACCEPTANCE_VOLATILE_FIELDS),
+                },
+            },
+            {
+                "cve_id": "CVE-2025-47256",
+                "baseline_sample": {
+                    "sample_types": ["deterministic_url_fallback_patch"],
+                    "stable_fields": list(ACCEPTANCE_STABLE_FIELDS),
+                    "volatile_fields": list(ACCEPTANCE_VOLATILE_FIELDS),
+                },
+            },
+        ],
+    }
+    baseline_path = tmp_path / "baseline.json"
+    output_path = tmp_path / "gate_result.json"
+    baseline_path.write_text(json.dumps(baseline_report, ensure_ascii=False), encoding="utf-8")
+    called_args: list[list[str]] = []
+
+    def _fake_acceptance_main(argv: list[str]) -> int:
+        called_args.append(argv)
+        results_dir = Path(argv[argv.index("--results-dir") + 1])
+        results_dir.mkdir(parents=True, exist_ok=True)
+        requested_cves = [
+            argv[index + 1]
+            for index, item in enumerate(argv)
+            if item == "--cve"
+        ]
+        (results_dir / "acceptance_report.json").write_text(
+            json.dumps(
+                {
+                    "timestamp": "2026-04-24T00:00:00+00:00",
+                    "scenarios": [
+                        {"cve_id": cve_id}
+                        for cve_id in requested_cves
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return 0
+
+    monkeypatch.setattr(gate_module.acceptance_module, "main", _fake_acceptance_main)
+
+    candidate_path = gate_module._generate_candidate_report(
+        SimpleNamespace(
+            baseline_report=str(baseline_path),
+            output=str(output_path),
+        )
+    )
+
+    assert candidate_path.exists()
+    assert called_args == [
+        [
+            "--cve",
+            "CVE-2022-2509",
+            "--cve",
+            "CVE-2025-47256",
+            "--profile",
+            "rule-fallback-only",
+            "--mock-mode",
+            "llm-timeout-forced",
+            "--results-dir",
+            str(tmp_path / ".acceptance-gate"),
+        ]
+    ]
 
 
 def test_main_mock_mode_writes_stable_acceptance_report_json(

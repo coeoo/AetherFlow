@@ -1,0 +1,51 @@
+{
+  "timestamp": "2026-04-23T00:00:00+00:00",
+  "scenarios": [
+    {
+      "cve_id": "CVE-2025-47256",
+      "description": "deterministic url fallback patch baseline",
+      "stop_reason": "patches_downloaded",
+      "llm_call_count": 1,
+      "llm_failure_count": 0,
+      "rule_fallback_count": 0,
+      "url_fallback_candidate_count": 1,
+      "visited_page_roles": [
+        "tracker_page",
+        "pull_request_page"
+      ],
+      "selected_patch_types": [
+        "github_pull_patch"
+      ],
+      "navigation_path": [
+        "tracker_page: https://security-tracker.debian.org/tracker/CVE-2025-47256",
+        "pull_request_page: https://github.com/libxmp/libxmp/pull/848"
+      ],
+      "final_patch_urls": [
+        "https://github.com/libxmp/libxmp/pull/848.patch"
+      ],
+      "baseline_sample": {
+        "sample_types": [
+          "hosted_fix_navigation",
+          "deterministic_url_fallback_patch"
+        ],
+        "stable_fields": [
+          "stop_reason",
+          "llm_call_count",
+          "llm_failure_count",
+          "rule_fallback_count",
+          "url_fallback_candidate_count",
+          "visited_page_roles",
+          "selected_patch_types",
+          "navigation_path",
+          "final_patch_urls"
+        ],
+        "volatile_fields": [
+          "run_id",
+          "duration_seconds",
+          "memory_peak_mb",
+          "timestamp"
+        ]
+      }
+    }
+  ]
+}

@@ -690,12 +690,33 @@ def _build_baseline_sample(report: dict[str, object]) -> dict[str, object]:
         report.get("final_patch_urls")
     ):
         sample_types.append("tracker_commit_patch")
+    if {
+        "tracker_page",
+        "mailing_list_page",
+        "commit_page",
+    }.issubset(visited_page_roles) and any(
+        patch_type in {"github_commit_patch", "gitlab_commit_patch", "kernel_commit_patch"}
+        for patch_type in selected_patch_types
+    ):
+        sample_types.append("tracker_mailing_list_commit_patch")
+    if "bugtracker_page" in visited_page_roles and "commit_page" in visited_page_roles and any(
+        patch_type in {"github_commit_patch", "gitlab_commit_patch", "kernel_commit_patch"}
+        for patch_type in selected_patch_types
+    ):
+        sample_types.append("bugtracker_commit_patch")
     if any(role in visited_page_roles for role in ("tracker_page", "mailing_list_page", "bugtracker_page")) and any(
         role in visited_page_roles for role in ("commit_page", "pull_request_page", "merge_request_page")
     ):
         sample_types.append("hosted_fix_navigation")
+    if int(report.get("url_fallback_candidate_count") or 0) > 0 and bool(report.get("final_patch_urls")):
+        sample_types.append("deterministic_url_fallback_patch")
     if mock_mode == "llm-timeout-forced" and int(report.get("rule_fallback_count") or 0) > 0:
         sample_types.append("rule_fallback_timeout_chain")
+        if any(
+            role in {"commit_page", "pull_request_page", "merge_request_page", "download_page"}
+            for role in visited_page_roles
+        ) and bool(report.get("final_patch_urls")):
+            sample_types.append("rule_fallback_timeout_high_value_patch")
 
     stable_fields = [
         "stop_reason",
