@@ -14,7 +14,9 @@ from app.models.cve import CVESearchNode
 from scripts import acceptance_browser_agent as acceptance_module
 from scripts.acceptance_browser_agent import main
 from scripts.acceptance_browser_agent import parse_args
+from scripts.acceptance_browser_agent import _build_baseline_sample
 from scripts.acceptance_browser_agent import _build_navigation_context_presence
+from scripts.acceptance_browser_agent import _compare_acceptance_reports
 from scripts.acceptance_browser_agent import _build_effective_budget_report
 from scripts.acceptance_browser_agent import _build_scenario_report
 from scripts.acceptance_browser_agent import _build_performance_summary
@@ -58,6 +60,20 @@ def test_parse_args_accepts_profile_and_mock_mode() -> None:
 
     assert args.profile == "dashscope-stable"
     assert args.mock_mode == "llm-timeout-forced"
+
+
+def test_parse_args_accepts_compare_report_inputs() -> None:
+    args = parse_args(
+        [
+            "--baseline-report",
+            "baseline.json",
+            "--candidate-report",
+            "candidate.json",
+        ]
+    )
+
+    assert args.baseline_report == "baseline.json"
+    assert args.candidate_report == "candidate.json"
 
 
 def test_build_default_budget_allows_environment_overrides(monkeypatch) -> None:
@@ -537,6 +553,264 @@ def test_build_scenario_report_includes_acceptance_matrix_metrics() -> None:
         "pull_request_page: https://github.com/acme/project/pull/42",
     ]
     assert report["final_patch_urls"] == ["https://github.com/acme/project/pull/42.patch"]
+    assert "hosted_fix_navigation" in report["baseline_sample"]["sample_types"]
+
+
+def test_build_baseline_sample_marks_tracker_commit_patch_contract() -> None:
+    report = {
+        "stop_reason": "patches_downloaded",
+        "llm_call_count": 2,
+        "llm_failure_count": 0,
+        "rule_fallback_count": 0,
+        "url_fallback_candidate_count": 0,
+        "visited_page_roles": ["tracker_page", "commit_page"],
+        "selected_patch_types": ["gitlab_commit_patch"],
+        "navigation_path": [
+            "tracker_page: https://security-tracker.example.org/CVE-2022-2509",
+            "commit_page: https://gitlab.example.org/group/project/-/commit/abc1234",
+        ],
+        "final_patch_urls": ["https://gitlab.example.org/group/project/-/commit/abc1234.patch"],
+    }
+
+    baseline = _build_baseline_sample(report)
+
+    assert "tracker_commit_patch" in baseline["sample_types"]
+    assert "final_patch_urls" in baseline["stable_fields"]
+    assert "duration_seconds" in baseline["volatile_fields"]
+
+
+def test_build_baseline_sample_marks_rule_fallback_timeout_contract() -> None:
+    report = {
+        "stop_reason": "no_patch_candidates",
+        "llm_call_count": 1,
+        "llm_failure_count": 1,
+        "rule_fallback_count": 2,
+        "url_fallback_candidate_count": 0,
+        "visited_page_roles": ["mailing_list_page", "tracker_page"],
+        "selected_patch_types": [],
+        "navigation_path": [
+            "mailing_list_page: https://lists.example.org/post",
+            "tracker_page: https://security-tracker.example.org/CVE-2022-2509",
+        ],
+        "final_patch_urls": [],
+        "effective_budget": {
+            "mock_mode": "llm-timeout-forced",
+        },
+    }
+
+    baseline = _build_baseline_sample(report)
+
+    assert "rule_fallback_timeout_chain" in baseline["sample_types"]
+    assert "rule_fallback_count" in baseline["stable_fields"]
+    assert "llm_failure_count" in baseline["stable_fields"]
+
+
+def test_compare_acceptance_reports_marks_patch_and_path_changes() -> None:
+    baseline_report = {
+        "timestamp": "2026-04-23T00:00:00+00:00",
+        "scenarios": [
+            {
+                "cve_id": "CVE-2022-2509",
+                "stop_reason": "patches_downloaded",
+                "llm_call_count": 2,
+                "llm_failure_count": 0,
+                "rule_fallback_count": 0,
+                "url_fallback_candidate_count": 0,
+                "visited_page_roles": ["tracker_page", "commit_page"],
+                "selected_patch_types": ["gitlab_commit_patch"],
+                "navigation_path": [
+                    "tracker_page: https://security-tracker.example.org/CVE-2022-2509",
+                    "commit_page: https://gitlab.example.org/group/project/-/commit/abc1234",
+                ],
+                "final_patch_urls": ["https://gitlab.example.org/group/project/-/commit/abc1234.patch"],
+            }
+        ],
+    }
+    candidate_report = {
+        "timestamp": "2026-04-24T00:00:00+00:00",
+        "scenarios": [
+            {
+                "cve_id": "CVE-2022-2509",
+                "stop_reason": "patches_downloaded",
+                "llm_call_count": 2,
+                "llm_failure_count": 0,
+                "rule_fallback_count": 0,
+                "url_fallback_candidate_count": 0,
+                "visited_page_roles": ["tracker_page", "pull_request_page"],
+                "selected_patch_types": ["github_pull_patch"],
+                "navigation_path": [
+                    "tracker_page: https://security-tracker.example.org/CVE-2022-2509",
+                    "pull_request_page: https://github.com/acme/project/pull/42",
+                ],
+                "final_patch_urls": ["https://github.com/acme/project/pull/42.patch"],
+            }
+        ],
+    }
+
+    diff = _compare_acceptance_reports(baseline_report, candidate_report)
+
+    scenario_diff = diff["scenario_diffs"][0]
+    assert scenario_diff["signals"]["patch_url_changed"] is True
+    assert scenario_diff["signals"]["navigation_path_changed"] is True
+    assert scenario_diff["signals"]["high_value_path_regressed"] is False
+
+
+def test_compare_acceptance_reports_marks_rule_fallback_increase_and_new_page_roles() -> None:
+    baseline_report = {
+        "scenarios": [
+            {
+                "cve_id": "CVE-2024-3094",
+                "stop_reason": "no_remaining_frontier_or_candidates",
+                "llm_call_count": 1,
+                "llm_failure_count": 0,
+                "rule_fallback_count": 1,
+                "url_fallback_candidate_count": 0,
+                "visited_page_roles": ["mailing_list_page", "tracker_page"],
+                "selected_patch_types": [],
+                "navigation_path": ["mailing_list_page: https://lists.example.org/post"],
+                "final_patch_urls": [],
+            }
+        ],
+    }
+    candidate_report = {
+        "scenarios": [
+            {
+                "cve_id": "CVE-2024-3094",
+                "stop_reason": "no_patch_candidates",
+                "llm_call_count": 1,
+                "llm_failure_count": 1,
+                "rule_fallback_count": 3,
+                "url_fallback_candidate_count": 0,
+                "visited_page_roles": ["mailing_list_page", "tracker_page", "repository_page"],
+                "selected_patch_types": [],
+                "navigation_path": ["mailing_list_page: https://lists.example.org/post"],
+                "final_patch_urls": [],
+            }
+        ],
+    }
+
+    diff = _compare_acceptance_reports(baseline_report, candidate_report)
+
+    scenario_diff = diff["scenario_diffs"][0]
+    assert scenario_diff["signals"]["more_rule_fallback"] is True
+    assert scenario_diff["signals"]["new_page_roles"] == ["repository_page"]
+    assert scenario_diff["field_diffs"]["stop_reason"]["changed"] is True
+
+
+def test_compare_acceptance_reports_marks_patch_quality_degradation() -> None:
+    baseline_report = {
+        "scenarios": [
+            {
+                "cve_id": "CVE-2022-2509",
+                "stop_reason": "patches_downloaded",
+                "llm_call_count": 2,
+                "llm_failure_count": 0,
+                "rule_fallback_count": 0,
+                "url_fallback_candidate_count": 0,
+                "visited_page_roles": ["tracker_page", "commit_page"],
+                "selected_patch_types": ["gitlab_commit_patch"],
+                "navigation_path": [
+                    "tracker_page: https://security-tracker.example.org/CVE-2022-2509",
+                    "commit_page: https://gitlab.example.org/group/project/-/commit/abc1234",
+                ],
+                "final_patch_urls": ["https://gitlab.example.org/group/project/-/commit/abc1234.patch"],
+            }
+        ],
+    }
+    candidate_report = {
+        "scenarios": [
+            {
+                "cve_id": "CVE-2022-2509",
+                "stop_reason": "patches_downloaded",
+                "llm_call_count": 2,
+                "llm_failure_count": 0,
+                "rule_fallback_count": 0,
+                "url_fallback_candidate_count": 0,
+                "visited_page_roles": ["tracker_page", "download_page"],
+                "selected_patch_types": ["patch"],
+                "navigation_path": [
+                    "tracker_page: https://security-tracker.example.org/CVE-2022-2509",
+                    "download_page: https://patches.ubuntu.com/example.patch",
+                ],
+                "final_patch_urls": ["https://patches.ubuntu.com/example.patch"],
+            }
+        ],
+    }
+
+    diff = _compare_acceptance_reports(baseline_report, candidate_report)
+
+    scenario_diff = diff["scenario_diffs"][0]
+    assert scenario_diff["signals"]["patch_quality_degraded"] is True
+    assert scenario_diff["signals"]["baseline_patch_quality"]["best_patch_type"] == "gitlab_commit_patch"
+    assert scenario_diff["signals"]["candidate_patch_quality"]["best_patch_type"] == "patch"
+
+
+def test_main_compare_mode_writes_structured_json_diff(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    baseline_path.write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-04-23T00:00:00+00:00",
+                "scenarios": [
+                    {
+                        "cve_id": "CVE-2022-2509",
+                        "stop_reason": "patches_downloaded",
+                        "llm_call_count": 2,
+                        "llm_failure_count": 0,
+                        "rule_fallback_count": 0,
+                        "url_fallback_candidate_count": 0,
+                        "visited_page_roles": ["tracker_page", "commit_page"],
+                        "selected_patch_types": ["gitlab_commit_patch"],
+                        "navigation_path": ["tracker_page: a", "commit_page: b"],
+                        "final_patch_urls": ["https://gitlab.example.org/group/project/-/commit/abc1234.patch"],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    candidate_path.write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-04-24T00:00:00+00:00",
+                "scenarios": [
+                    {
+                        "cve_id": "CVE-2022-2509",
+                        "stop_reason": "patches_downloaded",
+                        "llm_call_count": 2,
+                        "llm_failure_count": 1,
+                        "rule_fallback_count": 2,
+                        "url_fallback_candidate_count": 0,
+                        "visited_page_roles": ["tracker_page", "download_page"],
+                        "selected_patch_types": ["patch"],
+                        "navigation_path": ["tracker_page: a", "download_page: c"],
+                        "final_patch_urls": ["https://patches.ubuntu.com/example.patch"],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "--baseline-report",
+            str(baseline_path),
+            "--candidate-report",
+            str(candidate_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["scenario_diffs"][0]["signals"]["patch_quality_degraded"] is True
 
 
 def test_main_mock_mode_writes_stable_acceptance_report_json(

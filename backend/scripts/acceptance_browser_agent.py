@@ -67,6 +67,27 @@ _NETWORK_ERROR_MARKERS = (
     "Timeout",
     "net::",
 )
+_COMPARE_FIELDS = (
+    "stop_reason",
+    "llm_call_count",
+    "llm_failure_count",
+    "rule_fallback_count",
+    "url_fallback_candidate_count",
+    "visited_page_roles",
+    "selected_patch_types",
+    "navigation_path",
+    "final_patch_urls",
+)
+_PATCH_TYPE_PRIORITY = {
+    "github_commit_patch": 100,
+    "gitlab_commit_patch": 100,
+    "kernel_commit_patch": 100,
+    "github_pull_patch": 90,
+    "gitlab_merge_request_patch": 90,
+    "patch": 50,
+    "diff": 50,
+    "debdiff": 20,
+}
 ACCEPTANCE_PROFILES = {
     "dashscope-stable": AcceptanceProfile(
         name="dashscope-stable",
@@ -118,6 +139,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="报告输出目录，默认相对当前工作目录的 results。",
     )
     parser.add_argument(
+        "--baseline-report",
+        default=None,
+        help="与 --candidate-report 一起使用，比较两份 acceptance_report.json。",
+    )
+    parser.add_argument(
+        "--candidate-report",
+        default=None,
+        help="与 --baseline-report 一起使用，比较两份 acceptance_report.json。",
+    )
+    parser.add_argument(
         "--profile",
         choices=sorted(ACCEPTANCE_PROFILES),
         default=None,
@@ -154,13 +185,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="覆盖单次 run 的页面抓取总上限。",
     )
     args = parser.parse_args(argv)
+    if bool(args.baseline_report) ^ bool(args.candidate_report):
+        parser.error("--baseline-report 和 --candidate-report 必须同时提供。")
+    if args.baseline_report and args.cve:
+        parser.error("compare 模式下不能同时提供 --cve/--all。")
+    if args.baseline_report and args.all:
+        parser.error("compare 模式下不能同时提供 --cve/--all。")
     if not args.all and not args.cve:
-        parser.error("必须提供 --all 或至少一个 --cve。")
+        if not args.baseline_report:
+            parser.error("必须提供 --all 或至少一个 --cve。")
     return args
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.baseline_report and args.candidate_report:
+        baseline_report = json.loads(Path(args.baseline_report).read_text(encoding="utf-8"))
+        candidate_report = json.loads(Path(args.candidate_report).read_text(encoding="utf-8"))
+        comparison = _compare_acceptance_reports(baseline_report, candidate_report)
+        print(json.dumps(comparison, ensure_ascii=False, indent=2))
+        return 0
+
     scenario_ids = sorted(SCENARIOS) if args.all else list(dict.fromkeys(args.cve or []))
     settings = load_settings()
     if not settings.database_url:
@@ -401,6 +446,22 @@ def _build_scenario_report(
         "selected_patch_types": selected_patch_types,
         "navigation_path": navigation_path,
         "final_patch_urls": patch_urls,
+        "baseline_sample": _build_baseline_sample(
+            {
+                "stop_reason": run.stop_reason,
+                "llm_call_count": len(llm_logs),
+                "llm_failure_count": llm_failure_count,
+                "rule_fallback_count": rule_fallback_count,
+                "url_fallback_candidate_count": url_fallback_candidate_count,
+                "visited_page_roles": page_roles_visited,
+                "selected_patch_types": selected_patch_types,
+                "navigation_path": navigation_path,
+                "final_patch_urls": patch_urls,
+                "effective_budget": {
+                    "mock_mode": mock_mode,
+                },
+            }
+        ),
         "db_validation": _validate_database_records(
             run=run,
             nodes=nodes,
@@ -617,6 +678,152 @@ def _build_effective_budget_report(
         settings.cve_runtime_diagnostic_timeout_seconds
     )
     return effective_budget
+
+
+def _build_baseline_sample(report: dict[str, object]) -> dict[str, object]:
+    sample_types: list[str] = []
+    visited_page_roles = [str(role) for role in list(report.get("visited_page_roles") or [])]
+    selected_patch_types = [str(patch_type) for patch_type in list(report.get("selected_patch_types") or [])]
+    mock_mode = str(dict(report.get("effective_budget") or {}).get("mock_mode") or "")
+
+    if "tracker_page" in visited_page_roles and "commit_page" in visited_page_roles and bool(
+        report.get("final_patch_urls")
+    ):
+        sample_types.append("tracker_commit_patch")
+    if any(role in visited_page_roles for role in ("tracker_page", "mailing_list_page", "bugtracker_page")) and any(
+        role in visited_page_roles for role in ("commit_page", "pull_request_page", "merge_request_page")
+    ):
+        sample_types.append("hosted_fix_navigation")
+    if mock_mode == "llm-timeout-forced" and int(report.get("rule_fallback_count") or 0) > 0:
+        sample_types.append("rule_fallback_timeout_chain")
+
+    stable_fields = [
+        "stop_reason",
+        "llm_call_count",
+        "llm_failure_count",
+        "rule_fallback_count",
+        "url_fallback_candidate_count",
+        "visited_page_roles",
+        "selected_patch_types",
+        "navigation_path",
+        "final_patch_urls",
+    ]
+    volatile_fields = [
+        "run_id",
+        "duration_seconds",
+        "memory_peak_mb",
+        "timestamp",
+    ]
+    return {
+        "sample_types": sample_types,
+        "stable_fields": stable_fields,
+        "volatile_fields": volatile_fields,
+    }
+
+
+def _compare_acceptance_reports(
+    baseline_report: dict[str, object],
+    candidate_report: dict[str, object],
+) -> dict[str, object]:
+    baseline_scenarios = {
+        str(scenario.get("cve_id") or ""): dict(scenario)
+        for scenario in list(baseline_report.get("scenarios") or [])
+        if isinstance(scenario, dict) and str(scenario.get("cve_id") or "").strip()
+    }
+    candidate_scenarios = {
+        str(scenario.get("cve_id") or ""): dict(scenario)
+        for scenario in list(candidate_report.get("scenarios") or [])
+        if isinstance(scenario, dict) and str(scenario.get("cve_id") or "").strip()
+    }
+    all_cve_ids = sorted(set(baseline_scenarios) | set(candidate_scenarios))
+    scenario_diffs = [
+        _compare_scenario_reports(
+            cve_id,
+            baseline_scenarios.get(cve_id),
+            candidate_scenarios.get(cve_id),
+        )
+        for cve_id in all_cve_ids
+    ]
+    return {
+        "baseline_timestamp": baseline_report.get("timestamp"),
+        "candidate_timestamp": candidate_report.get("timestamp"),
+        "scenario_diffs": scenario_diffs,
+    }
+
+
+def _compare_scenario_reports(
+    cve_id: str,
+    baseline: dict[str, object] | None,
+    candidate: dict[str, object] | None,
+) -> dict[str, object]:
+    field_diffs: dict[str, dict[str, object]] = {}
+    baseline = dict(baseline or {})
+    candidate = dict(candidate or {})
+    for field_name in _COMPARE_FIELDS:
+        baseline_value = baseline.get(field_name)
+        candidate_value = candidate.get(field_name)
+        field_diffs[field_name] = {
+            "baseline": baseline_value,
+            "candidate": candidate_value,
+            "changed": baseline_value != candidate_value,
+        }
+
+    baseline_roles = [str(role) for role in list(baseline.get("visited_page_roles") or [])]
+    candidate_roles = [str(role) for role in list(candidate.get("visited_page_roles") or [])]
+    baseline_patch_quality = _build_patch_quality_summary(
+        list(baseline.get("selected_patch_types") or [])
+    )
+    candidate_patch_quality = _build_patch_quality_summary(
+        list(candidate.get("selected_patch_types") or [])
+    )
+    baseline_path = [str(item) for item in list(baseline.get("navigation_path") or [])]
+    candidate_path = [str(item) for item in list(candidate.get("navigation_path") or [])]
+    signals = {
+        "patch_url_changed": list(baseline.get("final_patch_urls") or []) != list(candidate.get("final_patch_urls") or []),
+        "navigation_path_changed": baseline_path != candidate_path,
+        "more_rule_fallback": int(candidate.get("rule_fallback_count") or 0)
+        > int(baseline.get("rule_fallback_count") or 0),
+        "new_page_roles": sorted(set(candidate_roles) - set(baseline_roles)),
+        "patch_quality_degraded": candidate_patch_quality["best_priority"]
+        < baseline_patch_quality["best_priority"],
+        "baseline_patch_quality": baseline_patch_quality,
+        "candidate_patch_quality": candidate_patch_quality,
+        "high_value_path_regressed": _has_high_value_fix_host(baseline_roles)
+        and not _has_high_value_fix_host(candidate_roles),
+    }
+    return {
+        "cve_id": cve_id,
+        "baseline_present": bool(baseline),
+        "candidate_present": bool(candidate),
+        "field_diffs": field_diffs,
+        "signals": signals,
+    }
+
+
+def _build_patch_quality_summary(patch_types: list[object]) -> dict[str, object]:
+    normalized_types = [str(patch_type) for patch_type in patch_types if str(patch_type).strip()]
+    if not normalized_types:
+        return {
+            "best_patch_type": None,
+            "best_priority": 0,
+        }
+    prioritized = sorted(
+        normalized_types,
+        key=lambda patch_type: _PATCH_TYPE_PRIORITY.get(patch_type, 0),
+        reverse=True,
+    )
+    best_patch_type = prioritized[0]
+    return {
+        "best_patch_type": best_patch_type,
+        "best_priority": _PATCH_TYPE_PRIORITY.get(best_patch_type, 0),
+    }
+
+
+def _has_high_value_fix_host(page_roles: list[str]) -> bool:
+    return any(
+        role in {"commit_page", "pull_request_page", "merge_request_page", "download_page"}
+        for role in page_roles
+    )
 
 
 def _build_navigation_path(
