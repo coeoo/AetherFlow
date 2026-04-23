@@ -12,6 +12,7 @@ from app.models.cve import CVEPatchArtifact
 from app.models.cve import CVESearchDecision
 from app.models.cve import CVESearchNode
 from scripts import acceptance_browser_agent as acceptance_module
+from scripts import acceptance_regression_gate as gate_module
 from scripts.acceptance_browser_agent import main
 from scripts.acceptance_browser_agent import parse_args
 from scripts.acceptance_browser_agent import _build_baseline_sample
@@ -22,6 +23,8 @@ from scripts.acceptance_browser_agent import _build_scenario_report
 from scripts.acceptance_browser_agent import _build_performance_summary
 from scripts.acceptance_browser_agent import _determine_verdict
 from scripts.acceptance_browser_agent import _temporary_acceptance_env
+from scripts.acceptance_regression_gate import _evaluate_gate_result
+from scripts.acceptance_regression_gate import _load_baseline_report
 
 
 def test_parse_args_accepts_runtime_budget_overrides() -> None:
@@ -811,6 +814,160 @@ def test_main_compare_mode_writes_structured_json_diff(
     assert exit_code == 0
     payload = json.loads(captured.out)
     assert payload["scenario_diffs"][0]["signals"]["patch_quality_degraded"] is True
+
+
+def test_acceptance_gate_baseline_fixture_contains_required_sample_types() -> None:
+    baseline = _load_baseline_report(gate_module.DEFAULT_BASELINE_REPORT_PATH)
+
+    sample_types = {
+        sample_type
+        for scenario in baseline["scenarios"]
+        for sample_type in scenario["baseline_sample"]["sample_types"]
+    }
+
+    assert {"tracker_commit_patch", "hosted_fix_navigation", "rule_fallback_timeout_chain"}.issubset(
+        sample_types
+    )
+
+
+def test_acceptance_gate_fails_on_high_value_regression() -> None:
+    comparison = {
+        "scenario_diffs": [
+            {
+                "cve_id": "CVE-2022-2509",
+                "signals": {
+                    "patch_quality_degraded": True,
+                    "high_value_path_regressed": False,
+                    "patch_url_changed": True,
+                    "navigation_path_changed": True,
+                    "more_rule_fallback": False,
+                    "new_page_roles": [],
+                },
+            }
+        ]
+    }
+
+    result = _evaluate_gate_result(comparison)
+
+    assert result["passed"] is False
+    assert result["exit_code"] == 1
+    assert result["failures"] == [
+        {
+            "cve_id": "CVE-2022-2509",
+            "signal": "patch_quality_degraded",
+        }
+    ]
+
+
+def test_acceptance_gate_warns_but_passes_on_path_or_fallback_changes() -> None:
+    comparison = {
+        "scenario_diffs": [
+            {
+                "cve_id": "CVE-2024-3094",
+                "signals": {
+                    "patch_quality_degraded": False,
+                    "high_value_path_regressed": False,
+                    "patch_url_changed": False,
+                    "navigation_path_changed": True,
+                    "more_rule_fallback": True,
+                    "new_page_roles": ["repository_page"],
+                },
+            }
+        ]
+    }
+
+    result = _evaluate_gate_result(comparison)
+
+    assert result["passed"] is True
+    assert result["exit_code"] == 0
+    assert result["warnings"] == [
+        {
+            "cve_id": "CVE-2024-3094",
+            "signal": "navigation_path_changed",
+        },
+        {
+            "cve_id": "CVE-2024-3094",
+            "signal": "more_rule_fallback",
+        },
+        {
+            "cve_id": "CVE-2024-3094",
+            "signal": "new_page_roles",
+            "roles": ["repository_page"],
+        },
+    ]
+
+
+def test_acceptance_gate_main_writes_json_and_returns_failure_on_regression(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    baseline_report = {
+        "timestamp": "2026-04-23T00:00:00+00:00",
+        "scenarios": [
+            {
+                "cve_id": "CVE-2022-2509",
+                "baseline_sample": {
+                    "sample_types": ["tracker_commit_patch"],
+                    "stable_fields": ["stop_reason", "final_patch_urls"],
+                    "volatile_fields": ["duration_seconds"],
+                },
+                "stop_reason": "patches_downloaded",
+                "llm_call_count": 1,
+                "llm_failure_count": 0,
+                "rule_fallback_count": 0,
+                "url_fallback_candidate_count": 0,
+                "visited_page_roles": ["tracker_page", "commit_page"],
+                "selected_patch_types": ["gitlab_commit_patch"],
+                "navigation_path": ["tracker_page: a", "commit_page: b"],
+                "final_patch_urls": ["https://gitlab.example.org/group/project/-/commit/abc1234.patch"],
+            }
+        ],
+    }
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(json.dumps(baseline_report, ensure_ascii=False), encoding="utf-8")
+
+    candidate_report = {
+        "timestamp": "2026-04-24T00:00:00+00:00",
+        "scenarios": [
+            {
+                "cve_id": "CVE-2022-2509",
+                "stop_reason": "patches_downloaded",
+                "llm_call_count": 1,
+                "llm_failure_count": 0,
+                "rule_fallback_count": 0,
+                "url_fallback_candidate_count": 0,
+                "visited_page_roles": ["tracker_page", "download_page"],
+                "selected_patch_types": ["patch"],
+                "navigation_path": ["tracker_page: a", "download_page: c"],
+                "final_patch_urls": ["https://patches.ubuntu.com/example.patch"],
+            }
+        ],
+    }
+    candidate_path = tmp_path / "candidate.json"
+    output_path = tmp_path / "gate_result.json"
+    candidate_path.write_text(json.dumps(candidate_report, ensure_ascii=False), encoding="utf-8")
+
+    monkeypatch.setattr(gate_module, "_generate_candidate_report", lambda args: candidate_path)
+
+    exit_code = gate_module.main(
+        [
+            "--baseline-report",
+            str(baseline_path),
+            "--candidate-report",
+            str(candidate_path),
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    payload = json.loads(captured.out)
+    assert payload["passed"] is False
+    assert output_path.exists()
+    written = json.loads(output_path.read_text(encoding="utf-8"))
+    assert written["failures"][0]["signal"] == "patch_quality_degraded"
 
 
 def test_main_mock_mode_writes_stable_acceptance_report_json(

@@ -1,0 +1,137 @@
+{
+  "timestamp": "2026-04-23T00:00:00+00:00",
+  "scenarios": [
+    {
+      "cve_id": "CVE-2022-2509",
+      "description": "tracker commit patch baseline",
+      "stop_reason": "patches_downloaded",
+      "llm_call_count": 1,
+      "llm_failure_count": 0,
+      "rule_fallback_count": 0,
+      "url_fallback_candidate_count": 0,
+      "visited_page_roles": [
+        "tracker_page",
+        "commit_page"
+      ],
+      "selected_patch_types": [
+        "gitlab_commit_patch"
+      ],
+      "navigation_path": [
+        "tracker_page: https://security-tracker.example.org/CVE-2022-2509",
+        "commit_page: https://gitlab.example.org/group/project/-/commit/abc1234"
+      ],
+      "final_patch_urls": [
+        "https://gitlab.example.org/group/project/-/commit/abc1234.patch"
+      ],
+      "baseline_sample": {
+        "sample_types": [
+          "tracker_commit_patch",
+          "hosted_fix_navigation"
+        ],
+        "stable_fields": [
+          "stop_reason",
+          "llm_call_count",
+          "llm_failure_count",
+          "rule_fallback_count",
+          "url_fallback_candidate_count",
+          "visited_page_roles",
+          "selected_patch_types",
+          "navigation_path",
+          "final_patch_urls"
+        ],
+        "volatile_fields": [
+          "run_id",
+          "duration_seconds",
+          "memory_peak_mb",
+          "timestamp"
+        ]
+      }
+    },
+    {
+      "cve_id": "CVE-2024-3094",
+      "description": "hosted fix navigation baseline",
+      "stop_reason": "no_remaining_frontier_or_candidates",
+      "llm_call_count": 1,
+      "llm_failure_count": 0,
+      "rule_fallback_count": 0,
+      "url_fallback_candidate_count": 0,
+      "visited_page_roles": [
+        "mailing_list_page",
+        "pull_request_page"
+      ],
+      "selected_patch_types": [
+        "github_pull_patch"
+      ],
+      "navigation_path": [
+        "mailing_list_page: https://lists.example.org/post",
+        "pull_request_page: https://github.com/acme/project/pull/42"
+      ],
+      "final_patch_urls": [
+        "https://github.com/acme/project/pull/42.patch"
+      ],
+      "baseline_sample": {
+        "sample_types": [
+          "hosted_fix_navigation"
+        ],
+        "stable_fields": [
+          "stop_reason",
+          "llm_call_count",
+          "llm_failure_count",
+          "rule_fallback_count",
+          "url_fallback_candidate_count",
+          "visited_page_roles",
+          "selected_patch_types",
+          "navigation_path",
+          "final_patch_urls"
+        ],
+        "volatile_fields": [
+          "run_id",
+          "duration_seconds",
+          "memory_peak_mb",
+          "timestamp"
+        ]
+      }
+    },
+    {
+      "cve_id": "CVE-2024-0001",
+      "description": "rule fallback timeout baseline",
+      "stop_reason": "no_patch_candidates",
+      "llm_call_count": 1,
+      "llm_failure_count": 1,
+      "rule_fallback_count": 2,
+      "url_fallback_candidate_count": 0,
+      "visited_page_roles": [
+        "mailing_list_page",
+        "tracker_page"
+      ],
+      "selected_patch_types": [],
+      "navigation_path": [
+        "mailing_list_page: https://lists.example.org/post",
+        "tracker_page: https://security-tracker.example.org/CVE-2024-0001"
+      ],
+      "final_patch_urls": [],
+      "baseline_sample": {
+        "sample_types": [
+          "rule_fallback_timeout_chain"
+        ],
+        "stable_fields": [
+          "stop_reason",
+          "llm_call_count",
+          "llm_failure_count",
+          "rule_fallback_count",
+          "url_fallback_candidate_count",
+          "visited_page_roles",
+          "selected_patch_types",
+          "navigation_path",
+          "final_patch_urls"
+        ],
+        "volatile_fields": [
+          "run_id",
+          "duration_seconds",
+          "memory_peak_mb",
+          "timestamp"
+        ]
+      }
+    }
+  ]
+}

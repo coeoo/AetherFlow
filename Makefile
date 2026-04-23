@@ -1,4 +1,4 @@
-.PHONY: backend-install frontend-install pg-up pg-down backend-test frontend-test phase1-verify
+.PHONY: backend-install frontend-install pg-up pg-down backend-test frontend-test phase1-verify acceptance-gate
 
 VENV_PYTHON := ./.venv/bin/python
 TEST_DATABASE_URL ?= postgresql+psycopg://postgres:postgres@127.0.0.1:55432/aetherflow_dev
@@ -26,3 +26,6 @@ phase1-verify: pg-up
 	TEST_DATABASE_URL=$(TEST_DATABASE_URL) timeout 60s $(VENV_PYTHON) -m pytest backend/tests -q
 	timeout 60s npm --prefix frontend test -- --run
 	timeout 60s npm --prefix frontend run build
+
+acceptance-gate:
+	timeout 60s bash scripts/run_acceptance_gate.sh
