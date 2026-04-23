@@ -40,7 +40,7 @@
 | M005 | 平台系统配置与健康观测 | 平台 | P1 | 系统状态、配置总览、健康检查 |
 | M101 | CVE 检索工作台 | CVE | P0 | 发起搜索、展示运行状态、切换结果视角 |
 | M102 | CVE 运行详情与补丁证据 | CVE | P0 | 搜索图、patch 收敛、diff 与决策审计 |
-| M103 | CVE Patch 多跳 Agent 搜索主链 | CVE | P0 | LangGraph 图运行时、预算、决策与候选收敛 |
+| M103 | CVE 浏览器 Agent 搜索主链 | CVE | P0 | 浏览器快照、页面角色、链路追踪、LLM 决策、acceptance baseline 与 gate |
 | M201 | 安全公告手动提取 | 公告 | P0 | URL/正文两种手动入口 |
 | M202 | 安全公告监控源管理 | 公告 | P0 | 三类首批监控源配置 |
 | M203 | 安全公告调度运行与结果 | 公告 | P0 | 定时抓取、批次结果、重试 |
@@ -111,8 +111,8 @@ M901
 
 当前文档体系已经确认：
 
-- CVE 场景的正式方向是 **LangGraph 编排的受控多跳 Patch Agent**
-- 功能文档必须围绕搜索图、预算、页面角色、Agent 决策和 patch 收敛展开
+- CVE 场景的正式方向是 **LangGraph + Playwright 浏览器驱动型受控多跳 Patch Agent**
+- 功能文档必须围绕搜索图、页面角色、链路追踪、预算、Agent 决策、acceptance baseline 和 patch 收敛展开
 - 不再把 `fast-first` 规则链作为长期主线进行传播
 
 ---
@@ -132,11 +132,11 @@ M901
 
 ## 🔄 变更记录
 
-### v2.0 - 2026-04-20
+### v2.1 - 2026-04-23
 
-- 将 CVE 场景口径统一切换为 `LangGraph Patch Agent`
-- 更新模块清单、依赖关系与实现顺序
-- 不再把 `fast-first` 描述为功能设计层的长期主线
+- 将 M103 口径收口为 `浏览器 Agent 搜索主链`
+- 明确 acceptance baseline / regression gate 属于 CVE 主链长期语义的一部分
+- 不再把 `docs/superpowers/specs` 阶段文档当作功能设计主落点
 
 ---
 

@@ -10,7 +10,7 @@
 **模块编号**：M102  
 **优先级**：P0  
 **负责人**：AI + 开发团队  
-**状态**：按 Patch Agent 搜索图详情页重构
+**状态**：按浏览器 Agent 搜索图详情页重构
 
 ---
 
@@ -26,6 +26,7 @@
 - Agent 决策记录
 - 预算消耗
 - patch 收敛与 diff 内容
+- acceptance baseline / regression gate 复核信息
 
 ### 用户价值
 
@@ -169,10 +170,13 @@ flowchart TD
 | `search_graph` | object | 是 | 搜索图摘要 |
 | `budget_status` | object | 是 | 预算状态 |
 | `frontier_status` | object | 是 | frontier 摘要 |
+| `navigation_chains` | array | 是 | 链路追踪记录 |
+| `page_roles` | object | 是 | 页面角色摘要与统计 |
 | `fix_families` | array | 是 | patch 收敛族视图 |
 | `patches` | array | 是 | 补丁记录 |
 | `decision_history` | array | 是 | 决策记录 |
 | `source_traces` | array | 是 | 工具级抓取证据 |
+| `acceptance_summary` | object | 否 | 对应 baseline / gate / compare 结果摘要 |
 
 #### `PatchSearchGraphView`
 
@@ -204,6 +208,7 @@ flowchart TD
 | `validated` | boolean | 是 | 是否通过校验 |
 | `reason_summary` | string | 否 | 决策摘要 |
 | `selected_links` | array | 否 | 选中的链接 |
+| `navigation_context_present` | boolean | 否 | 是否带导航上下文 |
 
 ---
 
@@ -309,15 +314,20 @@ detail_ready
 
 即使 run 未成功命中 patch，详情页仍必须展示搜索图、预算和停止原因。
 
+### 规则7：详情页承接 acceptance / gate 的解释职责
+
+- 如果运行结果进入本地 acceptance baseline 或 regression gate，比对结果应在详情页可见
+- 详情页负责解释 baseline 代表的链路样本、页面角色变化、patch 质量变化和 fallback 信号
+- 工作台只展示摘要，不承接这部分细节解释
+
 ---
 
 ## 🔄 变更记录
 
-### v2.0 - 2026-04-20
+### v2.1 - 2026-04-23
 
-- 将详情页从“trace + patch + diff”视图升级为“搜索图 + patch 收敛 + 决策审计”视图
-- 引入 `search_graph / budget_status / frontier_status / decision_history` 设计
-- 不再以最小 family summary 和受限 fallback 作为长期主叙事
+- 补充浏览器 Agent 的 `navigation_chains`、页面角色与 acceptance / gate 详情语义
+- 明确详情页是链路、决策与基线解释的正式承载面
 
 ---
 

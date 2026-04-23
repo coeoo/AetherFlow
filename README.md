@@ -160,6 +160,8 @@ python -m scripts.acceptance_browser_agent \
 - `docs/03-系统架构/架构设计.md`：运行拓扑、分层与主链边界
 - `docs/04-功能设计/README.md`：模块索引与开发顺序
 - `docs/13-界面设计/README.md`：页面级 UI 规格与信息架构
-- `docs/superpowers/specs/2026-04-20-cve-patch-agent-graph-design.md`：
-  Patch Agent 专项方案
+- `docs/04-功能设计/M103-CVE数据源与页面探索规则功能设计.md`：
+  CVE 浏览器 Agent 主链与页面探索规则
+- `docs/superpowers/specs/2026-04-21-cve-browser-agent-design.md`：
+  浏览器 Agent 重设计规格（阶段性设计记录）
 - `docs/09-AI开发日志/README_AI使用说明.md`：AI 会话接手说明与日志规范

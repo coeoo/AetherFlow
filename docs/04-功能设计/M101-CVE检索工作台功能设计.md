@@ -10,7 +10,7 @@
 **模块编号**：M101  
 **优先级**：P0  
 **负责人**：AI + 开发团队  
-**状态**：按 Patch Agent 主线重构
+**状态**：按浏览器 Agent 主线重构并接入真实验收语义
 
 ---
 
@@ -119,6 +119,7 @@ graph TD
 - 最近动作区块
 - 预算摘要区块
 - 结果摘要卡片
+- 验收 / 基线摘要区块（可选）
 - 最近运行列表
 - 详情页入口
 
@@ -169,6 +170,9 @@ graph TD
 | `progress` | object | 是 | 进度摘要 |
 | `recent_progress` | array | 是 | 最近 1 到 3 条动作 |
 | `budget_status` | object | 否 | 预算摘要 |
+| `chain_summary` | array | 否 | 链路摘要（按 active/completed/dead_end 聚合） |
+| `page_roles` | array | 否 | 当前已访问页面角色摘要 |
+| `acceptance_summary` | object | 否 | 最近 acceptance baseline / gate 摘要，仅做入口提示 |
 
 ### 前端状态对象
 
@@ -257,15 +261,19 @@ idle
 
 人工复核入口和详细决策审计留给详情页，不在工作台首屏展开。
 
+### 规则5：工作台只展示 gate 摘要，不替代详情解释
+
+- baseline / regression gate 结果在工作台只用于提示“当前结果是否通过本地稳定基线”
+- 具体链路、页面角色、警告和失败信号统一在详情页或验收报告中解释
+
 ---
 
 ## 🔄 变更记录
 
-### v2.0 - 2026-04-20
+### v2.1 - 2026-04-23
 
-- 将工作台重新定位为 Patch Agent 搜索入口与摘要页
-- 引入运行状态、预算摘要与搜索进度表达
-- 不再以 `fast-first` 规则工作台作为长期设计口径
+- 同步浏览器 Agent 已实现的链路摘要、页面角色和 acceptance 摘要口径
+- 明确工作台只承载运行摘要，不替代详情页中的链路与 gate 解释
 
 ---
 
