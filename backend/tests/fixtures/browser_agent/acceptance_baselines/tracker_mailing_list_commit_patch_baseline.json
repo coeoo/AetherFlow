@@ -26,11 +26,13 @@
         "https://github.com/tukaani-project/xz/commit/cf44e4b7f5dfdbf8c78aef377c10f71e274f63c0.patch"
       ],
       "baseline_sample": {
-        "sample_types": [
+        "execution_architecture": "single_browser_agent_path",
+        "chain_patterns": [
           "tracker_commit_patch",
           "tracker_mailing_list_commit_patch",
           "hosted_fix_navigation"
         ],
+        "resilience_modes": [],
         "stable_fields": [
           "stop_reason",
           "llm_call_count",

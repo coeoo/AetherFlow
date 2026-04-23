@@ -24,10 +24,12 @@
         "https://github.com/netty/netty/commit/89c241e3b1795ff257af4ad6eadc616cb2fb3dc4.patch"
       ],
       "baseline_sample": {
-        "sample_types": [
+        "execution_architecture": "single_browser_agent_path",
+        "chain_patterns": [
           "bugtracker_commit_patch",
           "hosted_fix_navigation"
         ],
+        "resilience_modes": [],
         "stable_fields": [
           "stop_reason",
           "llm_call_count",

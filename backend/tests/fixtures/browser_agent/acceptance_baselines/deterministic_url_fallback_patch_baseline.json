@@ -24,8 +24,11 @@
         "https://github.com/libxmp/libxmp/pull/848.patch"
       ],
       "baseline_sample": {
-        "sample_types": [
-          "hosted_fix_navigation",
+        "execution_architecture": "single_browser_agent_path",
+        "chain_patterns": [
+          "hosted_fix_navigation"
+        ],
+        "resilience_modes": [
           "deterministic_url_fallback_patch"
         ],
         "stable_fields": [

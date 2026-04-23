@@ -24,10 +24,12 @@
         "https://gitlab.example.org/group/project/-/commit/abc1234.patch"
       ],
       "baseline_sample": {
-        "sample_types": [
+        "execution_architecture": "single_browser_agent_path",
+        "chain_patterns": [
           "tracker_commit_patch",
           "hosted_fix_navigation"
         ],
+        "resilience_modes": [],
         "stable_fields": [
           "stop_reason",
           "llm_call_count",
@@ -70,9 +72,11 @@
         "https://github.com/acme/project/pull/42.patch"
       ],
       "baseline_sample": {
-        "sample_types": [
+        "execution_architecture": "single_browser_agent_path",
+        "chain_patterns": [
           "hosted_fix_navigation"
         ],
+        "resilience_modes": [],
         "stable_fields": [
           "stop_reason",
           "llm_call_count",
@@ -111,8 +115,10 @@
       ],
       "final_patch_urls": [],
       "baseline_sample": {
-        "sample_types": [
-          "rule_fallback_timeout_chain"
+        "execution_architecture": "single_browser_agent_path",
+        "chain_patterns": [],
+        "resilience_modes": [
+          "llm_timeout_rule_fallback"
         ],
         "stable_fields": [
           "stop_reason",

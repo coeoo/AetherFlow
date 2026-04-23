@@ -24,11 +24,14 @@
         "https://gitlab.com/qemu-project/qemu/-/commit/f757d9d90d19b914d4023663bfc4da73bbbf007e.patch"
       ],
       "baseline_sample": {
-        "sample_types": [
+        "execution_architecture": "single_browser_agent_path",
+        "chain_patterns": [
           "bugtracker_commit_patch",
-          "hosted_fix_navigation",
-          "rule_fallback_timeout_chain",
-          "rule_fallback_timeout_high_value_patch"
+          "hosted_fix_navigation"
+        ],
+        "resilience_modes": [
+          "llm_timeout_rule_fallback",
+          "llm_timeout_rule_fallback_high_value_patch"
         ],
         "stable_fields": [
           "stop_reason",

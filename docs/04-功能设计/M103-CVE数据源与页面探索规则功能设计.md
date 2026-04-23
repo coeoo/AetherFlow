@@ -339,18 +339,31 @@ NavigationChain
 - 跨域扩展消耗 `max_cross_domain_expansions` 预算
 - 默认预算 8 次，允许追踪 advisory→tracker→commit 完整链路
 
-### 规则7：成功 patch 事实不可覆盖
+### 规则7：单主路径与受限鲁棒性保底
+
+- CVE Patch Agent 的执行架构仍然只有一条主路径：
+  `CVE ID -> seed 解析 -> 浏览器 Agent 搜索图 -> patch 结果`
+- LLM 是导航主决策器，负责基于浏览器快照、链路上下文和预算信息做结构化导航判断。
+- rule fallback / URL fallback 不是新的执行架构，也不是与 LLM 并列的主路径。
+- rule fallback 仅用于 LLM 不可用、超时、预算耗尽或结构化决策未通过校验时的受限鲁棒性保底。
+- URL fallback 仅用于已知代码托管 URL 形态的 deterministic patch 派生，例如 commit / PR / MR 到 `.patch` 的规范化。
+- acceptance baseline 记录的是：
+  - 真实互联网链路样本
+  - 单主路径内部的鲁棒性边界
+- acceptance baseline 不代表系统存在多套执行主链，也不改变 LLM 作为主决策器的定位。
+
+### 规则8：成功 patch 事实不可覆盖
 
 - 已下载成功并通过内容校验的 patch，模型不得覆盖该事实
 - 模型只能决定是否继续搜索补充更多证据
 
-### 规则8：Agent 输出必须结构化并经过校验
+### 规则9：Agent 输出必须结构化并经过校验
 
 - 决策输出必须是结构化 JSON
 - 动作仅允许：`expand_frontier` / `try_candidate_download` / `stop_search` / `needs_human_review`
 - 任何超预算、越权、未知链接、重复跳转的输出必须被拒绝
 
-### 规则9：停止必须可解释
+### 规则10：停止必须可解释
 
 Agent 停止时必须明确属于以下之一：
 

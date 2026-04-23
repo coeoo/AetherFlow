@@ -681,7 +681,8 @@ def _build_effective_budget_report(
 
 
 def _build_baseline_sample(report: dict[str, object]) -> dict[str, object]:
-    sample_types: list[str] = []
+    chain_patterns: list[str] = []
+    resilience_modes: list[str] = []
     visited_page_roles = [str(role) for role in list(report.get("visited_page_roles") or [])]
     selected_patch_types = [str(patch_type) for patch_type in list(report.get("selected_patch_types") or [])]
     mock_mode = str(dict(report.get("effective_budget") or {}).get("mock_mode") or "")
@@ -689,7 +690,7 @@ def _build_baseline_sample(report: dict[str, object]) -> dict[str, object]:
     if "tracker_page" in visited_page_roles and "commit_page" in visited_page_roles and bool(
         report.get("final_patch_urls")
     ):
-        sample_types.append("tracker_commit_patch")
+        chain_patterns.append("tracker_commit_patch")
     if {
         "tracker_page",
         "mailing_list_page",
@@ -698,25 +699,25 @@ def _build_baseline_sample(report: dict[str, object]) -> dict[str, object]:
         patch_type in {"github_commit_patch", "gitlab_commit_patch", "kernel_commit_patch"}
         for patch_type in selected_patch_types
     ):
-        sample_types.append("tracker_mailing_list_commit_patch")
+        chain_patterns.append("tracker_mailing_list_commit_patch")
     if "bugtracker_page" in visited_page_roles and "commit_page" in visited_page_roles and any(
         patch_type in {"github_commit_patch", "gitlab_commit_patch", "kernel_commit_patch"}
         for patch_type in selected_patch_types
     ):
-        sample_types.append("bugtracker_commit_patch")
+        chain_patterns.append("bugtracker_commit_patch")
     if any(role in visited_page_roles for role in ("tracker_page", "mailing_list_page", "bugtracker_page")) and any(
         role in visited_page_roles for role in ("commit_page", "pull_request_page", "merge_request_page")
     ):
-        sample_types.append("hosted_fix_navigation")
+        chain_patterns.append("hosted_fix_navigation")
     if int(report.get("url_fallback_candidate_count") or 0) > 0 and bool(report.get("final_patch_urls")):
-        sample_types.append("deterministic_url_fallback_patch")
+        resilience_modes.append("deterministic_url_fallback_patch")
     if mock_mode == "llm-timeout-forced" and int(report.get("rule_fallback_count") or 0) > 0:
-        sample_types.append("rule_fallback_timeout_chain")
+        resilience_modes.append("llm_timeout_rule_fallback")
         if any(
             role in {"commit_page", "pull_request_page", "merge_request_page", "download_page"}
             for role in visited_page_roles
         ) and bool(report.get("final_patch_urls")):
-            sample_types.append("rule_fallback_timeout_high_value_patch")
+            resilience_modes.append("llm_timeout_rule_fallback_high_value_patch")
 
     stable_fields = [
         "stop_reason",
@@ -736,7 +737,9 @@ def _build_baseline_sample(report: dict[str, object]) -> dict[str, object]:
         "timestamp",
     ]
     return {
-        "sample_types": sample_types,
+        "execution_architecture": "single_browser_agent_path",
+        "chain_patterns": chain_patterns,
+        "resilience_modes": resilience_modes,
         "stable_fields": stable_fields,
         "volatile_fields": volatile_fields,
     }

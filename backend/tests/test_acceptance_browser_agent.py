@@ -50,10 +50,28 @@ ACCEPTANCE_VOLATILE_FIELDS = {
     "memory_peak_mb",
     "timestamp",
 }
-REPRESENTATIVE_BASELINE_SAMPLE_TYPES = {
+ACCEPTANCE_EXECUTION_ARCHITECTURE = "single_browser_agent_path"
+REPRESENTATIVE_BASELINE_CHAIN_PATTERNS = {
+    "tracker_commit_patch",
+    "hosted_fix_navigation",
     "tracker_mailing_list_commit_patch",
     "bugtracker_commit_patch",
+}
+REPRESENTATIVE_BASELINE_RESILIENCE_MODES = {
+    "llm_timeout_rule_fallback",
     "deterministic_url_fallback_patch",
+    "llm_timeout_rule_fallback_high_value_patch",
+}
+BASELINE_SAMPLE_KEYS = {
+    "execution_architecture",
+    "chain_patterns",
+    "resilience_modes",
+    "stable_fields",
+    "volatile_fields",
+}
+LEGACY_BASELINE_SAMPLE_KEY = "sample_types"
+LEGACY_BASELINE_SAMPLE_TYPES = {
+    "rule_fallback_timeout_chain",
     "rule_fallback_timeout_high_value_patch",
 }
 
@@ -594,7 +612,7 @@ def test_build_scenario_report_includes_acceptance_matrix_metrics() -> None:
         "pull_request_page: https://github.com/acme/project/pull/42",
     ]
     assert report["final_patch_urls"] == ["https://github.com/acme/project/pull/42.patch"]
-    assert "hosted_fix_navigation" in report["baseline_sample"]["sample_types"]
+    assert "hosted_fix_navigation" in report["baseline_sample"]["chain_patterns"]
 
 
 def test_build_baseline_sample_marks_tracker_commit_patch_contract() -> None:
@@ -615,7 +633,9 @@ def test_build_baseline_sample_marks_tracker_commit_patch_contract() -> None:
 
     baseline = _build_baseline_sample(report)
 
-    assert "tracker_commit_patch" in baseline["sample_types"]
+    assert baseline["execution_architecture"] == ACCEPTANCE_EXECUTION_ARCHITECTURE
+    assert "tracker_commit_patch" in baseline["chain_patterns"]
+    assert baseline["resilience_modes"] == []
     assert "final_patch_urls" in baseline["stable_fields"]
     assert "duration_seconds" in baseline["volatile_fields"]
 
@@ -641,7 +661,9 @@ def test_build_baseline_sample_marks_rule_fallback_timeout_contract() -> None:
 
     baseline = _build_baseline_sample(report)
 
-    assert "rule_fallback_timeout_chain" in baseline["sample_types"]
+    assert baseline["execution_architecture"] == ACCEPTANCE_EXECUTION_ARCHITECTURE
+    assert "llm_timeout_rule_fallback" in baseline["resilience_modes"]
+    assert baseline["chain_patterns"] == []
     assert "rule_fallback_count" in baseline["stable_fields"]
     assert "llm_failure_count" in baseline["stable_fields"]
 
@@ -731,10 +753,21 @@ def test_build_baseline_sample_marks_representative_real_world_link_types() -> N
         }
     )
 
-    assert "tracker_mailing_list_commit_patch" in tracker_to_mailing_list_commit["sample_types"]
-    assert "bugtracker_commit_patch" in bugtracker_to_commit["sample_types"]
-    assert "deterministic_url_fallback_patch" in deterministic_url_fallback["sample_types"]
-    assert "rule_fallback_timeout_high_value_patch" in timeout_high_value["sample_types"]
+    assert "tracker_mailing_list_commit_patch" in tracker_to_mailing_list_commit["chain_patterns"]
+    assert "bugtracker_commit_patch" in bugtracker_to_commit["chain_patterns"]
+    assert "deterministic_url_fallback_patch" in deterministic_url_fallback["resilience_modes"]
+    assert (
+        "llm_timeout_rule_fallback_high_value_patch"
+        in timeout_high_value["resilience_modes"]
+    )
+    for baseline in (
+        tracker_to_mailing_list_commit,
+        bugtracker_to_commit,
+        deterministic_url_fallback,
+        timeout_high_value,
+    ):
+        assert baseline["execution_architecture"] == ACCEPTANCE_EXECUTION_ARCHITECTURE
+        assert LEGACY_BASELINE_SAMPLE_KEY not in baseline
 
 
 def test_compare_acceptance_reports_marks_patch_and_path_changes() -> None:
@@ -945,17 +978,23 @@ def test_main_compare_mode_writes_structured_json_diff(
     assert payload["scenario_diffs"][0]["signals"]["patch_quality_degraded"] is True
 
 
-def test_acceptance_gate_baseline_fixture_contains_required_sample_types() -> None:
+def test_acceptance_gate_baseline_fixture_contains_required_semantic_axes() -> None:
     baseline = _load_baseline_report(gate_module.DEFAULT_BASELINE_REPORT_PATH)
 
-    sample_types = {
-        sample_type
+    chain_patterns = {
+        chain_pattern
         for scenario in baseline["scenarios"]
-        for sample_type in scenario["baseline_sample"]["sample_types"]
+        for chain_pattern in scenario["baseline_sample"]["chain_patterns"]
+    }
+    resilience_modes = {
+        resilience_mode
+        for scenario in baseline["scenarios"]
+        for resilience_mode in scenario["baseline_sample"]["resilience_modes"]
     }
 
-    assert {"tracker_commit_patch", "hosted_fix_navigation", "rule_fallback_timeout_chain"}.issubset(
-        sample_types
+    assert {"tracker_commit_patch", "hosted_fix_navigation"}.issubset(chain_patterns)
+    assert {"llm_timeout_rule_fallback"}.issubset(
+        resilience_modes
     )
 
 
@@ -976,20 +1015,36 @@ def test_acceptance_baseline_fixtures_have_complete_sample_metadata() -> None:
             assert isinstance(scenario, dict), path.name
             baseline_sample = scenario.get("baseline_sample")
             assert isinstance(baseline_sample, dict), scenario.get("cve_id")
-            assert baseline_sample.get("sample_types"), scenario.get("cve_id")
+            assert set(baseline_sample) == BASELINE_SAMPLE_KEYS, scenario.get("cve_id")
+            assert (
+                baseline_sample["execution_architecture"]
+                == ACCEPTANCE_EXECUTION_ARCHITECTURE
+            )
+            assert isinstance(baseline_sample.get("chain_patterns"), list)
+            assert isinstance(baseline_sample.get("resilience_modes"), list)
+            assert LEGACY_BASELINE_SAMPLE_KEY not in baseline_sample
             assert set(baseline_sample.get("stable_fields") or []) == ACCEPTANCE_STABLE_FIELDS
             assert set(baseline_sample.get("volatile_fields") or []) == ACCEPTANCE_VOLATILE_FIELDS
 
 
-def test_representative_real_world_baselines_cover_link_type_gaps() -> None:
-    sample_types = {
-        sample_type
+def test_representative_real_world_baselines_separate_chain_patterns_from_resilience_modes() -> None:
+    chain_patterns = {
+        chain_pattern
         for _, baseline in _load_all_acceptance_baselines()
         for scenario in baseline["scenarios"]
-        for sample_type in scenario["baseline_sample"]["sample_types"]
+        for chain_pattern in scenario["baseline_sample"]["chain_patterns"]
+    }
+    resilience_modes = {
+        resilience_mode
+        for _, baseline in _load_all_acceptance_baselines()
+        for scenario in baseline["scenarios"]
+        for resilience_mode in scenario["baseline_sample"]["resilience_modes"]
     }
 
-    assert REPRESENTATIVE_BASELINE_SAMPLE_TYPES.issubset(sample_types)
+    assert REPRESENTATIVE_BASELINE_CHAIN_PATTERNS.issubset(chain_patterns)
+    assert REPRESENTATIVE_BASELINE_RESILIENCE_MODES.issubset(resilience_modes)
+    assert LEGACY_BASELINE_SAMPLE_TYPES.isdisjoint(chain_patterns)
+    assert LEGACY_BASELINE_SAMPLE_TYPES.isdisjoint(resilience_modes)
 
 
 def test_acceptance_compare_and_gate_consume_all_baseline_fixtures() -> None:
@@ -1084,7 +1139,9 @@ def test_acceptance_gate_main_writes_json_and_returns_failure_on_regression(
             {
                 "cve_id": "CVE-2022-2509",
                 "baseline_sample": {
-                    "sample_types": ["tracker_commit_patch"],
+                    "execution_architecture": ACCEPTANCE_EXECUTION_ARCHITECTURE,
+                    "chain_patterns": ["tracker_commit_patch"],
+                    "resilience_modes": [],
                     "stable_fields": ["stop_reason", "final_patch_urls"],
                     "volatile_fields": ["duration_seconds"],
                 },
@@ -1167,7 +1224,9 @@ def test_acceptance_gate_generates_candidate_for_all_baseline_scenarios(
             {
                 "cve_id": "CVE-2022-2509",
                 "baseline_sample": {
-                    "sample_types": ["tracker_commit_patch"],
+                    "execution_architecture": ACCEPTANCE_EXECUTION_ARCHITECTURE,
+                    "chain_patterns": ["tracker_commit_patch"],
+                    "resilience_modes": [],
                     "stable_fields": list(ACCEPTANCE_STABLE_FIELDS),
                     "volatile_fields": list(ACCEPTANCE_VOLATILE_FIELDS),
                 },
@@ -1175,7 +1234,9 @@ def test_acceptance_gate_generates_candidate_for_all_baseline_scenarios(
             {
                 "cve_id": "CVE-2025-47256",
                 "baseline_sample": {
-                    "sample_types": ["deterministic_url_fallback_patch"],
+                    "execution_architecture": ACCEPTANCE_EXECUTION_ARCHITECTURE,
+                    "chain_patterns": ["hosted_fix_navigation"],
+                    "resilience_modes": ["deterministic_url_fallback_patch"],
                     "stable_fields": list(ACCEPTANCE_STABLE_FIELDS),
                     "volatile_fields": list(ACCEPTANCE_VOLATILE_FIELDS),
                 },
