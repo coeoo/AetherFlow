@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 from app.cve.agent_policy import build_default_budget
+from app.cve.seed_resolver import SeedReference
 
 
 class AgentFrontierItem(TypedDict, total=False):
@@ -12,6 +13,10 @@ class AgentFrontierItem(TypedDict, total=False):
     score: int
     expanded: bool
     fetch_status: str
+    anchor_text: str
+    link_context: str
+    page_role: str
+    chain_id: str | None
 
 
 class AgentDecisionRecord(TypedDict, total=False):
@@ -53,6 +58,7 @@ class AgentPageObservation(TypedDict, total=False):
     content: str
     error: str | None
     extracted_links: list[str]
+    frontier_candidates: list[dict[str, object]]
     candidates: list[dict[str, str]]
     extracted: bool
 
@@ -64,7 +70,7 @@ class AgentState(TypedDict, total=False):
     cve_id: str
     budget: dict[str, int]
     initial_budget: dict[str, int]
-    seed_references: list[str]
+    seed_references: list[SeedReference]
     frontier: list[AgentFrontierItem]
     direct_candidates: list[AgentCandidateRecord]
     page_nodes: list[AgentPageNodeRecord]

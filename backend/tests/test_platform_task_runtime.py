@@ -8,12 +8,13 @@ from sqlalchemy import select, text
 from app import models  # noqa: F401
 from app.db.base import Base
 from app.db.session import create_engine_from_url, create_session_factory
-from app.models import TaskAttempt, TaskJob
+from app.models import CVERun, TaskAttempt, TaskJob
 from app.platform.task_runtime import (
     claim_next_job,
     finish_attempt_failure,
     finish_attempt_success,
 )
+from app.worker.runtime import process_once
 
 
 def _get_test_database_url() -> str:
@@ -35,11 +36,13 @@ def _reset_database(database_url: str) -> None:
         engine.dispose()
 
 
-def _create_job(session, *, scene_name: str, status: str) -> TaskJob:
+def _create_job(
+    session, *, scene_name: str, status: str, job_type: str = "cve_patch_agent_graph"
+) -> TaskJob:
     job = TaskJob(
         job_id=uuid.uuid4(),
         scene_name=scene_name,
-        job_type="cve_patch_fast_first",
+        job_type=job_type,
         trigger_kind="manual",
         status=status,
         payload_json={},
@@ -49,6 +52,44 @@ def _create_job(session, *, scene_name: str, status: str) -> TaskJob:
     session.add(job)
     session.flush()
     return job
+
+
+def test_process_once_rejects_legacy_cve_fast_first_job_type(monkeypatch) -> None:
+    database_url = _get_test_database_url()
+    _reset_database(database_url)
+    session_factory = create_session_factory(database_url)
+    legacy_job_type = "cve_patch_" + "fast_first"
+
+    with session_factory() as session:
+        job = _create_job(
+            session,
+            scene_name="cve",
+            status="queued",
+            job_type=legacy_job_type,
+        )
+        run = CVERun(
+            job_id=job.job_id,
+            cve_id="CVE-2024-3094",
+            status="queued",
+            phase="resolve_seeds",
+            summary_json={},
+        )
+        session.add(run)
+        session.commit()
+
+    def _fail_if_invoked(session, *, run_id) -> None:
+        raise AssertionError(f"旧 fast_first 任务不应继续执行 run: {run_id}")
+
+    monkeypatch.setattr("app.worker.runtime.execute_cve_run", _fail_if_invoked)
+
+    processed = process_once(session_factory, worker_name="worker-legacy")
+    assert processed is True
+
+    with session_factory() as session:
+        reloaded_job = session.get(TaskJob, job.job_id)
+        assert reloaded_job is not None
+        assert reloaded_job.status == "failed"
+        assert reloaded_job.last_error == f"不支持的任务类型: cve/{legacy_job_type}"
 
 
 def test_claim_next_job_only_returns_matching_queued_job() -> None:

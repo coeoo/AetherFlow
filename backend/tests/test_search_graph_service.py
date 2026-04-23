@@ -20,7 +20,7 @@ from app.models.platform import TaskJob
 def _create_second_run(db_session):
     job = TaskJob(
         scene_name="cve",
-        job_type="cve_patch_fast_first",
+        job_type="cve_patch_agent_graph",
         trigger_kind="manual",
         status="queued",
         payload_json={},

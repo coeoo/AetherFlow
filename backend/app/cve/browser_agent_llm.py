@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 import json
 from time import perf_counter
 from dataclasses import asdict
@@ -7,10 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+import httpx
+import re
 
 from app import http_client
 from app.config import load_settings
-from app.cve.browser.base import BrowserPageSnapshot
+from app.cve.browser.base import BrowserPageSnapshot, PageLink
 
 
 MAX_KEY_LINKS = 15
@@ -24,6 +28,7 @@ _REQUIRED_DECISION_FIELDS = {
     "chain_updates",
     "new_chains",
 }
+_CVE_ID_RE = re.compile(r"\bCVE-\d{4}-\d{4,}\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -58,18 +63,80 @@ class NavigationContext:
     visited_domains: list[str]
 
 
-def build_llm_page_view(snapshot: BrowserPageSnapshot, candidates: list[dict]) -> LLMPageView:
+def _score_link_for_llm(link: PageLink, *, cve_id: str = "") -> int:
+    """为页面链接计算 LLM 可见性优先级分数。"""
+    role_scores = {
+        "commit_page": 100,
+        "pull_request_page": 100,
+        "download_page": 80,
+        "tracker_page": 60,
+        "bugtracker_page": 60,
+        "advisory_page": 40,
+        "repository_page": 20,
+    }
+    score = role_scores.get(link.estimated_target_role, 0)
+    if link.is_cross_domain:
+        score += 10
+    normalized_url = link.url.lower()
+    if any(keyword in normalized_url for keyword in ("commit", "patch", "diff", "merge_request", "pull")):
+        score += 30
+    target_cve_id = str(cve_id or "").strip().upper()
+    if target_cve_id:
+        matched_cve_ids = {
+            matched.upper()
+            for matched in _CVE_ID_RE.findall(
+                f"{link.url}\n{link.text}\n{link.context}"
+            )
+        }
+        if target_cve_id in matched_cve_ids:
+            score += 120
+        elif matched_cve_ids:
+            score -= 160
+    return score
+
+
+def build_llm_page_view(
+    snapshot: BrowserPageSnapshot,
+    candidates: list[dict],
+    *,
+    cve_id: str = "",
+    frontier_candidates: list[dict[str, object]] | None = None,
+) -> LLMPageView:
     """从 BrowserPageSnapshot 构建可直接发给 LLM 的页面视图。"""
-    key_links = [
-        LLMLink(
-            url=link.url,
-            text=link.text,
-            context=link.context,
-            is_cross_domain=link.is_cross_domain,
-            estimated_target_role=link.estimated_target_role,
+    if frontier_candidates:
+        page_host = urlparse(snapshot.final_url or snapshot.url).hostname or snapshot.final_url or snapshot.url
+        sorted_candidates = sorted(
+            [candidate for candidate in frontier_candidates if isinstance(candidate, dict)],
+            key=lambda candidate: int(candidate.get("score", 0) or 0),
+            reverse=True,
         )
-        for link in snapshot.links[:MAX_KEY_LINKS]
-    ]
+        key_links = [
+            LLMLink(
+                url=str(candidate.get("url") or ""),
+                text=str(candidate.get("anchor_text") or ""),
+                context=str(candidate.get("link_context") or ""),
+                is_cross_domain=(urlparse(str(candidate.get("url") or "")).hostname or str(candidate.get("url") or "")) != page_host,
+                estimated_target_role=str(candidate.get("page_role") or ""),
+            )
+            for candidate in sorted_candidates[:MAX_KEY_LINKS]
+            if str(candidate.get("url") or "").strip()
+        ]
+    else:
+        ranked_links = sorted(
+            snapshot.links,
+            key=lambda link: _score_link_for_llm(link, cve_id=cve_id),
+            reverse=True,
+        )
+        key_links = [
+            LLMLink(
+                url=link.url,
+                text=link.text,
+                context=link.context,
+                is_cross_domain=link.is_cross_domain,
+                estimated_target_role=link.estimated_target_role,
+            )
+            for link in ranked_links[:MAX_KEY_LINKS]
+        ]
     return LLMPageView(
         url=snapshot.final_url or snapshot.url,
         page_role=snapshot.page_role_hint,
@@ -115,30 +182,48 @@ def call_browser_agent_navigation(
     response = None
     last_error: Exception | None = None
     max_attempts = max(1, int(settings.llm_retry_attempts))
+    request_timeout: float | None
+    wall_clock_timeout = max(1, int(settings.llm_wall_clock_timeout_seconds or 120))
+    if int(settings.llm_timeout_seconds) <= 0:
+        request_timeout = None
+    else:
+        request_timeout = float(settings.llm_timeout_seconds)
     for attempt_index in range(max_attempts):
         try:
-            response = http_client.post(
-                f"{settings.llm_base_url.rstrip('/')}/chat/completions",
-                timeout=float(settings.llm_timeout_seconds),
-                headers={
-                    "Authorization": f"Bearer {settings.llm_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": settings.llm_default_model,
-                    "response_format": {"type": "json_object"},
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": _load_browser_navigation_prompt(),
-                        },
-                        {
-                            "role": "user",
-                            "content": json.dumps(asdict(context), ensure_ascii=False),
-                        },
-                    ],
-                },
-            )
+            executor = ThreadPoolExecutor(max_workers=1)
+            try:
+                future = executor.submit(
+                    http_client.post,
+                    f"{settings.llm_base_url.rstrip('/')}/chat/completions",
+                    timeout=request_timeout,
+                    headers={
+                        "Authorization": f"Bearer {settings.llm_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": settings.llm_default_model,
+                        "response_format": {"type": "json_object"},
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": _load_browser_navigation_prompt(),
+                            },
+                            {
+                                "role": "user",
+                                "content": json.dumps(asdict(context), ensure_ascii=False),
+                            },
+                        ],
+                    },
+                )
+                try:
+                    response = future.result(timeout=wall_clock_timeout)
+                except FutureTimeoutError as exc:
+                    future.cancel()
+                    raise httpx.ReadTimeout(
+                        f"LLM 调用超过总时限 {wall_clock_timeout}s"
+                    ) from exc
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
             break
         except Exception as exc:
             last_error = exc

@@ -63,10 +63,7 @@ def process_once(session_factory: sessionmaker[Session], *, worker_name: str) ->
 
         job = attempt.job
         try:
-            if job.scene_name == "cve" and job.job_type in {
-                "cve_patch_fast_first",
-                "cve_patch_agent_graph",
-            }:
+            if job.scene_name == "cve" and job.job_type == "cve_patch_agent_graph":
                 run_id = session.execute(
                     select(CVERun.run_id).where(CVERun.job_id == job.job_id)
                 ).scalar_one()

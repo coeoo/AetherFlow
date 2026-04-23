@@ -1,22 +1,44 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from urllib.parse import urldefrag
 
 from app.cve.seed_sources import resolve_all_seed_sources
 from app.cve.source_trace import record_source_fetch
 
 
-def _merge_seed_references(source_results) -> list[str]:
-    merged: list[str] = []
-    seen: set[str] = set()
+@dataclass(frozen=True)
+class SeedReference:
+    url: str
+    source: str
+    authority_score: int
+
+
+SOURCE_AUTHORITY: dict[str, int] = {
+    "cve_official": 100,
+    "osv": 80,
+    "github_advisory": 70,
+    "nvd": 60,
+}
+
+
+def _merge_seed_references(source_results) -> list[SeedReference]:
+    merged_by_url: dict[str, SeedReference] = {}
     for result in source_results:
+        authority_score = SOURCE_AUTHORITY.get(result.source, 0)
         for reference in result.references:
             normalized = urldefrag(reference).url
-            if not normalized or normalized in seen:
+            if not normalized:
                 continue
-            seen.add(normalized)
-            merged.append(normalized)
-    return merged
+            current = merged_by_url.get(normalized)
+            if current is not None and current.authority_score >= authority_score:
+                continue
+            merged_by_url[normalized] = SeedReference(
+                url=normalized,
+                source=result.source,
+                authority_score=authority_score,
+            )
+    return list(merged_by_url.values())
 
 
 def _select_status_code(source_results) -> int | None:
@@ -39,7 +61,7 @@ def _build_request_snapshot(cve_id: str, source_results) -> dict[str, object]:
     }
 
 
-def _build_response_meta(references: list[str], source_results) -> dict[str, object]:
+def _build_response_meta(references: list[SeedReference], source_results) -> dict[str, object]:
     return {
         "status_code": _select_status_code(source_results),
         "reference_count": len(references),
@@ -56,7 +78,7 @@ def _build_response_meta(references: list[str], source_results) -> dict[str, obj
         ],
     }
 
-def resolve_seed_references(session, *, run, cve_id: str) -> list[str]:
+def resolve_seed_references(session, *, run, cve_id: str) -> list[SeedReference]:
     source_results = resolve_all_seed_sources(cve_id)
     request_snapshot = _build_request_snapshot(cve_id, source_results)
     references = _merge_seed_references(source_results)

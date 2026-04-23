@@ -24,6 +24,7 @@ from app.models import CVERun
 _logger = logging.getLogger(__name__)
 _DIAGNOSTIC_MODE_ENV = "AETHERFLOW_CVE_RUNTIME_DIAGNOSTIC_MODE"
 _MAX_DIAGNOSTIC_ROUNDS = 5
+_GRAPH_RECURSION_LIMIT = 64
 
 _EXCEPTION_STOP_REASONS = {
     "resolve_seeds": "resolve_seeds_failed",
@@ -34,7 +35,6 @@ _EXCEPTION_STOP_REASONS = {
     "download_and_validate": "download_and_validate_failed",
     "finalize_run": "finalize_run_failed",
 }
-_MAX_DIAGNOSTIC_TOTAL_SECONDS = 180
 
 
 def _finalize_failure(run: CVERun, *, stop_reason: str, summary: dict[str, object]) -> None:
@@ -64,10 +64,15 @@ def _execute_diagnostic_run(
     run: CVERun,
     state: dict[str, object],
 ) -> dict[str, object]:
+    settings = load_settings()
     current_state = state
     budget = dict(current_state.get("budget") or {})
     budget["max_parallel_frontier"] = 1
     current_state["budget"] = budget
+    diagnostic_timeout_seconds = max(
+        1,
+        int(settings.cve_runtime_diagnostic_timeout_seconds or 180),
+    )
 
     setup_sequence = [
         ("resolve_seeds", resolve_seeds_node),
@@ -94,11 +99,11 @@ def _execute_diagnostic_run(
         diagnostic_started_at = monotonic()
         for round_index in range(1, _MAX_DIAGNOSTIC_ROUNDS + 1):
             elapsed = monotonic() - diagnostic_started_at
-            if elapsed > _MAX_DIAGNOSTIC_TOTAL_SECONDS:
+            if elapsed > diagnostic_timeout_seconds:
                 _logger.warning(
                     "[CVE:%s] 诊断模式超过总时限 %ds（已用 %.1fs），强制终止循环",
                     run.cve_id,
-                    _MAX_DIAGNOSTIC_TOTAL_SECONDS,
+                    diagnostic_timeout_seconds,
                     elapsed,
                 )
                 if not current_state.get("stop_reason"):
@@ -176,6 +181,9 @@ def execute_cve_run(session: Session, *, run_id: UUID) -> dict[str, object]:
     state: dict[str, object] = {}
     try:
         state = build_initial_agent_state(run_id=str(run.run_id), cve_id=run.cve_id)
+        budget = dict(state.get("budget") or {})
+        budget["max_parallel_frontier"] = 1
+        state["budget"] = budget
         state["session"] = session
         state["_browser_bridge"] = bridge
         if _diagnostic_mode_enabled():
@@ -184,7 +192,10 @@ def execute_cve_run(session: Session, *, run_id: UUID) -> dict[str, object]:
         else:
             graph = build_cve_patch_graph()
             _logger.info("[CVE:%s] graph.invoke() 开始", run.cve_id)
-            state = graph.invoke(state)
+            state = graph.invoke(
+                state,
+                config={"recursion_limit": _GRAPH_RECURSION_LIMIT},
+            )
             _logger.info(
                 "[CVE:%s] graph.invoke() 完成, stop_reason=%s",
                 run.cve_id,

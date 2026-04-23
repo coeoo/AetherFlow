@@ -17,7 +17,7 @@ def test_home_summary_aggregates_recent_jobs_deliveries_and_health(client, db_se
     cve_job = TaskJob(
         job_id=uuid.uuid4(),
         scene_name="cve",
-        job_type="cve_patch_fast_first",
+        job_type="cve_patch_agent_graph",
         trigger_kind="manual",
         status="running",
         payload_json={"cve_id": "CVE-2024-3094"},
@@ -104,7 +104,7 @@ def test_platform_tasks_list_and_detail_include_scene_run_and_attempts(client, d
     job = TaskJob(
         job_id=uuid.uuid4(),
         scene_name="cve",
-        job_type="cve_patch_fast_first",
+        job_type="cve_patch_agent_graph",
         trigger_kind="manual",
         status="failed",
         payload_json={"cve_id": "CVE-2024-3094"},

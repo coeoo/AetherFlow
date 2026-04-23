@@ -44,12 +44,21 @@ def test_validate_agent_decision_rejects_unknown_selected_url() -> None:
     )
 
     assert decision.accepted is False
-    assert decision.rejection_reason == "selected_url_not_in_frontier_or_page"
+    assert decision.rejection_reason == "selected_url_not_in_current_page_or_frontier"
 
 
 def test_validate_agent_decision_rejects_cross_domain_when_budget_exhausted() -> None:
     state = _build_state()
     state["budget"]["max_cross_domain_expansions"] = 0
+    state["page_observations"]["https://example.com/frontier"]["frontier_candidates"] = [
+        {
+            "url": "https://other.example.com/cross",
+            "anchor_text": "cross",
+            "link_context": "candidate",
+            "page_role": "tracker_page",
+            "score": 20,
+        }
+    ]
     decision = validate_agent_decision(
         state,
         {"action": "expand_frontier", "selected_urls": ["https://other.example.com/cross"]},
@@ -61,7 +70,7 @@ def test_validate_agent_decision_rejects_cross_domain_when_budget_exhausted() ->
 
 def test_validate_agent_decision_rejects_duplicate_url() -> None:
     state = _build_state()
-    state["visited_urls"] = {"https://example.com/child"}
+    state["visited_urls"] = ["https://example.com/child"]
     decision = validate_agent_decision(
         state,
         {"action": "expand_frontier", "selected_urls": ["https://example.com/child"]},
@@ -201,15 +210,15 @@ def test_validate_needs_human_review_rejects_when_active_chain_exists() -> None:
 def test_validate_agent_decision_accepts_browser_snapshot_links() -> None:
     state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2024-3094")
     state["current_page_url"] = "https://security-tracker.debian.org/tracker/CVE-2022-2509"
-    state["browser_snapshots"] = {
+    state["page_observations"] = {
         "https://security-tracker.debian.org/tracker/CVE-2022-2509": {
-            "links": [
+            "frontier_candidates": [
                 {
                     "url": "https://gitlab.com/org/proj/-/commit/abc1234",
-                    "text": "upstream fix",
-                    "context": "tracker -> commit",
-                    "is_cross_domain": True,
-                    "estimated_target_role": "commit_page",
+                    "anchor_text": "upstream fix",
+                    "link_context": "tracker -> commit",
+                    "page_role": "commit_page",
+                    "score": 120,
                 }
             ]
         }
@@ -227,3 +236,65 @@ def test_validate_agent_decision_accepts_browser_snapshot_links() -> None:
     assert decision.normalized_selected_urls == [
         "https://gitlab.com/org/proj/-/commit/abc1234"
     ]
+
+
+def test_validate_agent_decision_rejects_historical_page_link_not_in_current_candidates() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2024-3094")
+    state["current_page_url"] = "https://security-tracker.debian.org/tracker/CVE-2022-2509"
+    state["page_observations"] = {
+        "https://security-tracker.debian.org/tracker/CVE-2022-2509": {
+            "frontier_candidates": [
+                {
+                    "url": "https://gitlab.com/org/proj/-/commit/current1234",
+                    "anchor_text": "current fix",
+                    "link_context": "tracker -> commit",
+                    "page_role": "commit_page",
+                    "score": 120,
+                }
+            ]
+        },
+        "https://example.com/older-page": {
+            "frontier_candidates": [
+                {
+                    "url": "https://gitlab.com/org/proj/-/commit/old9999",
+                    "anchor_text": "old fix",
+                    "link_context": "older page candidate",
+                    "page_role": "commit_page",
+                    "score": 80,
+                }
+            ]
+        },
+    }
+
+    decision = validate_agent_decision(
+        state,
+        {
+            "action": "expand_frontier",
+            "selected_urls": ["https://gitlab.com/org/proj/-/commit/old9999"],
+        },
+    )
+
+    assert decision.accepted is False
+    assert decision.rejection_reason == "selected_url_not_in_current_page_or_frontier"
+
+
+def test_validate_agent_decision_rejects_unknown_selected_candidate_key() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2024-3094")
+    state["direct_candidates"] = [
+        {
+            "canonical_key": "https://gitlab.com/org/proj/-/commit/abc1234.patch",
+            "candidate_url": "https://gitlab.com/org/proj/-/commit/abc1234.patch",
+            "patch_type": "github_commit_patch",
+        }
+    ]
+
+    decision = validate_agent_decision(
+        state,
+        {
+            "action": "try_candidate_download",
+            "selected_candidate_keys": ["https://example.com/not-found.patch"],
+        },
+    )
+
+    assert decision.accepted is False
+    assert decision.rejection_reason == "selected_candidate_key_not_in_candidates"

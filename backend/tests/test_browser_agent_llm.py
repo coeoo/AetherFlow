@@ -14,14 +14,16 @@ from app.cve.agent_state import build_initial_agent_state
 from app.cve.browser.base import BrowserPageSnapshot
 from app.cve.browser.base import PageLink
 from app.cve.browser_agent_llm import MAX_KEY_LINKS
+from app.cve.browser_agent_llm import LLMPageView
 from app.cve.browser_agent_llm import NavigationContext
+from app.cve.browser_agent_llm import _score_link_for_llm
 from app.cve.browser_agent_llm import build_llm_page_view
 from app.cve.browser_agent_llm import build_navigation_context
 from app.cve.browser_agent_llm import call_browser_agent_navigation
 
 
-def test_build_llm_page_view_limits_key_links_to_15() -> None:
-    snapshot = BrowserPageSnapshot(
+def _make_snapshot(links: list[PageLink]) -> BrowserPageSnapshot:
+    return BrowserPageSnapshot(
         url="https://security-tracker.debian.org/tracker/CVE-2022-2509",
         final_url="https://security-tracker.debian.org/tracker/CVE-2022-2509",
         status_code=200,
@@ -29,7 +31,134 @@ def test_build_llm_page_view_limits_key_links_to_15() -> None:
         raw_html="<html></html>",
         accessibility_tree="heading \"CVE-2022-2509\"",
         markdown_content="tracker summary",
-        links=[
+        links=links,
+        page_role_hint="tracker_page",
+        fetch_duration_ms=10,
+    )
+
+
+def test_score_link_commit_page_ranks_highest() -> None:
+    commit_link = PageLink(
+        url="https://gitlab.example.net/acme/widget/-/commit/abc1234def5678",
+        text="上游提交",
+        context="fix in upstream commit",
+        is_cross_domain=True,
+        estimated_target_role="commit_page",
+    )
+    advisory_link = PageLink(
+        url="https://vendor.example.com/security/advisory/CVE-2030-1001",
+        text="公告",
+        context="security advisory",
+        is_cross_domain=False,
+        estimated_target_role="advisory_page",
+    )
+
+    assert _score_link_for_llm(commit_link) > _score_link_for_llm(advisory_link)
+
+
+def test_score_link_url_keyword_bonus() -> None:
+    keyword_link = PageLink(
+        url="https://code.example.org/project/commit/abc1234def5678",
+        text="查看提交",
+        context="plain link",
+        is_cross_domain=False,
+        estimated_target_role="",
+    )
+
+    assert _score_link_for_llm(keyword_link) == 30
+
+
+def test_build_llm_page_view_promotes_high_value_links() -> None:
+    low_value_links = [
+        PageLink(
+            url=f"https://example.com/nav-{index}",
+            text=f"导航-{index}",
+            context="site navigation",
+            is_cross_domain=False,
+            estimated_target_role="unknown_page",
+        )
+        for index in range(18)
+    ]
+    high_value_links = [
+        PageLink(
+            url=f"https://git.example.org/acme/widget/commit/abc1234def567{index}",
+            text=f"修复提交-{index}",
+            context="upstream fix commit",
+            is_cross_domain=True,
+            estimated_target_role="commit_page",
+        )
+        for index in range(2)
+    ]
+
+    page_view = build_llm_page_view(_make_snapshot(low_value_links + high_value_links), candidates=[])
+
+    assert [link.estimated_target_role for link in page_view.key_links[:2]] == [
+        "commit_page",
+        "commit_page",
+    ]
+
+
+def test_build_llm_page_view_prioritizes_current_cve_tracker_link() -> None:
+    page_view = build_llm_page_view(
+        _make_snapshot(
+            [
+                PageLink(
+                    url="https://security-tracker.debian.org/tracker/CVE-2011-3389",
+                    text="CVE-2011-3389",
+                    context="other security issue",
+                    is_cross_domain=False,
+                    estimated_target_role="tracker_page",
+                ),
+                PageLink(
+                    url="https://security-tracker.debian.org/tracker/CVE-2022-2509",
+                    text="CVE-2022-2509",
+                    context="target security issue",
+                    is_cross_domain=False,
+                    estimated_target_role="tracker_page",
+                ),
+            ]
+        ),
+        candidates=[],
+        cve_id="CVE-2022-2509",
+    )
+
+    assert page_view.key_links[0].url == "https://security-tracker.debian.org/tracker/CVE-2022-2509"
+
+
+def test_build_llm_page_view_uses_frontier_candidates_instead_of_raw_snapshot_links() -> None:
+    page_view = build_llm_page_view(
+        _make_snapshot(
+            [
+                PageLink(
+                    url="https://example.com/raw-only",
+                    text="raw only",
+                    context="should not be visible",
+                    is_cross_domain=False,
+                    estimated_target_role="unknown_page",
+                )
+            ]
+        ),
+        candidates=[],
+        cve_id="CVE-2022-2509",
+        frontier_candidates=[
+            {
+                "url": "https://security-tracker.debian.org/tracker/CVE-2022-2509",
+                "anchor_text": "CVE-2022-2509",
+                "link_context": "target issue",
+                "page_role": "tracker_page",
+                "score": 120,
+            }
+        ],
+    )
+
+    assert [link.url for link in page_view.key_links] == [
+        "https://security-tracker.debian.org/tracker/CVE-2022-2509"
+    ]
+
+
+def test_build_llm_page_view_respects_max_key_links_limit() -> None:
+    snapshot = _make_snapshot(
+        [
             PageLink(
                 url=f"https://example.com/link-{index}",
                 text=f"link-{index}",
@@ -37,10 +166,8 @@ def test_build_llm_page_view_limits_key_links_to_15() -> None:
                 is_cross_domain=index % 2 == 0,
                 estimated_target_role="commit_page",
             )
-            for index in range(20)
-        ],
-        page_role_hint="tracker_page",
-        fetch_duration_ms=10,
+            for index in range(25)
+        ]
     )
 
     page_view = build_llm_page_view(
@@ -48,9 +175,8 @@ def test_build_llm_page_view_limits_key_links_to_15() -> None:
         candidates=[{"candidate_url": "https://example.com/fix.patch", "patch_type": "patch"}],
     )
 
-    assert page_view.page_role == "tracker_page"
     assert len(page_view.key_links) == MAX_KEY_LINKS
-    assert page_view.patch_candidates[0]["candidate_url"] == "https://example.com/fix.patch"
+    assert page_view.page_role == "tracker_page"
 
 
 def test_build_navigation_context_includes_chain_and_browser_state() -> None:
@@ -357,6 +483,119 @@ def test_call_browser_agent_navigation_retries_and_logs_timeout_failure(monkeypa
     assert log_entry["error_type"] == "ReadTimeout"
     assert log_entry["selected_urls"] == []
     assert log_entry["latency_ms"] >= 0
+
+
+def test_call_browser_agent_navigation_disables_timeout_when_env_is_zero(monkeypatch) -> None:
+    context = NavigationContext(
+        cve_id="CVE-2022-2509",
+        budget_remaining={"max_pages_total": 20},
+        navigation_path=["tracker_page: https://security-tracker.debian.org/tracker/CVE-2022-2509"],
+        parent_page_summary=None,
+        current_page=LLMPageView(
+            url="https://security-tracker.debian.org/tracker/CVE-2022-2509",
+            page_role="tracker_page",
+            title="CVE-2022-2509",
+            accessibility_tree_summary='heading "CVE-2022-2509"',
+            key_links=[],
+            patch_candidates=[],
+            page_text_summary="tracker summary",
+        ),
+        active_chains=[],
+        discovered_candidates=[],
+        visited_domains=[],
+    )
+    captured_timeout = {"value": "unset"}
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "action": "stop_search",
+                                    "reason_summary": "done",
+                                    "confirmed_page_role": "tracker_page",
+                                    "selected_urls": [],
+                                    "selected_candidate_keys": [],
+                                    "cross_domain_justification": "",
+                                    "chain_updates": [],
+                                    "new_chains": [],
+                                },
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ]
+            }
+
+    def _capture_post(*args, **kwargs):
+        captured_timeout["value"] = kwargs.get("timeout", "missing")
+        return _FakeResponse()
+
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.com")
+    monkeypatch.setenv("LLM_API_KEY", "demo-key")
+    monkeypatch.setenv("LLM_DEFAULT_MODEL", "qwen3.6-plus")
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "0")
+    monkeypatch.setattr("app.cve.browser_agent_llm.http_client.post", _capture_post)
+
+    decision = call_browser_agent_navigation(context, llm_decision_log=[])
+
+    assert decision["action"] == "stop_search"
+    assert captured_timeout["value"] is None
+
+
+def test_call_browser_agent_navigation_enforces_wall_clock_timeout_when_request_timeout_disabled(
+    monkeypatch,
+) -> None:
+    context = NavigationContext(
+        cve_id="CVE-2022-2509",
+        budget_remaining={"max_pages_total": 20},
+        navigation_path=["tracker_page: https://security-tracker.debian.org/tracker/CVE-2022-2509"],
+        parent_page_summary=None,
+        current_page=LLMPageView(
+            url="https://security-tracker.debian.org/tracker/CVE-2022-2509",
+            page_role="tracker_page",
+            title="CVE-2022-2509",
+            accessibility_tree_summary='heading "CVE-2022-2509"',
+            key_links=[],
+            patch_candidates=[],
+            page_text_summary="tracker summary",
+        ),
+        active_chains=[],
+        discovered_candidates=[],
+        visited_domains=[],
+    )
+    call_args: dict[str, object] = {}
+
+    def _hang_post(*args, **kwargs):
+        call_args["timeout"] = kwargs.get("timeout", "missing")
+        import time
+
+        time.sleep(1.5)
+        raise AssertionError("future should have timed out before returning")
+
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.com")
+    monkeypatch.setenv("LLM_API_KEY", "demo-key")
+    monkeypatch.setenv("LLM_DEFAULT_MODEL", "qwen3.6-plus")
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("LLM_WALL_CLOCK_TIMEOUT_SECONDS", "1")
+    monkeypatch.setenv("LLM_RETRY_ATTEMPTS", "1")
+    monkeypatch.setattr("app.cve.browser_agent_llm.http_client.post", _hang_post)
+
+    import time
+
+    started_at = time.perf_counter()
+    with pytest.raises(httpx.ReadTimeout, match="总时限 1s"):
+        call_browser_agent_navigation(context, llm_decision_log=[])
+    elapsed = time.perf_counter() - started_at
+
+    assert call_args["timeout"] is None
+    assert elapsed < 1.5
 
 
 def test_call_browser_agent_navigation_raises_when_llm_response_missing_required_fields(monkeypatch) -> None:

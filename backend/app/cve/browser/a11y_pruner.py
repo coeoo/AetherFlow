@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 
-MAX_A11Y_CHARS = 6000
+MAX_A11Y_CHARS = 12000
 KEEP_ROLES = {
     "link",
     "heading",

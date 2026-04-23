@@ -1,4 +1,4 @@
-from app.cve.reference_matcher import match_reference_url, match_reference_urls
+from app.cve.reference_matcher import get_candidate_priority, match_reference_url, match_reference_urls
 
 
 def test_matcher_keeps_direct_patch_url() -> None:
@@ -143,3 +143,27 @@ def test_match_reference_urls_preserves_input_order_and_skips_non_matches() -> N
             "patch_type": "debdiff",
         },
     ]
+
+
+def test_get_candidate_priority_upstream_commit_is_highest() -> None:
+    assert get_candidate_priority("github_commit_patch") == 100
+    assert get_candidate_priority("gitlab_commit_patch") == 100
+    assert get_candidate_priority("kernel_commit_patch") == 100
+
+
+def test_get_candidate_priority_distro_patch_is_lowest() -> None:
+    assert get_candidate_priority("debdiff") == 20
+
+
+def test_get_candidate_priority_downgrades_ubuntu_distro_patch_url() -> None:
+    assert (
+        get_candidate_priority(
+            "patch",
+            "https://patches.ubuntu.com/g/gnutls28/gnutls28_3.8.12-2ubuntu1.patch",
+        )
+        == 20
+    )
+
+
+def test_get_candidate_priority_unknown_type_returns_default() -> None:
+    assert get_candidate_priority("some_unknown_type") == 50

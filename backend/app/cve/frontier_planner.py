@@ -4,6 +4,7 @@ import re
 from urllib.parse import urldefrag
 
 from app.cve.reference_matcher import match_reference_url
+from app.cve.seed_resolver import SeedReference
 
 
 MAX_FRONTIER_PAGES = 10
@@ -36,18 +37,24 @@ GITLAB_COMMIT_OR_MR_RE = re.compile(
 )
 
 
-def plan_frontier(seed_references: list[str]) -> list[str]:
+def plan_frontier(seed_references: list[SeedReference]) -> list[str]:
     frontier: list[tuple[str, int, int]] = []
     seen_urls: set[str] = set()
 
     for index, reference in enumerate(seed_references):
-        normalized = normalize_frontier_url(reference)
+        normalized = normalize_frontier_url(reference.url)
         if normalized is None or normalized in seen_urls:
             continue
         if match_reference_url(normalized) is not None:
             continue
         seen_urls.add(normalized)
-        frontier.append((normalized, score_frontier_url(normalized), index))
+        frontier.append(
+            (
+                normalized,
+                score_frontier_url(normalized, authority_score=reference.authority_score),
+                index,
+            )
+        )
 
     frontier.sort(key=lambda item: (-item[1], item[2]))
     return [url for url, _, _ in frontier[:MAX_FRONTIER_PAGES]]
@@ -63,11 +70,12 @@ def normalize_frontier_url(url: str) -> str | None:
     return normalized
 
 
-def score_frontier_url(url: str) -> int:
+def score_frontier_url(url: str, authority_score: int = 0) -> int:
     normalized = url.lower()
     score = sum(weight for marker, weight in FRONTIER_PRIORITY_RULES if marker in normalized)
     if "cve-" in normalized:
         score += 2
     if "security" in normalized:
         score += 1
+    score += authority_score // 5
     return score
