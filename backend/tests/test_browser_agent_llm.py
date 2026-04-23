@@ -56,6 +56,44 @@ def test_score_link_commit_page_ranks_highest() -> None:
     assert _score_link_for_llm(commit_link) > _score_link_for_llm(advisory_link)
 
 
+def test_score_link_pull_request_page_ranks_above_repository_page() -> None:
+    pull_request_link = PageLink(
+        url="https://github.com/acme/widget/pull/42",
+        text="上游修复 PR",
+        context="proposed fix pull request",
+        is_cross_domain=True,
+        estimated_target_role="pull_request_page",
+    )
+    repository_link = PageLink(
+        url="https://github.com/acme/widget",
+        text="仓库首页",
+        context="source repository",
+        is_cross_domain=True,
+        estimated_target_role="repository_page",
+    )
+
+    assert _score_link_for_llm(pull_request_link) > _score_link_for_llm(repository_link)
+
+
+def test_score_link_merge_request_page_ranks_above_repository_page() -> None:
+    merge_request_link = PageLink(
+        url="https://gitlab.example.org/acme/widget/-/merge_requests/88",
+        text="上游修复 MR",
+        context="proposed fix merge request",
+        is_cross_domain=True,
+        estimated_target_role="merge_request_page",
+    )
+    repository_link = PageLink(
+        url="https://gitlab.example.org/acme/widget",
+        text="仓库首页",
+        context="source repository",
+        is_cross_domain=True,
+        estimated_target_role="repository_page",
+    )
+
+    assert _score_link_for_llm(merge_request_link) > _score_link_for_llm(repository_link)
+
+
 def test_score_link_url_keyword_bonus() -> None:
     keyword_link = PageLink(
         url="https://code.example.org/project/commit/abc1234def5678",

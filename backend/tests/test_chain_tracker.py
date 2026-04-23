@@ -14,7 +14,13 @@ def test_chain_tracker_creates_advisory_chain_with_expected_next_roles() -> None
     assert chain.chain_type == "advisory_to_patch"
     assert chain.status == "in_progress"
     assert chain.steps[0].url == "https://nvd.nist.gov/vuln/detail/CVE-2022-2509"
-    assert chain.expected_next_roles == ["tracker_page", "commit_page", "download_page"]
+    assert chain.expected_next_roles == [
+        "tracker_page",
+        "commit_page",
+        "pull_request_page",
+        "merge_request_page",
+        "download_page",
+    ]
 
 
 def test_chain_tracker_extend_updates_expected_next_roles() -> None:
@@ -35,7 +41,12 @@ def test_chain_tracker_extend_updates_expected_next_roles() -> None:
     extended = tracker.get_all_chains()[0]
     assert len(extended.steps) == 2
     assert extended.steps[-1].page_role == "tracker_page"
-    assert extended.expected_next_roles == ["commit_page", "download_page"]
+    assert extended.expected_next_roles == [
+        "commit_page",
+        "pull_request_page",
+        "merge_request_page",
+        "download_page",
+    ]
 
 
 def test_chain_tracker_complete_and_dead_end_update_status() -> None:
@@ -97,7 +108,12 @@ def test_chain_tracker_round_trip_serialization_preserves_chain_state() -> None:
     restored_chain = restored.get_all_chains()[0]
     assert restored_chain.chain_id == chain.chain_id
     assert restored_chain.steps[1].url == "https://security-tracker.debian.org/tracker/CVE-2022-2509"
-    assert restored_chain.expected_next_roles == ["commit_page", "download_page"]
+    assert restored_chain.expected_next_roles == [
+        "commit_page",
+        "pull_request_page",
+        "merge_request_page",
+        "download_page",
+    ]
 
 
 def test_chain_tracker_create_chain_rejects_when_max_chains_exceeded() -> None:

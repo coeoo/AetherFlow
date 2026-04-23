@@ -145,7 +145,9 @@ def test_classify_page_role_returns_expected_role() -> None:
     assert classify_page_role("https://nvd.nist.gov/vuln/detail/CVE-2022-2509") == "advisory_page"
     assert classify_page_role("https://github.com/advisories/GHSA-abcd-1234") == "advisory_page"
     assert classify_page_role("https://github.com/user/repo/commit/abc123") == "commit_page"
-    assert classify_page_role("https://gitlab.com/org/proj/-/merge_requests/42") == "commit_page"
+    assert classify_page_role("https://github.com/user/repo/pull/42") == "pull_request_page"
+    assert classify_page_role("https://gitlab.com/org/proj/-/merge_requests/42") == "merge_request_page"
+    assert classify_page_role("https://github.com/user/repo") == "repository_page"
     assert classify_page_role("https://example.com/file.patch") == "download_page"
     assert (
         classify_page_role("https://www.openwall.com/lists/oss-security/2022/08/01/1")

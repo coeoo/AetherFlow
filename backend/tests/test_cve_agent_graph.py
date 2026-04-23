@@ -1739,10 +1739,11 @@ def test_extract_links_and_candidates_node_filters_mailing_list_noise_before_fro
     db_session.commit()
 
     frontier_urls = [item["url"] for item in result["frontier"]]
-    assert frontier_urls == ["https://security-tracker.debian.org/tracker/CVE-2022-2509"]
-    assert [candidate["candidate_url"] for candidate in result["direct_candidates"]] == [
-        "https://salsa.debian.org/gnutls-team/gnutls/-/commit/abcdef1234567890.patch"
+    assert frontier_urls == [
+        "https://security-tracker.debian.org/tracker/CVE-2022-2509",
+        "https://salsa.debian.org/gnutls-team/gnutls/-/commit/abcdef1234567890",
     ]
+    assert result["direct_candidates"] == []
 
 
 def test_extract_links_and_candidates_node_prioritizes_tracker_link_over_mailing_list_metadata_noise(
@@ -1995,6 +1996,170 @@ def test_select_fallback_frontier_urls_prefers_high_value_cross_domain_over_nvd_
     assert selected_urls == ["https://security-tracker.debian.org/tracker/gnutls28"]
 
 
+def test_build_rule_fallback_decision_prefers_pull_request_target_role_for_mailing_list_chain() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2024-3094")
+    state["current_page_url"] = "https://www.openwall.com/lists/oss-security/2024/03/29/4"
+    state["navigation_chains"] = [
+        {
+            "chain_id": "chain-1",
+            "chain_type": "mailing_list_to_fix",
+            "status": "in_progress",
+            "steps": [],
+            "expected_next_roles": ["pull_request_page", "commit_page", "download_page"],
+        }
+    ]
+    state["frontier"] = [
+        {
+            "url": "https://github.com/acme/project",
+            "depth": 1,
+            "score": 80,
+            "expanded": False,
+            "page_role": "repository_page",
+            "anchor_text": "repository",
+            "link_context": "source code repository",
+            "chain_id": "chain-1",
+        },
+        {
+            "url": "https://github.com/acme/project/pull/42",
+            "depth": 1,
+            "score": 40,
+            "expanded": False,
+            "page_role": "pull_request_page",
+            "anchor_text": "fix proposal",
+            "link_context": "upstream security fix pull request",
+            "chain_id": "chain-1",
+        },
+    ]
+
+    decision = _build_rule_fallback_decision(state)
+
+    assert decision["action"] == "expand_frontier"
+    assert decision["selected_urls"] == ["https://github.com/acme/project/pull/42"]
+
+
+def test_build_rule_fallback_decision_prefers_merge_request_target_role_for_bugtracker_chain() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2024-0001")
+    state["current_page_url"] = "https://bugzilla.example.org/show_bug.cgi?id=42"
+    state["navigation_chains"] = [
+        {
+            "chain_id": "chain-1",
+            "chain_type": "advisory_to_patch",
+            "status": "in_progress",
+            "steps": [],
+            "expected_next_roles": ["merge_request_page", "download_page"],
+        }
+    ]
+    state["frontier"] = [
+        {
+            "url": "https://gitlab.example.org/group/project/-/merge_requests/88",
+            "depth": 1,
+            "score": 35,
+            "expanded": False,
+            "page_role": "merge_request_page",
+            "anchor_text": "merge request 88",
+            "link_context": "candidate upstream fix",
+            "chain_id": "chain-1",
+        },
+        {
+            "url": "https://bugzilla.example.org/page.cgi?id=fields.html",
+            "depth": 1,
+            "score": 60,
+            "expanded": False,
+            "page_role": "bugtracker_page",
+            "anchor_text": "fields help",
+            "link_context": "site help",
+            "chain_id": "chain-1",
+        },
+    ]
+
+    decision = _build_rule_fallback_decision(state)
+
+    assert decision["action"] == "expand_frontier"
+    assert decision["selected_urls"] == ["https://gitlab.example.org/group/project/-/merge_requests/88"]
+
+
+def test_build_rule_fallback_decision_prefers_commit_target_role_for_repository_chain() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2022-2509")
+    state["current_page_url"] = "https://github.com/acme/project"
+    state["navigation_chains"] = [
+        {
+            "chain_id": "chain-1",
+            "chain_type": "advisory_to_patch",
+            "status": "in_progress",
+            "steps": [],
+            "expected_next_roles": ["commit_page", "pull_request_page", "merge_request_page"],
+        }
+    ]
+    state["frontier"] = [
+        {
+            "url": "https://github.com/acme/project/security",
+            "depth": 1,
+            "score": 90,
+            "expanded": False,
+            "page_role": "advisory_page",
+            "anchor_text": "security",
+            "link_context": "repository security tab",
+            "chain_id": "chain-1",
+        },
+        {
+            "url": "https://github.com/acme/project/commit/abcdef1234567890",
+            "depth": 1,
+            "score": 45,
+            "expanded": False,
+            "page_role": "commit_page",
+            "anchor_text": "fix commit",
+            "link_context": "upstream vulnerability fix",
+            "chain_id": "chain-1",
+        },
+    ]
+
+    decision = _build_rule_fallback_decision(state)
+
+    assert decision["action"] == "expand_frontier"
+    assert decision["selected_urls"] == ["https://github.com/acme/project/commit/abcdef1234567890"]
+
+
+def test_build_rule_fallback_decision_keeps_expected_role_order_ahead_of_score() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2024-3094")
+    state["current_page_url"] = "https://www.openwall.com/lists/oss-security/2024/03/29/4"
+    state["navigation_chains"] = [
+        {
+            "chain_id": "chain-1",
+            "chain_type": "mailing_list_to_fix",
+            "status": "in_progress",
+            "steps": [],
+            "expected_next_roles": ["commit_page", "pull_request_page", "download_page"],
+        }
+    ]
+    state["frontier"] = [
+        {
+            "url": "https://github.com/acme/project/pull/42",
+            "depth": 1,
+            "score": 200,
+            "expanded": False,
+            "page_role": "pull_request_page",
+            "anchor_text": "pull request fix",
+            "link_context": "candidate fix",
+            "chain_id": "chain-1",
+        },
+        {
+            "url": "https://github.com/acme/project/commit/abcdef1234567890",
+            "depth": 1,
+            "score": 10,
+            "expanded": False,
+            "page_role": "commit_page",
+            "anchor_text": "commit fix",
+            "link_context": "direct upstream fix commit",
+            "chain_id": "chain-1",
+        },
+    ]
+
+    decision = _build_rule_fallback_decision(state)
+
+    assert decision["action"] == "expand_frontier"
+    assert decision["selected_urls"] == ["https://github.com/acme/project/commit/abcdef1234567890"]
+
+
 def test_extract_links_and_candidates_node_deduplicates_frontier_links_across_multiple_pages(
     seeded_cve_run, db_session, monkeypatch
 ) -> None:
@@ -2179,6 +2344,214 @@ def test_extract_links_and_candidates_node_appends_frontier_edge_and_candidate(
         select(CVECandidateArtifact).where(CVECandidateArtifact.run_id == seeded_cve_run.run_id)
     ).scalar_one()
     assert candidate.candidate_url == "https://example.com/fix.patch"
+
+
+def test_extract_links_and_candidates_node_derives_github_pull_patch_from_challenge_page(
+    seeded_cve_run, db_session, monkeypatch
+) -> None:
+    root_url = "https://github.com/acme/project/pull/42"
+    root_node = CVESearchNode(
+        run_id=seeded_cve_run.run_id,
+        url=root_url,
+        depth=0,
+        host="github.com",
+        page_role="pull_request_page",
+        fetch_status="fetched",
+    )
+    db_session.add(root_node)
+    db_session.flush()
+
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["page_nodes"] = [
+        {
+            "node_id": str(root_node.node_id),
+            "url": root_node.url,
+            "depth": root_node.depth,
+            "host": root_node.host,
+            "fetch_status": root_node.fetch_status,
+            "page_role": root_node.page_role,
+        }
+    ]
+    state["page_observations"] = {
+        root_url: {
+            "source_node_id": str(root_node.node_id),
+            "url": root_url,
+            "depth": 0,
+            "fetch_status": "fetched",
+            "content": "<html></html>",
+            "content_type": "text/html",
+            "extracted_links": [],
+            "frontier_candidates": [],
+            "candidates": [],
+            "extracted": False,
+        }
+    }
+    state["browser_snapshots"] = {
+        root_url: asdict(
+            BrowserPageSnapshot(
+                url=root_url,
+                final_url=root_url,
+                status_code=200,
+                title="Just a moment...",
+                raw_html="<html><body><h1>Just a moment...</h1><p>Checking your browser before accessing</p></body></html>",
+                accessibility_tree='heading "Just a moment..."',
+                markdown_content="# Just a moment...\nChecking your browser before accessing",
+                links=[],
+                page_role_hint="pull_request_page",
+                fetch_duration_ms=100,
+            )
+        )
+    }
+    monkeypatch.setattr("app.cve.agent_nodes.analyze_page", lambda snapshot: [])
+
+    result = extract_links_and_candidates_node(state)
+    db_session.commit()
+
+    assert [candidate["candidate_url"] for candidate in result["direct_candidates"]] == [
+        "https://github.com/acme/project/pull/42.patch"
+    ]
+
+
+def test_extract_links_and_candidates_node_derives_gitlab_merge_request_patch_from_challenge_page(
+    seeded_cve_run, db_session, monkeypatch
+) -> None:
+    root_url = "https://gitlab.example.org/group/project/-/merge_requests/88"
+    root_node = CVESearchNode(
+        run_id=seeded_cve_run.run_id,
+        url=root_url,
+        depth=0,
+        host="gitlab.example.org",
+        page_role="merge_request_page",
+        fetch_status="fetched",
+    )
+    db_session.add(root_node)
+    db_session.flush()
+
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["page_nodes"] = [
+        {
+            "node_id": str(root_node.node_id),
+            "url": root_node.url,
+            "depth": root_node.depth,
+            "host": root_node.host,
+            "fetch_status": root_node.fetch_status,
+            "page_role": root_node.page_role,
+        }
+    ]
+    state["page_observations"] = {
+        root_url: {
+            "source_node_id": str(root_node.node_id),
+            "url": root_url,
+            "depth": 0,
+            "fetch_status": "fetched",
+            "content": "<html></html>",
+            "content_type": "text/html",
+            "extracted_links": [],
+            "frontier_candidates": [],
+            "candidates": [],
+            "extracted": False,
+        }
+    }
+    state["browser_snapshots"] = {
+        root_url: asdict(
+            BrowserPageSnapshot(
+                url=root_url,
+                final_url=root_url,
+                status_code=200,
+                title="Just a moment...",
+                raw_html="<html><body><h1>Just a moment...</h1><p>Checking your browser before accessing</p></body></html>",
+                accessibility_tree='heading "Just a moment..."',
+                markdown_content="# Just a moment...\nChecking your browser before accessing",
+                links=[],
+                page_role_hint="merge_request_page",
+                fetch_duration_ms=100,
+            )
+        )
+    }
+    monkeypatch.setattr("app.cve.agent_nodes.analyze_page", lambda snapshot: [])
+
+    result = extract_links_and_candidates_node(state)
+    db_session.commit()
+
+    assert [candidate["candidate_url"] for candidate in result["direct_candidates"]] == [
+        "https://gitlab.example.org/group/project/-/merge_requests/88.patch"
+    ]
+
+
+def test_extract_links_and_candidates_node_does_not_derive_patch_from_repository_challenge_page(
+    seeded_cve_run, db_session, monkeypatch
+) -> None:
+    root_url = "https://github.com/acme/project"
+    root_node = CVESearchNode(
+        run_id=seeded_cve_run.run_id,
+        url=root_url,
+        depth=0,
+        host="github.com",
+        page_role="repository_page",
+        fetch_status="fetched",
+    )
+    db_session.add(root_node)
+    db_session.flush()
+
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["page_nodes"] = [
+        {
+            "node_id": str(root_node.node_id),
+            "url": root_node.url,
+            "depth": root_node.depth,
+            "host": root_node.host,
+            "fetch_status": root_node.fetch_status,
+            "page_role": root_node.page_role,
+        }
+    ]
+    state["page_observations"] = {
+        root_url: {
+            "source_node_id": str(root_node.node_id),
+            "url": root_url,
+            "depth": 0,
+            "fetch_status": "fetched",
+            "content": "<html></html>",
+            "content_type": "text/html",
+            "extracted_links": [],
+            "frontier_candidates": [],
+            "candidates": [],
+            "extracted": False,
+        }
+    }
+    state["browser_snapshots"] = {
+        root_url: asdict(
+            BrowserPageSnapshot(
+                url=root_url,
+                final_url=root_url,
+                status_code=200,
+                title="Just a moment...",
+                raw_html="<html><body><h1>Just a moment...</h1><p>Checking your browser before accessing</p></body></html>",
+                accessibility_tree='heading "Just a moment..."',
+                markdown_content="# Just a moment...\nChecking your browser before accessing",
+                links=[],
+                page_role_hint="repository_page",
+                fetch_duration_ms=100,
+            )
+        )
+    }
+    monkeypatch.setattr("app.cve.agent_nodes.analyze_page", lambda snapshot: [])
+
+    result = extract_links_and_candidates_node(state)
+    db_session.commit()
+
+    assert result["direct_candidates"] == []
 
 
 def test_download_and_finalize_node_updates_run_summary(

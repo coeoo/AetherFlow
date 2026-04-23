@@ -19,12 +19,13 @@ def classify_page_role(url: str) -> str:
     if path.endswith(_DOWNLOAD_SUFFIXES) or any(suffix in query for suffix in _DOWNLOAD_SUFFIXES):
         return "download_page"
 
-    if (
-        "/commit/" in path
-        or "/pull/" in path
-        or "/merge_requests/" in path
-        or path.endswith("/commit")
-    ):
+    if "/pull/" in path:
+        return "pull_request_page"
+
+    if "/merge_requests/" in path:
+        return "merge_request_page"
+
+    if "/commit/" in path or path.endswith("/commit"):
         return "commit_page"
 
     if (

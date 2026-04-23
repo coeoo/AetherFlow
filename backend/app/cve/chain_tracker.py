@@ -8,17 +8,44 @@ from uuid import uuid4
 
 CHAIN_TYPE_EXPECTATIONS = {
     "advisory_to_patch": {
-        "advisory_page": ["tracker_page", "commit_page", "download_page"],
-        "tracker_page": ["commit_page", "download_page"],
+        "advisory_page": [
+            "tracker_page",
+            "commit_page",
+            "pull_request_page",
+            "merge_request_page",
+            "download_page",
+        ],
+        "tracker_page": [
+            "commit_page",
+            "pull_request_page",
+            "merge_request_page",
+            "download_page",
+        ],
         "commit_page": ["download_page"],
+        "pull_request_page": ["download_page"],
+        "merge_request_page": ["download_page"],
     },
     "tracker_to_commit": {
-        "tracker_page": ["commit_page", "download_page"],
+        "tracker_page": [
+            "commit_page",
+            "pull_request_page",
+            "merge_request_page",
+            "download_page",
+        ],
         "commit_page": ["download_page"],
+        "pull_request_page": ["download_page"],
+        "merge_request_page": ["download_page"],
     },
     "mailing_list_to_fix": {
-        "mailing_list_page": ["commit_page", "download_page"],
+        "mailing_list_page": [
+            "commit_page",
+            "pull_request_page",
+            "merge_request_page",
+            "download_page",
+        ],
         "commit_page": ["download_page"],
+        "pull_request_page": ["download_page"],
+        "merge_request_page": ["download_page"],
     },
 }
 DEFAULT_MAX_CHAINS = 5
