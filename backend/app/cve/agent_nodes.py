@@ -1812,7 +1812,23 @@ def download_and_validate_node(state: AgentState) -> AgentState:
     patches: list[dict[str, object]] = []
     downloaded_count = 0
     attempted_count = 0
-    for candidate in persisted_candidates:
+    terminal_downloaded_count = sum(
+        1 for candidate in persisted_candidates if candidate.download_status == "downloaded"
+    )
+    pending_candidates = [
+        candidate
+        for candidate in persisted_candidates
+        if candidate.download_status not in {"downloaded", "failed"}
+    ]
+    if not pending_candidates:
+        state["patches"] = []
+        state["next_action"] = "finalize_run"
+        state["stop_reason"] = (
+            "patches_downloaded" if terminal_downloaded_count > 0 else "patch_download_failed"
+        )
+        session.flush()
+        return state
+    for candidate in pending_candidates:
         if attempted_count >= download_attempt_limit:
             break
         evidence = dict(candidate.evidence_json or {})

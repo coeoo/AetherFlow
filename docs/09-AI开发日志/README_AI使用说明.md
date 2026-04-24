@@ -43,6 +43,17 @@
 
 ---
 
+## 🧩 CVE Patch Agent 接手要点
+
+- 页面获取主链是 `Playwright + LangGraph + LLM 导航决策`，不是 httpx 页面抓取。
+- `httpx` 只保留给 seed API 和 patch 文件下载。
+- GitHub commit 下载当前已具备 `.patch` / `.diff` / API fallback 多策略。
+- 如需避免 GitHub 匿名 API 限流，应配置可选环境变量 `GITHUB_TOKEN`。
+- 下载失败需要优先看 `patch_meta_json.error_kind` 和 `source_fetch_records.response_meta_json.attempts`。
+- `downloaded` / `failed` 是候选下载终态，图节点不应重复下载终态候选。
+
+---
+
 ## 📋 AI 会话结束前检查项
 
 - [ ] 相关功能设计文档已更新
@@ -102,9 +113,13 @@ YYYY-MM-DD_SessionNNN_任务名.md
 - 增加历史冻结说明，明确 AI 开发日志中的旧 spec / plan 引用仅用于追溯
 - 避免把阶段性 CVE / Patch Agent 过程资产误读为当前主规范入口
 
+### v1.6 - 2026-04-24
+- 补充 CVE Patch Agent 补丁下载稳定化接手要点
+- 明确 GitHub 多策略下载、`GITHUB_TOKEN`、内部重试、错误分类和终态候选跳过是当前主链事实
+
 ---
 
-**文档版本**：v1.5
+**文档版本**：v1.6
 **创建日期**：2026-04-09
-**最后更新**：2026-04-23
+**最后更新**：2026-04-24
 **维护人**：AI + 开发团队

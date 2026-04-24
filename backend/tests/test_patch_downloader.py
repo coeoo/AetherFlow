@@ -20,7 +20,7 @@ def test_download_patch_candidate_rejects_html_commit_page(
             request=request,
         )
 
-    monkeypatch.setattr("app.cve.patch_downloader.httpx.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.patch_downloader.http_client.get", _fake_http_get)
 
     patch = download_patch_candidate(
         db_session,
@@ -76,7 +76,7 @@ def test_download_patch_candidate_converts_github_commit_url_and_persists_artifa
             request=request,
         )
 
-    monkeypatch.setattr("app.cve.patch_downloader.httpx.get", _fake_http_get)
+    monkeypatch.setattr("app.cve.patch_downloader.http_client.get", _fake_http_get)
 
     patch = download_patch_candidate(
         db_session,
@@ -114,3 +114,77 @@ def test_download_patch_candidate_converts_github_commit_url_and_persists_artifa
     assert record.request_snapshot_json["patch_type"] == "patch"
     assert record.response_meta_json["status_code"] == 200
     assert record.response_meta_json["content_type"] == "text/x-patch"
+
+
+def test_download_patch_candidate_retries_timeout_and_records_attempts(
+    db_session, monkeypatch, tmp_path
+) -> None:
+    run = create_cve_run(db_session, cve_id="CVE-2026-31952")
+    db_session.commit()
+    monkeypatch.setenv("AETHERFLOW_ARTIFACT_ROOT", str(tmp_path))
+    monkeypatch.setattr("app.cve.patch_downloader._RETRY_DELAYS_SECONDS", (0, 0))
+    requested_urls: list[str] = []
+    patch_text = "diff --git a/a.txt b/a.txt\n+hello\n"
+
+    def _fake_http_get(url: str, **kwargs) -> httpx.Response:
+        requested_urls.append(url)
+        if len(requested_urls) < 3:
+            raise httpx.ReadTimeout("timed out")
+        request = httpx.Request("GET", url)
+        return httpx.Response(
+            200,
+            text=patch_text,
+            headers={"content-type": "text/plain; charset=utf-8"},
+            request=request,
+        )
+
+    monkeypatch.setattr("app.cve.patch_downloader.http_client.get", _fake_http_get)
+
+    patch = download_patch_candidate(
+        db_session,
+        run=run,
+        candidate={
+            "candidate_url": "https://github.com/example/repo/commit/abc123",
+            "patch_type": "patch",
+        },
+    )
+    db_session.commit()
+
+    assert requested_urls == ["https://github.com/example/repo/commit/abc123.patch"] * 3
+    assert patch.download_status == "downloaded"
+    assert patch.patch_meta_json["attempts"][0]["error_kind"] == "timeout"
+    assert patch.patch_meta_json["attempts"][1]["error_kind"] == "timeout"
+    assert patch.patch_meta_json["attempts"][2]["status"] == "succeeded"
+
+
+def test_download_patch_candidate_classifies_github_rate_limit(
+    db_session, monkeypatch
+) -> None:
+    run = create_cve_run(db_session, cve_id="CVE-2026-33317")
+    db_session.commit()
+    monkeypatch.setattr("app.cve.patch_downloader._RETRY_DELAYS_SECONDS", (0, 0))
+
+    def _fake_http_get(url: str, **kwargs) -> httpx.Response:
+        request = httpx.Request("GET", url)
+        return httpx.Response(
+            403,
+            text='{"message":"API rate limit exceeded"}',
+            headers={"content-type": "application/json; charset=utf-8"},
+            request=request,
+        )
+
+    monkeypatch.setattr("app.cve.patch_downloader.http_client.get", _fake_http_get)
+
+    patch = download_patch_candidate(
+        db_session,
+        run=run,
+        candidate={
+            "candidate_url": "https://github.com/example/repo/commit/abc123",
+            "patch_type": "patch",
+        },
+    )
+    db_session.commit()
+
+    assert patch.download_status == "failed"
+    assert patch.patch_meta_json["error_kind"] == "rate_limited"
+    assert patch.patch_meta_json["attempts"][0]["status_code"] == 403

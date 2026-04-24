@@ -11,6 +11,7 @@
 **优先级**：P0  
 **负责人**：AI + 开发团队  
 **状态**：当前主链、真实 acceptance baseline 与 regression gate 已落地  
+**补丁下载补强**：已完成 GitHub 多策略下载、`GITHUB_TOKEN` fallback、内部退避重试、错误分类与终态候选跳过。  
 **历史重设计规格参考**：[2026-04-21-cve-browser-agent-design.md](/opt/projects/demo/aetherflow/docs/superpowers/specs/2026-04-21-cve-browser-agent-design.md)
 
 ---
@@ -124,6 +125,17 @@ flowchart TD
 6. **download_and_validate**：下载候选 patch 并校验内容。**如果仍有活跃链路且预算未尽，路由回 fetch_next_batch 继续探索**
 7. **finalize_run**：收敛结果，生成 summary_json（含链路摘要）
 
+### 补丁下载稳定化要点
+
+当前补丁下载链路已经补齐以下稳定性措施：
+
+- GitHub commit 候选按多策略顺序尝试：优先 `.patch`，再 `.diff`
+- 有 `GITHUB_TOKEN` 时再启用 GitHub API patch / diff fallback，降低匿名 API 限流影响
+- 下载函数内部增加退避重试，专门覆盖短时超时和网络抖动
+- 下载失败按 `timeout / rate_limited / not_found / http_error / invalid_content / network_error` 分类
+- `downloaded` / `failed` 终态候选在图节点层直接跳过，避免重复下载和重复写证据
+- 候选全部终态时，`download_and_validate` 直接收敛，不再空转图循环
+
 ---
 
 ## 📊 功能清单
@@ -145,6 +157,7 @@ flowchart TD
 | 链路感知停止 | 基于链路状态的停止评估（替代简单的“无 frontier 则停”） | P0 | 已落地 |
 | 单路径运行时 | runtime.py 保持单主路径，移除 fast-first 与 httpx 页面主链 | P0 | 已落地 |
 | 搜索图落库 | 持久化搜索节点、边、决策和候选收敛（复用现有表） | P0 | 已落地 |
+| 补丁下载稳定化 | GitHub 多策略下载、token fallback、退避重试、错误分类、终态候选跳过 | P0 | 已落地 |
 | acceptance baseline / gate | compare、baseline 与 regression gate 形成稳定回归约束 | P0 | 已落地 |
 | 详情页图回放 | 展示链路追踪、frontier、budget、决策记录 | P1 | 已接入详情页语义，持续随详情能力演进 |
 
@@ -199,6 +212,16 @@ CVE ID -> seed 解析 -> 浏览器 Agent 搜索图 -> patch 结果
   `resolve_seeds -> build_initial_frontier -> fetch_next_batch -> extract_links_and_candidates -> agent_decide -> download_and_validate/finalize_run`
 - `download_and_validate` 在存在活跃链路且预算未耗尽时，可以返回 `fetch_next_batch` 继续探索。
 - 不存在并行主链、fast-first 规则执行器、httpx 页面抓取主路径或 feature flag 主链切换。
+
+### 补丁下载实现约束
+
+`backend/app/cve/patch_downloader.py` 当前承担补丁下载与校验，长期约束如下：
+
+- 只负责候选补丁文件下载，不承担页面主抓取职责
+- 对 GitHub commit 候选优先尝试直连 `.patch` / `.diff`
+- 有 `GITHUB_TOKEN` 时才启用 GitHub API patch / diff fallback
+- 通过浏览器风格请求头、内部重试和错误分类增强稳定性
+- 下载失败原因会写入 `patch_meta_json` 与 `source_fetch_records`，用于审计与排障
 
 ### 主运行时与节点职责
 
