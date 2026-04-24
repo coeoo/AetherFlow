@@ -58,6 +58,57 @@ def _diagnostic_mode_enabled() -> bool:
     return str(os.getenv(_DIAGNOSTIC_MODE_ENV, "")).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _diagnostic_state_summary(state: dict[str, object]) -> dict[str, object]:
+    return {
+        "next_action": state.get("next_action"),
+        "stop_reason": state.get("stop_reason"),
+        "frontier_count": len(list(state.get("frontier") or [])),
+        "direct_candidate_count": len(list(state.get("direct_candidates") or [])),
+        "selected_candidate_keys_count": len(list(state.get("selected_candidate_keys") or [])),
+    }
+
+
+def _run_diagnostic_node(
+    *,
+    session: Session,
+    run: CVERun,
+    state: dict[str, object],
+    node_name: str,
+    node_func,
+    round_index: int | None = None,
+) -> dict[str, object]:
+    label = f"诊断第 {round_index} 轮节点 {node_name}" if round_index is not None else f"诊断节点 {node_name}"
+    started_at = monotonic()
+    _logger.info(
+        "[CVE:%s] 进入%s, context=%s",
+        run.cve_id,
+        label,
+        _diagnostic_state_summary(state),
+    )
+    try:
+        next_state = node_func(state)
+        session.flush()
+        session.commit()
+    except Exception:
+        _logger.exception(
+            "[CVE:%s] %s 失败, elapsed=%.2fs, context=%s",
+            run.cve_id,
+            label,
+            monotonic() - started_at,
+            _diagnostic_state_summary(state),
+        )
+        raise
+    _logger.info(
+        "[CVE:%s] %s 完成, elapsed=%.2fs, phase=%s, context=%s",
+        run.cve_id,
+        label,
+        monotonic() - started_at,
+        run.phase,
+        _diagnostic_state_summary(next_state),
+    )
+    return next_state
+
+
 def _execute_diagnostic_run(
     *,
     session: Session,
@@ -80,17 +131,12 @@ def _execute_diagnostic_run(
     ]
 
     for node_name, node_func in setup_sequence:
-        _logger.info("[CVE:%s] 进入诊断节点 %s", run.cve_id, node_name)
-        current_state = node_func(current_state)
-        session.flush()
-        session.commit()
-        _logger.info(
-            "[CVE:%s] 诊断节点 %s 完成, phase=%s stop_reason=%s next_action=%s",
-            run.cve_id,
-            node_name,
-            run.phase,
-            current_state.get("stop_reason"),
-            current_state.get("next_action"),
+        current_state = _run_diagnostic_node(
+            session=session,
+            run=run,
+            state=current_state,
+            node_name=node_name,
+            node_func=node_func,
         )
         if current_state.get("stop_reason"):
             break
@@ -114,33 +160,24 @@ def _execute_diagnostic_run(
                 ("extract_links_and_candidates", extract_links_and_candidates_node),
                 ("agent_decide", agent_decide_node),
             ]:
-                _logger.info("[CVE:%s] 进入诊断第 %d 轮节点 %s", run.cve_id, round_index, node_name)
-                current_state = node_func(current_state)
-                session.flush()
-                session.commit()
-                _logger.info(
-                    "[CVE:%s] 诊断第 %d 轮节点 %s 完成, phase=%s stop_reason=%s next_action=%s",
-                    run.cve_id,
-                    round_index,
-                    node_name,
-                    run.phase,
-                    current_state.get("stop_reason"),
-                    current_state.get("next_action"),
+                current_state = _run_diagnostic_node(
+                    session=session,
+                    run=run,
+                    state=current_state,
+                    node_name=node_name,
+                    node_func=node_func,
+                    round_index=round_index,
                 )
 
             next_action = str(current_state.get("next_action") or "")
             if next_action == "try_candidate_download":
-                _logger.info("[CVE:%s] 进入诊断第 %d 轮节点 download_and_validate", run.cve_id, round_index)
-                current_state = download_and_validate_node(current_state)
-                session.flush()
-                session.commit()
-                _logger.info(
-                    "[CVE:%s] 诊断第 %d 轮节点 download_and_validate 完成, phase=%s stop_reason=%s next_action=%s",
-                    run.cve_id,
-                    round_index,
-                    run.phase,
-                    current_state.get("stop_reason"),
-                    current_state.get("next_action"),
+                current_state = _run_diagnostic_node(
+                    session=session,
+                    run=run,
+                    state=current_state,
+                    node_name="download_and_validate",
+                    node_func=download_and_validate_node,
+                    round_index=round_index,
                 )
                 next_action = str(current_state.get("next_action") or "")
 
@@ -149,15 +186,12 @@ def _execute_diagnostic_run(
             if next_action not in {"expand_frontier", "fetch_next_batch"}:
                 break
 
-    _logger.info("[CVE:%s] 进入诊断节点 finalize_run", run.cve_id)
-    current_state = finalize_run_node(current_state)
-    session.flush()
-    session.commit()
-    _logger.info(
-        "[CVE:%s] 诊断节点 finalize_run 完成, phase=%s stop_reason=%s",
-        run.cve_id,
-        run.phase,
-        current_state.get("stop_reason"),
+    current_state = _run_diagnostic_node(
+        session=session,
+        run=run,
+        state=current_state,
+        node_name="finalize_run",
+        node_func=finalize_run_node,
     )
     return current_state
 

@@ -95,6 +95,7 @@ _STAGE_FALLBACK_TARGET_ROLES_BY_SOURCE = {
         "pull_request_page",
         "merge_request_page",
         "download_page",
+        "mailing_list_page",
     ],
     "mailing_list_page": [
         "commit_page",
@@ -814,6 +815,16 @@ def _select_fallback_frontier_urls(
     current_page_url = str(state.get("current_page_url") or "").strip()
     current_host = urlparse(current_page_url).hostname or current_page_url
     current_page_role = classify_page_role(current_page_url) if current_page_url else ""
+    snapshots = dict(state.get("browser_snapshots") or {})
+    current_snapshot = dict(snapshots.get(current_page_url) or {})
+    if current_snapshot:
+        current_page_role = str(current_snapshot.get("page_role_hint") or current_page_role)
+    stage_role_order = {
+        role: index
+        for index, role in enumerate(
+            _STAGE_FALLBACK_TARGET_ROLES_BY_SOURCE.get(current_page_role, [])
+        )
+    }
     visited_urls = {str(url) for url in state.get("visited_urls", [])}
     max_children = int(state["budget"].get("max_children_per_node", 1) or 1)
     remaining_cross_domain_budget = int(
@@ -845,10 +856,17 @@ def _select_fallback_frontier_urls(
         if current_host and item_host == current_host:
             same_domain_urls.append((item_role_rank, -item_score, -item_text_score, url))
         else:
+            if item_role_rank == 999 and item.get("page_role") in stage_role_order:
+                item_role_rank = stage_role_order[str(item.get("page_role"))]
             cross_domain_urls.append((item_role_rank, -item_score, -item_text_score, url))
 
     same_domain_urls.sort()
     cross_domain_urls.sort()
+    if remaining_cross_domain_budget > 0 and cross_domain_urls:
+        best_cross_domain_rank = cross_domain_urls[0][0]
+        cross_domain_urls = [
+            item for item in cross_domain_urls if item[0] == best_cross_domain_rank
+        ]
     if cross_domain_urls and (
         not same_domain_urls or cross_domain_urls[0][:3] < same_domain_urls[0][:3]
     ):
@@ -866,7 +884,7 @@ def _select_fallback_frontier_urls(
                 for _, _, _, url in cross_domain_urls[
                     : min(remaining_slots, remaining_cross_domain_budget)
                 ]
-                if url not in selected_urls
+                if url not in selected_urls and not selected_urls
             ]
         )
     return selected_urls
@@ -1187,6 +1205,8 @@ def _build_budget_usage_summary(state: AgentState) -> dict[str, dict[str, int]]:
 
 
 def _is_blocked_or_empty_page(snapshot: BrowserPageSnapshot) -> bool:
+    if str(snapshot.final_url or snapshot.url).startswith("chrome-error://"):
+        return True
     normalized_markdown = " ".join(snapshot.markdown_content.lower().split())
     normalized_html = " ".join(snapshot.raw_html.lower().split())
     normalized_title = " ".join(snapshot.title.lower().split())

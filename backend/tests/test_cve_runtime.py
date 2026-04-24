@@ -294,7 +294,7 @@ def test_execute_cve_run_uses_diagnostic_runner_when_enabled(monkeypatch) -> Non
     assert captured["state"]["cve_id"] == "CVE-2022-2509"
 
 
-def test_execute_diagnostic_run_commits_progress_after_each_node(monkeypatch) -> None:
+def test_execute_diagnostic_run_commits_progress_after_each_node(monkeypatch, caplog) -> None:
     class _FakeRun:
         def __init__(self) -> None:
             self.run_id = uuid.uuid4()
@@ -325,14 +325,19 @@ def test_execute_diagnostic_run_commits_progress_after_each_node(monkeypatch) ->
 
     from app.cve.runtime import _execute_diagnostic_run
 
-    result = _execute_diagnostic_run(
-        session=_FakeSession(),
-        run=fake_run,
-        state={"cve_id": fake_run.cve_id},
-    )
+    with caplog.at_level(logging.INFO, logger="app.cve.runtime"):
+        result = _execute_diagnostic_run(
+            session=_FakeSession(),
+            run=fake_run,
+            state={"cve_id": fake_run.cve_id},
+        )
 
     assert result["stop_reason"] == "diagnostic_stop"
     assert lifecycle == ["flush", "commit", "flush", "commit"]
+    assert "进入诊断节点 resolve_seeds" in caplog.text
+    assert "诊断节点 resolve_seeds 完成" in caplog.text
+    assert "elapsed=" in caplog.text
+    assert "selected_candidate_keys_count" in caplog.text
 
 
 def test_execute_diagnostic_run_loops_until_frontier_expansion_stops(monkeypatch) -> None:
@@ -442,7 +447,7 @@ def test_execute_diagnostic_run_uses_configured_total_timeout(monkeypatch) -> No
         lambda state: {**state, "finalized": True},
     )
 
-    monotonic_values = iter([0.0, 2.0])
+    monotonic_values = iter([0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0, 2.0])
     monkeypatch.setattr("app.cve.runtime.monotonic", lambda: next(monotonic_values))
 
     from app.cve.runtime import _execute_diagnostic_run

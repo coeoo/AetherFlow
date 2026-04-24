@@ -47,9 +47,10 @@
 
 - 页面获取主链是 `Playwright + LangGraph + LLM 导航决策`，不是 httpx 页面抓取。
 - `httpx` 只保留给 seed API 和 patch 文件下载。
-- GitHub commit 下载当前已具备 `.patch` / `.diff` / API fallback 多策略。
-- 如需避免 GitHub 匿名 API 限流，应配置可选环境变量 `GITHUB_TOKEN`。
-- 下载失败需要优先看 `patch_meta_json.error_kind` 和 `source_fetch_records.response_meta_json.attempts`。
+- GitHub commit 下载当前已具备页面 `.patch` / `.diff` 与 GitHub API patch / diff 多策略。
+- kernel commit 下载主路径是从 `git.kernel.org` 提取 SHA 后优先走 GitHub API patch / diff，`git.kernel.org` 直连只作最后诊断兜底。
+- 如需降低 GitHub 匿名 API 限流和短时失败风险，应配置可选环境变量 `GITHUB_TOKEN`；token 不得写入代码、文档或日志。
+- 下载失败需要优先看 `patch_meta_json.error_kind` 和 `source_fetch_records.response_meta_json.attempts` 中的 `strategy / repository / media_type / error_kind`。
 - `downloaded` / `failed` 是候选下载终态，图节点不应重复下载终态候选。
 
 ---
@@ -117,9 +118,14 @@ YYYY-MM-DD_SessionNNN_任务名.md
 - 补充 CVE Patch Agent 补丁下载稳定化接手要点
 - 明确 GitHub 多策略下载、`GITHUB_TOKEN`、内部重试、错误分类和终态候选跳过是当前主链事实
 
+### v1.7 - 2026-04-24
+- 补充 kernel commit 下载主路径：`git.kernel.org` commit identity → GitHub API patch / diff
+- 明确 `GITHUB_TOKEN` 是可选稳定性增强，不是 API 下载前置条件
+- 明确排障优先查看 attempts 中的 `strategy / repository / media_type / error_kind`
+
 ---
 
-**文档版本**：v1.6
+**文档版本**：v1.7
 **创建日期**：2026-04-09
 **最后更新**：2026-04-24
 **维护人**：AI + 开发团队

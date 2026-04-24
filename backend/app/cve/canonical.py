@@ -16,7 +16,11 @@ def canonicalize_candidate_url(url: str) -> str:
         sorted(parse_qsl(parsed.query, keep_blank_values=True)),
         doseq=True,
     )
-    path = parsed.path or "/"
+    path = "/".join(segment for segment in (parsed.path or "/").split("/") if segment)
+    if parsed.path.startswith("/"):
+        path = f"/{path}"
+    if not path:
+        path = "/"
     if path != "/" and path.endswith("/"):
         path = path[:-1]
 

@@ -11,6 +11,7 @@ from app.cve.agent_nodes import (
     _build_frontier_candidate_records,
     _filter_candidate_matches_for_page,
     _filter_frontier_links,
+    _is_blocked_or_empty_page,
     _select_fallback_frontier_urls,
     agent_decide_node,
     build_initial_frontier_node,
@@ -92,6 +93,23 @@ def test_build_cve_patch_graph_exposes_finalize_node() -> None:
     graph = build_cve_patch_graph()
 
     assert "finalize_run" in graph.nodes
+
+
+def test_is_blocked_or_empty_page_detects_chrome_error_webdata() -> None:
+    snapshot = BrowserPageSnapshot(
+        url="https://security-tracker.debian.org/tracker/CVE-2024-3094",
+        final_url="chrome-error://chromewebdata/",
+        status_code=200,
+        title="security-tracker.debian.org",
+        raw_html="<html><body></body></html>",
+        accessibility_tree="",
+        markdown_content="",
+        links=[],
+        page_role_hint="tracker_page",
+        fetch_duration_ms=300,
+    )
+
+    assert _is_blocked_or_empty_page(snapshot) is True
 
 
 def test_patch_agent_graph_records_seed_candidates_frontier_and_decision(
@@ -809,6 +827,47 @@ def test_fetch_next_batch_node_leaves_current_page_empty_when_only_blocked_shell
             "score": 10,
             "expanded": False,
             "page_role": "advisory_page",
+        }
+    ]
+
+    result = fetch_next_batch_node(state)
+
+    assert result["current_page_url"] is None
+
+
+def test_fetch_next_batch_node_treats_chrome_error_page_as_blocked(
+    seeded_cve_run, db_session
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id="CVE-2024-3094",
+    )
+    state["session"] = db_session
+    state["budget"]["max_parallel_frontier"] = 1
+    tracker_url = "https://security-tracker.debian.org/tracker/CVE-2024-3094"
+    state["_browser_bridge"] = _FakeBridge(
+        {
+            tracker_url: BrowserPageSnapshot(
+                url=tracker_url,
+                final_url="chrome-error://chromewebdata/",
+                status_code=200,
+                title="security-tracker.debian.org",
+                raw_html="<html><body></body></html>",
+                accessibility_tree="",
+                markdown_content="",
+                links=[],
+                page_role_hint="tracker_page",
+                fetch_duration_ms=300,
+            )
+        }
+    )
+    state["frontier"] = [
+        {
+            "url": tracker_url,
+            "depth": 0,
+            "score": 20,
+            "expanded": False,
+            "page_role": "tracker_page",
         }
     ]
 
@@ -2072,6 +2131,98 @@ def test_select_fallback_frontier_urls_prefers_high_value_cross_domain_over_nvd_
     selected_urls = _select_fallback_frontier_urls(state, state["frontier"])
 
     assert selected_urls == ["https://security-tracker.debian.org/tracker/gnutls28"]
+
+
+def test_build_rule_fallback_decision_prefers_openwall_mailing_list_from_tracker_page() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2024-3094")
+    state["current_page_url"] = "https://security-tracker.debian.org/tracker/CVE-2024-3094"
+    state["browser_snapshots"] = {
+        state["current_page_url"]: asdict(
+            _make_snapshot(
+                state["current_page_url"],
+                page_role_hint="tracker_page",
+                title="CVE-2024-3094",
+            )
+        )
+    }
+    state["budget"]["max_children_per_node"] = 1
+    state["budget"]["max_cross_domain_expansions"] = 1
+    state["frontier"] = [
+        {
+            "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-3094",
+            "depth": 1,
+            "score": 120,
+            "expanded": False,
+            "page_role": "advisory_page",
+            "anchor_text": "NVD",
+            "link_context": "generic CVE database",
+        },
+        {
+            "url": "https://www.openwall.com/lists/oss-security/2024/03/29/4",
+            "depth": 1,
+            "score": 20,
+            "expanded": False,
+            "page_role": "mailing_list_page",
+            "anchor_text": "oss-security",
+            "link_context": "upstream disclosure discussion for CVE-2024-3094",
+        },
+    ]
+
+    decision = _build_rule_fallback_decision(state)
+
+    assert decision["action"] == "expand_frontier"
+    assert decision["selected_urls"] == [
+        "https://www.openwall.com/lists/oss-security/2024/03/29/4"
+    ]
+
+
+def test_select_fallback_frontier_urls_reserves_cross_domain_budget_for_high_value_role() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2024-3094")
+    state["current_page_url"] = "https://security-tracker.debian.org/tracker/CVE-2024-3094"
+    state["browser_snapshots"] = {
+        state["current_page_url"]: asdict(
+            _make_snapshot(
+                state["current_page_url"],
+                page_role_hint="tracker_page",
+                title="CVE-2024-3094",
+            )
+        )
+    }
+    state["budget"]["max_children_per_node"] = 2
+    state["budget"]["max_cross_domain_expansions"] = 1
+    state["frontier"] = [
+        {
+            "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-3094",
+            "depth": 1,
+            "score": 150,
+            "expanded": False,
+            "page_role": "advisory_page",
+            "anchor_text": "NVD",
+            "link_context": "generic CVE database",
+        },
+        {
+            "url": "https://ubuntu.com/security/CVE-2024-3094",
+            "depth": 1,
+            "score": 140,
+            "expanded": False,
+            "page_role": "advisory_page",
+            "anchor_text": "Ubuntu",
+            "link_context": "distribution advisory",
+        },
+        {
+            "url": "https://www.openwall.com/lists/oss-security/2024/03/29/4",
+            "depth": 1,
+            "score": 10,
+            "expanded": False,
+            "page_role": "mailing_list_page",
+            "anchor_text": "oss-security",
+            "link_context": "upstream disclosure discussion for CVE-2024-3094",
+        },
+    ]
+
+    selected_urls = _select_fallback_frontier_urls(state, state["frontier"])
+
+    assert selected_urls == ["https://www.openwall.com/lists/oss-security/2024/03/29/4"]
 
 
 def test_build_rule_fallback_decision_prefers_pull_request_target_role_for_mailing_list_chain() -> None:

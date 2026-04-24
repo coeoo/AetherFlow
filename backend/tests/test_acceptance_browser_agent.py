@@ -615,6 +615,118 @@ def test_build_scenario_report_includes_acceptance_matrix_metrics() -> None:
     assert "hosted_fix_navigation" in report["baseline_sample"]["chain_patterns"]
 
 
+def test_build_scenario_report_summarizes_failed_patch_download_diagnostics() -> None:
+    run_id = uuid.uuid4()
+    run = type(
+        "_Run",
+        (),
+        {
+            "run_id": run_id,
+            "status": "failed",
+            "stop_reason": "patch_download_failed",
+            "summary_json": {
+                "patch_found": False,
+                "chain_summary": [],
+            },
+        },
+    )()
+    patches = [
+        CVEPatchArtifact(
+            run_id=run_id,
+            candidate_url="https://github.com/acme/project/commit/abc123.patch",
+            patch_type="github_commit_patch",
+            download_status="failed",
+            patch_meta_json={
+                "error_kind": "http_status_error",
+                "download_url": "https://github.com/acme/project/commit/abc123.patch",
+                "attempt_count": 3,
+                "last_status_code": 404,
+                "last_content_type": "text/html; charset=utf-8",
+            },
+        ),
+        CVEPatchArtifact(
+            run_id=run_id,
+            candidate_url="https://gitlab.example.org/group/project/-/commit/def456.patch",
+            patch_type="gitlab_commit_patch",
+            download_status="failed",
+            patch_meta_json={
+                "error_kind": "content_type_mismatch",
+                "attempts": [
+                    {
+                        "attempt_no": 1,
+                        "status": "failed",
+                        "status_code": 503,
+                        "content_type": "text/plain",
+                    },
+                    {
+                        "attempt_no": 2,
+                        "status": "failed",
+                        "status_code": 200,
+                        "content_type": "text/html",
+                    },
+                ],
+            },
+        ),
+        CVEPatchArtifact(
+            run_id=run_id,
+            candidate_url="https://github.com/acme/project/pull/42.patch",
+            patch_type="github_pull_patch",
+            download_status="downloaded",
+            patch_meta_json={
+                "error_kind": "ignored_successful_patch",
+                "attempt_count": 1,
+            },
+        ),
+    ]
+
+    report = _build_scenario_report(
+        scenario=type("_Scenario", (), {"cve_id": "CVE-2024-0001", "description": "test"})(),
+        run=run,
+        final_state={},
+        nodes=[],
+        edges=[],
+        decisions=[],
+        candidates=[],
+        patches=patches,
+        llm_logs=[],
+        duration_seconds=1.0,
+        memory_peak_mb=1.0,
+        runtime_error=None,
+        profile_name=None,
+        mock_mode=None,
+    )
+
+    assert report["failed_patch_types"] == [
+        "github_commit_patch",
+        "gitlab_commit_patch",
+    ]
+    assert report["patch_failure_kinds"] == [
+        "http_status_error",
+        "content_type_mismatch",
+    ]
+    assert report["failed_patch_attempts_summary"] == [
+        {
+            "patch_type": "github_commit_patch",
+            "error_kind": "http_status_error",
+            "download_url": "https://github.com/acme/project/commit/abc123.patch",
+            "attempt_count": 3,
+            "last_status_code": 404,
+            "last_content_type": "text/html; charset=utf-8",
+        },
+        {
+            "patch_type": "gitlab_commit_patch",
+            "error_kind": "content_type_mismatch",
+            "download_url": "https://gitlab.example.org/group/project/-/commit/def456.patch",
+            "attempt_count": 2,
+            "last_status_code": 200,
+            "last_content_type": "text/html",
+        },
+    ]
+    assert "failed_patch_types" not in report["baseline_sample"]["stable_fields"]
+    assert "patch_failure_kinds" not in report["baseline_sample"]["stable_fields"]
+    assert "failed_patch_attempts_summary" not in report["baseline_sample"]["stable_fields"]
+
+
 def test_build_baseline_sample_marks_tracker_commit_patch_contract() -> None:
     report = {
         "stop_reason": "patches_downloaded",

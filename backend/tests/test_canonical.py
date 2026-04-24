@@ -45,3 +45,12 @@ def test_canonicalize_candidate_url_normalizes_trailing_slash() -> None:
         canonicalize_candidate_url("https://example.com/advisory/")
         == "https://example.com/advisory"
     )
+
+
+def test_canonicalize_candidate_url_collapses_empty_path_segments() -> None:
+    assert (
+        canonicalize_candidate_url(
+            "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/patch/?id=308b4fc2403b335894592ee9dc212a5e58bb309f"
+        )
+        == "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/patch?id=308b4fc2403b335894592ee9dc212a5e58bb309f"
+    )

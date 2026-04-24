@@ -382,6 +382,7 @@ def _build_scenario_report(
         for patch in patches
         if patch.download_status == "downloaded"
     ]
+    patch_failure_diagnostics = _build_patch_failure_diagnostics(patches)
     selected_patch_types = list(
         dict.fromkeys(
             str(patch.patch_type)
@@ -444,6 +445,11 @@ def _build_scenario_report(
         "page_roles_visited": page_roles_visited,
         "visited_page_roles": page_roles_visited,
         "selected_patch_types": selected_patch_types,
+        "failed_patch_types": patch_failure_diagnostics["failed_patch_types"],
+        "patch_failure_kinds": patch_failure_diagnostics["patch_failure_kinds"],
+        "failed_patch_attempts_summary": patch_failure_diagnostics[
+            "failed_patch_attempts_summary"
+        ],
         "navigation_path": navigation_path,
         "final_patch_urls": patch_urls,
         "baseline_sample": _build_baseline_sample(
@@ -472,6 +478,55 @@ def _build_scenario_report(
         "error": runtime_error or summary.get("error"),
     }
     return report
+
+
+def _build_patch_failure_diagnostics(
+    patches: list[CVEPatchArtifact],
+) -> dict[str, list[object]]:
+    failed_patch_types: list[str] = []
+    patch_failure_kinds: list[str] = []
+    failed_patch_attempts_summary: list[dict[str, object]] = []
+
+    for patch in patches:
+        if str(patch.download_status or "") == "downloaded":
+            continue
+        patch_meta = dict(patch.patch_meta_json or {})
+        patch_type = str(patch.patch_type or "").strip()
+        error_kind = str(patch_meta.get("error_kind") or "").strip()
+        download_url = str(
+            patch_meta.get("download_url") or patch.candidate_url or ""
+        ).strip()
+        attempts = [
+            dict(attempt)
+            for attempt in list(patch_meta.get("attempts") or [])
+            if isinstance(attempt, dict)
+        ]
+        last_attempt = attempts[-1] if attempts else {}
+
+        if patch_type and patch_type not in failed_patch_types:
+            failed_patch_types.append(patch_type)
+        if error_kind and error_kind not in patch_failure_kinds:
+            patch_failure_kinds.append(error_kind)
+
+        failed_patch_attempts_summary.append(
+            {
+                "patch_type": patch_type or None,
+                "error_kind": error_kind or None,
+                "download_url": download_url or None,
+                "attempt_count": patch_meta.get("attempt_count") or len(attempts),
+                "last_status_code": patch_meta.get("last_status_code")
+                or last_attempt.get("status_code"),
+                "last_content_type": patch_meta.get("last_content_type")
+                or last_attempt.get("content_type")
+                or patch_meta.get("content_type"),
+            }
+        )
+
+    return {
+        "failed_patch_types": failed_patch_types,
+        "patch_failure_kinds": patch_failure_kinds,
+        "failed_patch_attempts_summary": failed_patch_attempts_summary,
+    }
 
 
 def _validate_database_records(
