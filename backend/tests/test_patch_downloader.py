@@ -253,6 +253,70 @@ def test_kernel_commit_patch_continues_from_stable_not_found_to_torvalds_linux(
     assert attempts[1]["status"] == "succeeded"
 
 
+def test_github_pull_patch_falls_back_from_patch_timeout_to_api_diff(
+    monkeypatch,
+) -> None:
+    requested_calls: list[dict[str, object]] = []
+    candidate_url = "https://github.com/acme/project/pull/42.patch"
+    api_url = "https://api.github.com/repos/acme/project/pulls/42"
+    patch_text = "diff --git a/a.txt b/a.txt\n+hello\n"
+
+    monkeypatch.setattr("app.cve.patch_downloader._RETRY_DELAYS_SECONDS", (0, 0))
+
+    def _fake_http_get(url: str, **kwargs) -> httpx.Response:
+        headers = dict(kwargs["headers"])
+        requested_calls.append({"url": url, "accept": headers["Accept"]})
+        if url == candidate_url:
+            raise httpx.ReadTimeout("timed out")
+        request = httpx.Request("GET", url)
+        if headers["Accept"] == "application/vnd.github.patch":
+            return httpx.Response(
+                500,
+                text="server error",
+                headers={"content-type": "text/plain; charset=utf-8"},
+                request=request,
+            )
+        assert url == api_url
+        assert headers["Accept"] == "application/vnd.github.diff"
+        return httpx.Response(
+            200,
+            text=patch_text,
+            headers={"content-type": "text/plain; charset=utf-8"},
+            request=request,
+        )
+
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr("app.cve.patch_downloader.http_client.get", _fake_http_get)
+
+    response, download_url, attempts = patch_downloader._download_with_strategies(
+        candidate_url, "patch"
+    )
+
+    assert response.text == patch_text
+    assert download_url == api_url
+    assert requested_calls == [
+        {"url": candidate_url, "accept": "text/x-patch,text/plain,*/*;q=0.8"},
+        {"url": candidate_url, "accept": "text/x-patch,text/plain,*/*;q=0.8"},
+        {"url": candidate_url, "accept": "text/x-patch,text/plain,*/*;q=0.8"},
+        {"url": api_url, "accept": "application/vnd.github.patch"},
+        {"url": api_url, "accept": "application/vnd.github.diff"},
+    ]
+    assert [attempt["strategy"] for attempt in attempts] == [
+        "direct_patch_url",
+        "direct_patch_url",
+        "direct_patch_url",
+        "github_pull_api_patch",
+        "github_pull_api_diff",
+    ]
+    assert attempts[0]["error_kind"] == "timeout"
+    assert attempts[1]["error_kind"] == "timeout"
+    assert attempts[2]["error_kind"] == "timeout"
+    assert attempts[3]["error_kind"] == "http_error"
+    assert attempts[4]["status"] == "succeeded"
+    assert attempts[4]["repository"] == "acme/project"
+    assert attempts[4]["media_type"] == "application/vnd.github.diff"
+
+
 def test_download_patch_candidate_records_successful_fallback_url_in_patch_metadata(
     monkeypatch,
 ) -> None:

@@ -1332,6 +1332,45 @@ def test_select_fallback_frontier_urls_returns_empty_when_all_urls_are_noise(
     assert selected_urls == []
 
 
+def test_select_fallback_frontier_urls_skips_nvd_cvss_calculator_noise(
+    seeded_cve_run, db_session
+) -> None:
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id="CVE-2026-0544",
+    )
+    state["session"] = db_session
+    state["current_page_url"] = "https://nvd.nist.gov/vuln/detail/CVE-2026-0544"
+    state["budget"]["max_children_per_node"] = 1
+    state["budget"]["max_cross_domain_expansions"] = 1
+    cvss_url = (
+        "https://nvd.nist.gov/vuln-metrics/cvss/v4-calculator"
+        "?name=CVE-2026-0544&vector=AV:N/AC:L&version=4.0&source=NIST"
+    )
+
+    selected_urls = _select_fallback_frontier_urls(
+        state,
+        [
+            {
+                "url": cvss_url,
+                "depth": 1,
+                "score": 100,
+                "expanded": False,
+                "page_role": "advisory_page",
+            },
+            {
+                "url": "https://github.com/acme/project/commit/abcdef1234567890",
+                "depth": 1,
+                "score": 10,
+                "expanded": False,
+                "page_role": "commit_page",
+            },
+        ],
+    )
+
+    assert selected_urls == ["https://github.com/acme/project/commit/abcdef1234567890"]
+
+
 def test_select_fallback_frontier_urls_skips_cross_domain_when_budget_is_zero(
     seeded_cve_run, db_session
 ) -> None:
@@ -1660,6 +1699,34 @@ def test_filter_frontier_links_skips_mailing_list_navigation_noise_and_keeps_hig
     assert [link.url for link in filtered_links] == [
         "https://security-tracker.debian.org/tracker/CVE-2022-2509",
         "https://salsa.debian.org/gnutls-team/gnutls/-/commit/abcdef1234567890",
+    ]
+
+
+def test_filter_frontier_links_skips_nvd_cvss_calculator_noise() -> None:
+    links = [
+        PageLink(
+            url=(
+                "https://nvd.nist.gov/vuln-metrics/cvss/v4-calculator"
+                "?name=CVE-2026-0544&vector=AV:N/AC:L&version=4.0&source=NIST"
+            ),
+            text="CVSS v4.0 Calculator",
+            context="severity score calculator",
+            is_cross_domain=False,
+            estimated_target_role="advisory_page",
+        ),
+        PageLink(
+            url="https://github.com/acme/project/commit/abcdef1234567890",
+            text="upstream fix commit",
+            context="patch reference",
+            is_cross_domain=True,
+            estimated_target_role="commit_page",
+        ),
+    ]
+
+    filtered_links = _filter_frontier_links("advisory_page", links)
+
+    assert [link.url for link in filtered_links] == [
+        "https://github.com/acme/project/commit/abcdef1234567890"
     ]
 
 

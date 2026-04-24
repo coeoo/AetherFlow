@@ -29,6 +29,10 @@ _GITHUB_COMMIT_WITH_SUFFIX_PATTERN = re.compile(
     r"^https://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/commit/(?P<sha>[0-9a-f]{6,40})(?P<suffix>\.(?:patch|diff))?/?$",
     re.IGNORECASE,
 )
+_GITHUB_PULL_WITH_SUFFIX_PATTERN = re.compile(
+    r"^https://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<pull_number>\d+)(?P<suffix>\.(?:patch|diff))?/?$",
+    re.IGNORECASE,
+)
 _FULL_COMMIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 _FULL_COMMIT_SHA_SEARCH_PATTERN = re.compile(r"(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])", re.IGNORECASE)
 _RETRY_TIMEOUT_SECONDS = (15.0, 20.0, 30.0)
@@ -183,6 +187,47 @@ def _build_github_commit_api_strategies(
     ]
 
 
+def _build_github_pull_fallback_strategies(
+    *,
+    repository: str,
+    pull_number: str,
+    download_url: str,
+) -> list[DownloadStrategy]:
+    api_url = f"https://api.github.com/repos/{repository}/pulls/{pull_number}"
+    base_url = f"https://github.com/{repository}/pull/{pull_number}"
+    strategies = [
+        DownloadStrategy(
+            name="github_pull_api_patch",
+            url=api_url,
+            headers=_build_github_api_headers("application/vnd.github.patch"),
+            max_attempts=1,
+            repository=repository,
+            media_type="application/vnd.github.patch",
+        ),
+        DownloadStrategy(
+            name="github_pull_api_diff",
+            url=api_url,
+            headers=_build_github_api_headers("application/vnd.github.diff"),
+            max_attempts=1,
+            repository=repository,
+            media_type="application/vnd.github.diff",
+        ),
+    ]
+    diff_url = f"{base_url}.diff"
+    if diff_url != download_url:
+        strategies.append(
+            DownloadStrategy(
+                name="github_pull_diff_url",
+                url=diff_url,
+                headers=dict(_PATCH_DOWNLOAD_HEADERS),
+                max_attempts=1,
+                repository=repository,
+                media_type="text/x-diff",
+            )
+        )
+    return strategies
+
+
 def _build_download_strategies(candidate_url: str, patch_type: str) -> list[DownloadStrategy]:
     download_url = _resolve_download_url(candidate_url, patch_type)
     kernel_identity = _extract_kernel_commit_identity(candidate_url)
@@ -213,6 +258,18 @@ def _build_download_strategies(candidate_url: str, patch_type: str) -> list[Down
             headers=dict(_PATCH_DOWNLOAD_HEADERS),
         )
     ]
+
+    pull_match = _GITHUB_PULL_WITH_SUFFIX_PATTERN.match(candidate_url.rstrip("/"))
+    if pull_match is not None:
+        repository = f"{pull_match.group('owner')}/{pull_match.group('repo')}"
+        strategies.extend(
+            _build_github_pull_fallback_strategies(
+                repository=repository,
+                pull_number=pull_match.group("pull_number"),
+                download_url=download_url,
+            )
+        )
+        return strategies
 
     match = _GITHUB_COMMIT_WITH_SUFFIX_PATTERN.match(candidate_url.rstrip("/"))
     if match is None:

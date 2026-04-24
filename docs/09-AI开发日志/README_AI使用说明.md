@@ -48,10 +48,13 @@
 - 页面获取主链是 `Playwright + LangGraph + LLM 导航决策`，不是 httpx 页面抓取。
 - `httpx` 只保留给 seed API 和 patch 文件下载。
 - GitHub commit 下载当前已具备页面 `.patch` / `.diff` 与 GitHub API patch / diff 多策略。
+- GitHub PR 下载当前已具备页面 `.patch`、Pull API patch / diff、页面 `.diff` 多策略。
 - kernel commit 下载主路径是从 `git.kernel.org` 提取 SHA 后优先走 GitHub API patch / diff，`git.kernel.org` 直连只作最后诊断兜底。
 - 如需降低 GitHub 匿名 API 限流和短时失败风险，应配置可选环境变量 `GITHUB_TOKEN`；token 不得写入代码、文档或日志。
 - 下载失败需要优先看 `patch_meta_json.error_kind` 和 `source_fetch_records.response_meta_json.attempts` 中的 `strategy / repository / media_type / error_kind`。
 - `downloaded` / `failed` 是候选下载终态，图节点不应重复下载终态候选。
+- NVD CVSS calculator（`/vuln-metrics/cvss/`）属于导航噪声，不应进入 frontier 或规则 fallback。
+- WordPress、WPScan、Trac 插件等非维护范围组件应优先进入“跳过/非行动项”判断，不应默认扩展下载策略。
 
 ---
 
@@ -123,9 +126,15 @@ YYYY-MM-DD_SessionNNN_任务名.md
 - 明确 `GITHUB_TOKEN` 是可选稳定性增强，不是 API 下载前置条件
 - 明确排障优先查看 attempts 中的 `strategy / repository / media_type / error_kind`
 
+### v1.8 - 2026-04-25
+- 补充 GitHub PR patch 下载稳定化接手要点：页面 `.patch` 超时后继续尝试 Pull API patch / diff 与页面 `.diff`
+- 补充 NVD CVSS calculator 导航噪声规则，避免把评分计算器误当作补丁线索消耗预算
+- 明确 20 个真实 CVE 样本验收后的主线：先修真实失败模式，再决定是否扩展下载源
+- 明确非维护范围组件跳过机制是后续优先事项之一，避免把 WordPress 类样本误归因为 downloader 缺口
+
 ---
 
-**文档版本**：v1.7
+**文档版本**：v1.8
 **创建日期**：2026-04-09
-**最后更新**：2026-04-24
+**最后更新**：2026-04-25
 **维护人**：AI + 开发团队

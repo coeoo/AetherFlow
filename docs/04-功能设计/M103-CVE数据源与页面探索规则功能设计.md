@@ -130,6 +130,7 @@ flowchart TD
 当前补丁下载链路已经补齐以下稳定性措施：
 
 - GitHub commit 候选按多策略顺序尝试：页面 `.patch` / `.diff` 与 GitHub API patch / diff 组合兜底
+- GitHub PR 候选在页面 `.patch` 短时超时或异常时，会继续尝试 GitHub Pull API patch / diff 与页面 `.diff` 兜底
 - kernel commit 候选优先从 `git.kernel.org` URL 提取 commit SHA，再走 GitHub API patch / diff 渲染补丁
 - `git.kernel.org` 直连 patch 仅作为最后诊断兜底；遇到 Anubis / bot challenge 时不绕过，按失败类型记录
 - `GITHUB_TOKEN` 是可选稳定性增强，不是 API 路径前置条件；无 token 时仍可匿名调用 GitHub API
@@ -139,6 +140,22 @@ flowchart TD
 - 下载 attempts 会记录 `strategy / url / repository / media_type / status / error_kind`，用于解释每次策略切换
 - `downloaded` / `failed` 终态候选在图节点层直接跳过，避免重复下载和重复写证据
 - 候选全部终态时，`download_and_validate` 直接收敛，不再空转图循环
+
+### Frontier 噪声过滤要点
+
+当前页面探索链路已将以下链接视为全局低价值导航噪声：
+
+- 登录、注册、帮助、定价、企业版等通用站点导航；
+- Debian 安全首页、FAQ 等无法直接指向具体补丁的泛化页面；
+- 邮件列表中的日期翻页、线程翻页、索引页等归档导航；
+- NVD CVSS calculator：`/vuln-metrics/cvss/`。
+
+NVD CVSS calculator 的处理原则是：
+
+- 它可以作为 CVE 严重度参考，但不是补丁、tracker、commit 或 download 线索；
+- 不应进入普通 frontier 扩展队列；
+- 即使历史 frontier 中已经存在该链接，规则 fallback 也必须跳过；
+- LLM 如果判断当前页面无补丁线索，系统不应继续消耗预算访问其它 CVSS calculator。
 
 ---
 
@@ -223,6 +240,7 @@ CVE ID -> seed 解析 -> 浏览器 Agent 搜索图 -> patch 结果
 
 - 只负责候选补丁文件下载，不承担页面主抓取职责
 - 对普通 GitHub commit 候选组合尝试页面 `.patch` / `.diff` 与 API patch / diff
+- 对 GitHub PR 候选组合尝试页面 `.patch`、Pull API patch / diff 与页面 `.diff`
 - 对 kernel commit 候选优先走 GitHub API patch / diff，`git.kernel.org` 直连只作诊断兜底
 - `GITHUB_TOKEN` 仅作为可选增强降低匿名限流风险，不作为下载能力硬依赖
 - 通过浏览器风格请求头、API media type、内部重试和错误分类增强稳定性
@@ -631,6 +649,8 @@ Agent 停止时必须明确属于以下之一：
 2. 早期 acceptance 预算过低，`max_llm_calls=2` 只够走到目标 tracker，还来不及进入 commit
 3. 真实 GitLab `commit_page` 会遇到 Cloudflare challenge；如果只依赖页面正文，系统无法产出 patch candidate
 4. 真实供应商配置最初未固化到本地配置文件，导致 acceptance 容易停在环境缺失而非业务逻辑
+5. NVD CVSS calculator 曾被当作普通 advisory frontier 消耗预算；当前已通过全局噪声过滤阻断
+6. GitHub PR `.patch` 页面曾因短时 timeout 导致 `patch_download_failed`；当前已补充 Pull API patch / diff 与 `.diff` 兜底
 
 ---
 

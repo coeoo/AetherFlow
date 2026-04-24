@@ -56,6 +56,7 @@ _GLOBAL_NOISE_PATH_FRAGMENTS = (
     "/features/",
     "/pricing",
     "/enterprise",
+    "/vuln-metrics/cvss/",
 )
 _MAILING_LIST_NOISE_TEXTS = {
     "date prev",
