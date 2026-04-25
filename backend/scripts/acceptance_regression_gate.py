@@ -34,6 +34,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="候选 acceptance_report.json 路径；未提供时由脚本生成。",
     )
     parser.add_argument(
+        "--database-url",
+        default=None,
+        help="自动生成 candidate report 时透传给 acceptance 脚本。",
+    )
+    parser.add_argument(
         "--output",
         default=None,
         help="可选，写出 gate 结果 JSON。",
@@ -79,6 +84,11 @@ def _generate_candidate_report(args: argparse.Namespace) -> Path:
         for cve_id in _extract_baseline_cve_ids(baseline_report)
         for item in ("--cve", cve_id)
     ]
+    database_args = (
+        ["--database-url", str(args.database_url)]
+        if str(getattr(args, "database_url", "") or "").strip()
+        else []
+    )
     exit_code = acceptance_module.main(
         [
             *cve_args,
@@ -86,6 +96,7 @@ def _generate_candidate_report(args: argparse.Namespace) -> Path:
             "rule-fallback-only",
             "--mock-mode",
             "llm-timeout-forced",
+            *database_args,
             "--results-dir",
             str(results_dir),
         ]

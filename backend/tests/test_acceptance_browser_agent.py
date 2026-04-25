@@ -21,6 +21,7 @@ from scripts.acceptance_browser_agent import _compare_acceptance_reports
 from scripts.acceptance_browser_agent import _build_effective_budget_report
 from scripts.acceptance_browser_agent import _build_scenario_report
 from scripts.acceptance_browser_agent import _build_performance_summary
+from scripts.acceptance_browser_agent import _classify_acceptance_outcome
 from scripts.acceptance_browser_agent import _determine_verdict
 from scripts.acceptance_browser_agent import _temporary_acceptance_env
 from scripts.acceptance_regression_gate import _evaluate_gate_result
@@ -133,6 +134,36 @@ def test_parse_args_accepts_compare_report_inputs() -> None:
 
     assert args.baseline_report == "baseline.json"
     assert args.candidate_report == "candidate.json"
+
+
+def test_parse_args_accepts_database_url_override() -> None:
+    args = parse_args(
+        [
+            "--cve",
+            "CVE-2022-2509",
+            "--database-url",
+            "postgresql+psycopg://postgres:postgres@127.0.0.1:55432/aetherflow_baseline",
+        ]
+    )
+
+    assert (
+        args.database_url
+        == "postgresql+psycopg://postgres:postgres@127.0.0.1:55432/aetherflow_baseline"
+    )
+
+
+def test_acceptance_gate_parse_args_accepts_database_url_override() -> None:
+    args = gate_module.parse_args(
+        [
+            "--database-url",
+            "postgresql+psycopg://postgres:postgres@127.0.0.1:55432/aetherflow_candidate",
+        ]
+    )
+
+    assert (
+        args.database_url
+        == "postgresql+psycopg://postgres:postgres@127.0.0.1:55432/aetherflow_candidate"
+    )
 
 
 def test_build_default_budget_allows_environment_overrides(monkeypatch) -> None:
@@ -358,6 +389,70 @@ def test_build_scenario_report_only_counts_fetched_page_roles() -> None:
     )
 
     assert report["page_roles_visited"] == ["advisory_page"]
+
+
+def test_build_scenario_report_includes_failure_category_contract() -> None:
+    run = type(
+        "_Run",
+        (),
+        {
+            "run_id": uuid.uuid4(),
+            "status": "succeeded",
+            "stop_reason": "patches_downloaded",
+            "summary_json": {
+                "patch_found": True,
+                "chain_summary": [{"status": "completed"}],
+            },
+        },
+    )()
+    fetched_node = CVESearchNode(
+        run_id=run.run_id,
+        url="https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+        depth=0,
+        host="nvd.nist.gov",
+        page_role="advisory_page",
+        fetch_status="fetched",
+    )
+
+    report = _build_scenario_report(
+        scenario=type("_Scenario", (), {"cve_id": "CVE-2022-2509", "description": "test"})(),
+        run=run,
+        final_state={},
+        nodes=[fetched_node],
+        edges=[],
+        decisions=[],
+        candidates=[],
+        patches=[],
+        llm_logs=[],
+        duration_seconds=1.0,
+        memory_peak_mb=1.0,
+        runtime_error=None,
+        profile_name=None,
+        mock_mode=None,
+    )
+    report["verdict"] = "PASS"
+
+    enriched_report = _classify_acceptance_outcome(report)
+
+    assert enriched_report["execution_outcome"] == "succeeded"
+    assert enriched_report["acceptance_verdict"] == "PASS"
+    assert enriched_report["failure_category"] is None
+
+
+def test_failed_run_does_not_hide_behind_acceptance_pass() -> None:
+    report = {
+        "status": "failed",
+        "stop_reason": "patch_download_failed",
+        "patch_found": False,
+        "verdict": "PASS",
+        "error": None,
+    }
+
+    enriched_report = _classify_acceptance_outcome(report)
+
+    assert enriched_report["execution_outcome"] == "failed"
+    assert enriched_report["acceptance_verdict"] == "PASS"
+    assert enriched_report["failure_category"] == "patch_download_failed"
 
 
 def test_temporary_acceptance_env_applies_profile_defaults_and_allows_cli_override(
@@ -1390,6 +1485,7 @@ def test_acceptance_gate_generates_candidate_for_all_baseline_scenarios(
         SimpleNamespace(
             baseline_report=str(baseline_path),
             output=str(output_path),
+            database_url="postgresql+psycopg://postgres:postgres@127.0.0.1:55432/aetherflow_candidate",
         )
     )
 
@@ -1404,6 +1500,8 @@ def test_acceptance_gate_generates_candidate_for_all_baseline_scenarios(
             "rule-fallback-only",
             "--mock-mode",
             "llm-timeout-forced",
+            "--database-url",
+            "postgresql+psycopg://postgres:postgres@127.0.0.1:55432/aetherflow_candidate",
             "--results-dir",
             str(tmp_path / ".acceptance-gate"),
         ]
@@ -1490,3 +1588,76 @@ def test_main_mock_mode_writes_stable_acceptance_report_json(
     assert written_report["scenarios"][0]["llm_failure_count"] == 1
     assert written_report["scenarios"][0]["rule_fallback_count"] == 1
     assert written_report["scenarios"][0]["navigation_path"] == fake_report["navigation_path"]
+
+
+def test_main_database_url_argument_overrides_environment(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configured_urls: list[str] = []
+    override_url = (
+        "postgresql+psycopg://postgres:postgres@127.0.0.1:55432/"
+        "aetherflow_baseline_override"
+    )
+    env_url = "postgresql+psycopg://demo:demo@127.0.0.1:5432/demo"
+    fake_report = {
+        "cve_id": "CVE-2022-2509",
+        "description": "mock regression",
+        "run_id": "run-1",
+        "status": "succeeded",
+        "stop_reason": "patches_downloaded",
+        "patch_found": True,
+        "patch_urls": [],
+        "verdict": "PASS",
+        "execution_outcome": "succeeded",
+        "acceptance_verdict": "PASS",
+        "failure_category": None,
+    }
+
+    class _FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def commit(self) -> None:
+            return None
+
+    class _FakeSessionFactory:
+        def __call__(self):
+            return _FakeSession()
+
+    def _record_engine_url(url: str):
+        configured_urls.append(url)
+        return object()
+
+    def _record_session_url(url: str):
+        configured_urls.append(url)
+        return _FakeSessionFactory()
+
+    monkeypatch.setenv("DATABASE_URL", env_url)
+    monkeypatch.setattr(acceptance_module, "create_engine_from_url", _record_engine_url)
+    monkeypatch.setattr(acceptance_module, "_prepare_database", lambda engine: None)
+    monkeypatch.setattr(acceptance_module, "create_session_factory", _record_session_url)
+    monkeypatch.setattr(
+        acceptance_module,
+        "_run_mock_scenario",
+        lambda session, *, scenario, mock_mode, profile_name: (dict(fake_report), []),
+    )
+
+    exit_code = main(
+        [
+            "--cve",
+            "CVE-2022-2509",
+            "--database-url",
+            override_url,
+            "--mock-mode",
+            "llm-timeout-forced",
+            "--results-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert configured_urls == [override_url, override_url]

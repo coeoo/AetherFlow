@@ -139,6 +139,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="报告输出目录，默认相对当前工作目录的 results。",
     )
     parser.add_argument(
+        "--database-url",
+        default=None,
+        help="覆盖 DATABASE_URL/AETHERFLOW_DATABASE_URL，用于隔离验收数据库。",
+    )
+    parser.add_argument(
         "--baseline-report",
         default=None,
         help="与 --candidate-report 一起使用，比较两份 acceptance_report.json。",
@@ -208,7 +213,8 @@ def main(argv: list[str] | None = None) -> int:
 
     scenario_ids = sorted(SCENARIOS) if args.all else list(dict.fromkeys(args.cve or []))
     settings = load_settings()
-    if not settings.database_url:
+    database_url = str(args.database_url or settings.database_url or "").strip()
+    if not database_url:
         raise RuntimeError("缺少 DATABASE_URL/AETHERFLOW_DATABASE_URL，无法执行验收。")
 
     results_dir = Path(args.results_dir).resolve()
@@ -216,9 +222,9 @@ def main(argv: list[str] | None = None) -> int:
     llm_log_path = results_dir / "llm_decisions_log.jsonl"
     report_path = results_dir / "acceptance_report.json"
 
-    engine = create_engine_from_url(settings.database_url)
+    engine = create_engine_from_url(database_url)
     _prepare_database(engine)
-    session_factory = create_session_factory(settings.database_url)
+    session_factory = create_session_factory(database_url)
 
     scenario_reports: list[dict[str, object]] = []
     llm_logs: list[dict[str, object]] = []
@@ -320,6 +326,7 @@ def _run_scenario(
     report["verdict"] = verdict
     if verdict_reason:
         report["verdict_reason"] = verdict_reason
+    report = _classify_acceptance_outcome(report)
     return report, llm_logs
 
 
@@ -477,6 +484,9 @@ def _build_scenario_report(
         ),
         "error": runtime_error or summary.get("error"),
     }
+    report["execution_outcome"] = _classify_execution_outcome(report)
+    report["acceptance_verdict"] = None
+    report["failure_category"] = None
     return report
 
 
@@ -631,6 +641,51 @@ def _looks_like_external_access_issue(error: object) -> bool:
         return False
     normalized = str(error)
     return any(marker in normalized for marker in _NETWORK_ERROR_MARKERS)
+
+
+def _classify_execution_outcome(report: dict[str, object]) -> str:
+    if _looks_like_external_access_issue(report.get("error")):
+        return "skipped"
+    status = str(report.get("status") or "")
+    if status == "succeeded":
+        return "succeeded"
+    if status == "skipped":
+        return "skipped"
+    return "failed"
+
+
+def _classify_failure_category(report: dict[str, object]) -> str | None:
+    execution_outcome = _classify_execution_outcome(report)
+    verdict = str(report.get("verdict") or "")
+    if execution_outcome == "succeeded" and verdict == "PASS":
+        return None
+
+    runtime_error = str(report.get("error") or "")
+    if _looks_like_external_access_issue(runtime_error):
+        return "external_access_issue"
+
+    stop_reason = str(report.get("stop_reason") or "")
+    if stop_reason == "no_seed_references":
+        return "seed_missing"
+    if stop_reason in {"max_pages_total_exhausted", "max_agent_iterations_exhausted"}:
+        return "budget_exhausted"
+    if stop_reason == "patch_download_failed":
+        return "patch_download_failed"
+    if stop_reason == "diagnostic_timeout":
+        return "diagnostic_timeout"
+    if int(report.get("llm_failure_count") or 0) > 0:
+        return "llm_timeout_rule_fallback"
+    if not bool(report.get("patch_found")):
+        return "candidate_missing"
+    return "evidence_incomplete"
+
+
+def _classify_acceptance_outcome(report: dict[str, object]) -> dict[str, object]:
+    enriched_report = dict(report)
+    enriched_report["execution_outcome"] = _classify_execution_outcome(enriched_report)
+    enriched_report["acceptance_verdict"] = enriched_report.get("verdict")
+    enriched_report["failure_category"] = _classify_failure_category(enriched_report)
+    return enriched_report
 
 
 def _determine_verdict(report: dict[str, object]) -> tuple[str, str | None]:
