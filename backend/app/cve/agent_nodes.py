@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import logging
-import re
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -40,6 +39,7 @@ from app.cve.page_analyzer import analyze_page
 from app.cve.patch_downloader import download_patch_candidate
 from app.cve.reference_matcher import get_candidate_priority
 from app.cve.reference_matcher import match_reference_url
+from app.cve import agent_search_tools
 from app.cve.search_graph_service import (
     record_search_decision,
     record_search_edge,
@@ -51,44 +51,20 @@ from app.models.cve import CVECandidateArtifact, CVEPatchArtifact, CVESearchNode
 
 _logger = logging.getLogger(__name__)
 
-_GLOBAL_NOISE_PATH_FRAGMENTS = (
-    "/login",
-    "/signin",
-    "/signup",
-    "/register",
-    "/msgid-search/",
-    "/general",
-    "/dashboard",
-    "/about",
-    "/contact",
-    "/privacy",
-    "/terms",
-    "/help",
-    "/features/",
-    "/pricing",
-    "/enterprise",
-    "/vuln-metrics/cvss/",
-)
-_MAILING_LIST_NOISE_TEXTS = {
-    "date prev",
-    "date next",
-    "date index",
-    "thread prev",
-    "thread next",
-    "author prev",
-    "author next",
-}
-_MAILING_LIST_NOISE_PATH_FRAGMENTS = (
-    "/maillist.html",
-    "/threads.html",
-    "/subject.html",
-    "/author.html",
-    "/date.html",
-    "/prev-date.html",
-    "/next-date.html",
-    "/thrd",
-)
-_CVE_ID_RE = re.compile(r"\bCVE-\d{4}-\d{4,}\b", re.IGNORECASE)
+_GLOBAL_NOISE_PATH_FRAGMENTS = agent_search_tools.GLOBAL_NOISE_PATH_FRAGMENTS
+_MAILING_LIST_NOISE_TEXTS = agent_search_tools.MAILING_LIST_NOISE_TEXTS
+_MAILING_LIST_NOISE_PATH_FRAGMENTS = agent_search_tools.MAILING_LIST_NOISE_PATH_FRAGMENTS
+_CVE_ID_RE = agent_search_tools.CVE_ID_RE
+_extract_cve_ids = agent_search_tools.extract_cve_ids
+_score_frontier_candidate = agent_search_tools.score_frontier_candidate
+_is_navigation_noise_url = agent_search_tools.is_navigation_noise_url
+_is_mailing_list_navigation_noise = agent_search_tools.is_mailing_list_navigation_noise
+_is_high_value_frontier_link = agent_search_tools.is_high_value_frontier_link
+_should_skip_frontier_link = agent_search_tools.should_skip_frontier_link
+_filter_frontier_links = agent_search_tools.filter_frontier_links
+_textual_fix_signal_score = agent_search_tools.textual_fix_signal_score
+_coerce_rank = agent_search_tools.coerce_rank
+
 _HIGH_PRIORITY_UPSTREAM_PATCH_TYPES = {
     "github_commit_patch",
     "gitlab_commit_patch",
@@ -315,15 +291,6 @@ def _append_page_role_history(state: AgentState, *, url: str, role: str, title: 
     state["page_role_history"] = page_role_history
 
 
-def _extract_cve_ids(*values: str) -> set[str]:
-    matched_ids: set[str] = set()
-    for value in values:
-        if not value:
-            continue
-        matched_ids.update(match.upper() for match in _CVE_ID_RE.findall(value))
-    return matched_ids
-
-
 def _target_cve_id(state: AgentState) -> str:
     return str(state.get("cve_id") or "").strip().upper()
 
@@ -346,57 +313,6 @@ def _classify_tracker_page_relevance(
     if target_cve_id in observed_cve_ids:
         return "target"
     return "off_target"
-
-
-def _score_frontier_candidate(
-    *,
-    normalized_url: str,
-    link: PageLink,
-    target_cve_id: str,
-    source_page_role: str = "",
-) -> int:
-    target_role = link.estimated_target_role or classify_page_role(normalized_url)
-    score = score_frontier_url(normalized_url)
-    role_bonus = {
-        "commit_page": 60,
-        "pull_request_page": 55,
-        "merge_request_page": 55,
-        "download_page": 25,
-        "tracker_page": 15,
-        "bugtracker_page": 10,
-        "repository_page": 5,
-    }
-    score += role_bonus.get(target_role, 0)
-    if source_page_role == "tracker_page":
-        tracker_source_bonus = {
-            "commit_page": 220,
-            "pull_request_page": 210,
-            "merge_request_page": 210,
-            "download_page": 180,
-            "tracker_page": 20,
-            "bugtracker_page": -20,
-            "advisory_page": -40,
-        }
-        score += tracker_source_bonus.get(target_role, 0)
-    elif source_page_role in {"mailing_list_page", "bugtracker_page", "repository_page"}:
-        stage_source_bonus = {
-            "commit_page": 180,
-            "pull_request_page": 170,
-            "merge_request_page": 170,
-            "download_page": 140,
-            "tracker_page": 40,
-            "bugtracker_page": -20,
-            "advisory_page": -40,
-            "repository_page": -60,
-        }
-        score += stage_source_bonus.get(target_role, 0)
-    matched_cve_ids = _extract_cve_ids(normalized_url, link.text, link.context)
-    if target_cve_id:
-        if target_cve_id in matched_cve_ids:
-            score += 120
-        elif matched_cve_ids:
-            score -= 160
-    return score
 
 
 def _should_keep_reference_link_in_frontier(
@@ -439,102 +355,6 @@ def _filter_candidate_matches_for_page(
                 continue
         filtered_candidates.append(candidate)
     return filtered_candidates
-
-
-def _is_navigation_noise_url(url: str) -> bool:
-    normalized = url.lower()
-    parsed = urlparse(normalized)
-    if parsed.scheme in {"mailto", "javascript", "tel"}:
-        return True
-    if normalized in {
-        "https://www.debian.org/security/",
-        "https://www.debian.org/lts/security/",
-        "https://www.debian.org/security/faq",
-    }:
-        return True
-    path = parsed.path or "/"
-    return any(fragment in path for fragment in _GLOBAL_NOISE_PATH_FRAGMENTS)
-
-
-def _is_mailing_list_navigation_noise(link: PageLink) -> bool:
-    normalized_text = " ".join(link.text.lower().split())
-    normalized_context = " ".join(link.context.lower().split())
-    normalized_url = link.url.lower()
-    path = urlparse(normalized_url).path or "/"
-    if normalized_text in _MAILING_LIST_NOISE_TEXTS:
-        return True
-    if "mail archive navigation" in normalized_context:
-        return True
-    if normalized_context.startswith("message-id:"):
-        return True
-    if normalized_context.startswith("to:") or normalized_context.startswith("from:"):
-        return True
-    if normalized_context.startswith("reply-to:") or normalized_context.startswith("mail-followup-to:"):
-        return True
-    if normalized_context.startswith("prev by date:") or normalized_context.startswith("next by date:"):
-        return True
-    if normalized_context.startswith("previous by thread:") or normalized_context.startswith("next by thread:"):
-        return True
-    return any(fragment in path for fragment in _MAILING_LIST_NOISE_PATH_FRAGMENTS)
-
-
-def _is_high_value_frontier_link(link: PageLink) -> bool:
-    target_url = (normalize_frontier_url(link.url) or link.url).lower()
-    target_role = (link.estimated_target_role or classify_page_role(target_url)).strip()
-    if "security-tracker.debian.org/tracker/" in target_url:
-        return True
-    if target_role in {
-        "tracker_page",
-        "commit_page",
-        "pull_request_page",
-        "merge_request_page",
-        "download_page",
-    }:
-        if target_url in {
-            "https://www.debian.org/security/",
-            "https://www.debian.org/lts/security/",
-            "https://www.debian.org/security/faq",
-        }:
-            return False
-        return True
-    return any(
-        marker in target_url
-        for marker in (
-            "/commit/",
-            "/pull/",
-            "/merge_requests/",
-            ".patch",
-            ".diff",
-            ".debdiff",
-        )
-    )
-
-
-def _should_skip_frontier_link(source_page_role: str, link: PageLink) -> bool:
-    normalized_url = normalize_frontier_url(link.url)
-    if normalized_url is None:
-        return True
-    if _is_high_value_frontier_link(link):
-        return False
-    if _is_navigation_noise_url(normalized_url):
-        return True
-    if source_page_role == "mailing_list_page" and _is_mailing_list_navigation_noise(link):
-        return True
-    return False
-
-
-def _filter_frontier_links(source_page_role: str, links: list[PageLink]) -> list[PageLink]:
-    filtered_links: list[PageLink] = []
-    seen_urls: set[str] = set()
-    for link in links:
-        normalized_url = normalize_frontier_url(link.url)
-        if normalized_url is None or normalized_url in seen_urls:
-            continue
-        seen_urls.add(normalized_url)
-        if _should_skip_frontier_link(source_page_role, link):
-            continue
-        filtered_links.append(link)
-    return filtered_links
 
 
 def _build_frontier_candidate_records(
@@ -797,38 +617,6 @@ def _select_stage_guided_frontier_urls(
     if not prioritized_items:
         return []
     return _select_fallback_frontier_urls(state, prioritized_items)
-
-
-def _textual_fix_signal_score(item: dict[str, object]) -> int:
-    text = " ".join(
-        [
-            str(item.get("url") or ""),
-            str(item.get("anchor_text") or ""),
-            str(item.get("link_context") or ""),
-        ]
-    ).lower()
-    score = 0
-    for keyword in (
-        "fix",
-        "fixed",
-        "patch",
-        "commit",
-        "pull request",
-        "merge request",
-        "security",
-        "vulnerab",
-        "cve-",
-    ):
-        if keyword in text:
-            score += 1
-    return score
-
-
-def _coerce_rank(value: object, *, default: int = 999) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def _build_rule_fallback_decision(state: AgentState) -> dict[str, object]:
