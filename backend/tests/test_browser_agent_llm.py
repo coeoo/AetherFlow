@@ -420,6 +420,42 @@ def test_call_browser_agent_navigation_sends_a11y_tree_and_chain_context(monkeyp
     assert serialized_context["navigation_path"][0].startswith("advisory_page:")
 
 
+def test_call_browser_agent_navigation_sends_reasoning_effort_when_configured(
+    monkeypatch,
+) -> None:
+    context = NavigationContext(
+        cve_id="CVE-2022-2509",
+        budget_remaining={"max_pages_total": 20},
+        navigation_path=[
+            "tracker_page: https://security-tracker.debian.org/tracker/CVE-2022-2509"
+        ],
+        parent_page_summary=None,
+        current_page=LLMPageView(
+            url="https://security-tracker.debian.org/tracker/CVE-2022-2509",
+            page_role="tracker_page",
+            title="CVE-2022-2509",
+            accessibility_tree_summary='heading "CVE-2022-2509"',
+            key_links=[],
+            patch_candidates=[],
+            page_text_summary="tracker summary",
+        ),
+        active_chains=[],
+        discovered_candidates=[],
+        visited_domains=[],
+    )
+
+    with _serve_llm_response() as base_url:
+        monkeypatch.setenv("LLM_BASE_URL", base_url)
+        monkeypatch.setenv("LLM_API_KEY", "demo-key")
+        monkeypatch.setenv("LLM_DEFAULT_MODEL", "gpt-5.4")
+        monkeypatch.setenv("LLM_REASONING_EFFORT", "high")
+
+        decision = call_browser_agent_navigation(context)
+
+    assert decision["model_name"] == "gpt-5.4"
+    assert _LLMHandler.payloads[0]["reasoning_effort"] == "high"
+
+
 def test_call_browser_agent_navigation_appends_acceptance_log(monkeypatch) -> None:
     state = build_initial_agent_state(run_id="run-2", cve_id="CVE-2022-2509")
     state["page_role_history"] = [

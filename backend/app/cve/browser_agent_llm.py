@@ -188,6 +188,22 @@ def call_browser_agent_navigation(
         request_timeout = None
     else:
         request_timeout = float(settings.llm_timeout_seconds)
+    request_body: dict[str, object] = {
+        "model": settings.llm_default_model,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": _load_browser_navigation_prompt(),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(asdict(context), ensure_ascii=False),
+            },
+        ],
+    }
+    if settings.llm_reasoning_effort:
+        request_body["reasoning_effort"] = settings.llm_reasoning_effort
     for attempt_index in range(max_attempts):
         try:
             executor = ThreadPoolExecutor(max_workers=1)
@@ -200,20 +216,7 @@ def call_browser_agent_navigation(
                         "Authorization": f"Bearer {settings.llm_api_key}",
                         "Content-Type": "application/json",
                     },
-                    json={
-                        "model": settings.llm_default_model,
-                        "response_format": {"type": "json_object"},
-                        "messages": [
-                            {
-                                "role": "system",
-                                "content": _load_browser_navigation_prompt(),
-                            },
-                            {
-                                "role": "user",
-                                "content": json.dumps(asdict(context), ensure_ascii=False),
-                            },
-                        ],
-                    },
+                    json=request_body,
                 )
                 try:
                     response = future.result(timeout=wall_clock_timeout)

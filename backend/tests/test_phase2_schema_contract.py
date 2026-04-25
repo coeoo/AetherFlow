@@ -37,7 +37,12 @@ def test_phase2_settings_include_runtime_defaults(monkeypatch) -> None:
 
     if env_local_path.exists():
         env_local_path.unlink()
-    for key in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_DEFAULT_MODEL"):
+    for key in (
+        "LLM_BASE_URL",
+        "LLM_API_KEY",
+        "LLM_DEFAULT_MODEL",
+        "LLM_REASONING_EFFORT",
+    ):
         monkeypatch.delenv(key, raising=False)
     settings = load_settings()
 
@@ -54,6 +59,7 @@ def test_phase2_settings_include_runtime_defaults(monkeypatch) -> None:
         assert settings.llm_base_url == ""
         assert settings.llm_api_key == ""
         assert settings.llm_default_model == ""
+        assert settings.llm_reasoning_effort == ""
         assert settings.llm_timeout_seconds == 20
     finally:
         if original_content is not None:
@@ -85,6 +91,7 @@ def test_load_settings_reads_root_env_local_without_overriding_existing_env(monk
         "LLM_BASE_URL",
         "LLM_API_KEY",
         "LLM_DEFAULT_MODEL",
+        "LLM_REASONING_EFFORT",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -94,6 +101,7 @@ def test_load_settings_reads_root_env_local_without_overriding_existing_env(monk
                 "LLM_BASE_URL=https://example.com/compatible-mode/v1",
                 "LLM_API_KEY=env-local-key",
                 "LLM_DEFAULT_MODEL=qwen-test-model",
+                "LLM_REASONING_EFFORT=high",
                 "",
             ]
         ),
@@ -105,6 +113,7 @@ def test_load_settings_reads_root_env_local_without_overriding_existing_env(monk
         assert settings.llm_base_url == "https://example.com/compatible-mode/v1"
         assert settings.llm_api_key == "env-local-key"
         assert settings.llm_default_model == "qwen-test-model"
+        assert settings.llm_reasoning_effort == "high"
 
         monkeypatch.setenv("LLM_API_KEY", "runtime-env-key")
         settings_with_runtime_override = load_settings()

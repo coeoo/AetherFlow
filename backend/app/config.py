@@ -70,6 +70,7 @@ class Settings:
     llm_base_url: str = ""
     llm_api_key: str = ""
     llm_default_model: str = ""
+    llm_reasoning_effort: str = ""
     llm_timeout_seconds: int = 20
     llm_wall_clock_timeout_seconds: int = 120
     llm_retry_attempts: int = 2
@@ -102,6 +103,7 @@ def load_settings() -> Settings:
         llm_base_url=os.getenv("LLM_BASE_URL", "").strip(),
         llm_api_key=os.getenv("LLM_API_KEY", "").strip(),
         llm_default_model=os.getenv("LLM_DEFAULT_MODEL", "").strip(),
+        llm_reasoning_effort=os.getenv("LLM_REASONING_EFFORT", "").strip(),
         llm_timeout_seconds=_load_int_setting("LLM_TIMEOUT_SECONDS", 20),
         llm_wall_clock_timeout_seconds=_load_int_setting(
             "LLM_WALL_CLOCK_TIMEOUT_SECONDS",
