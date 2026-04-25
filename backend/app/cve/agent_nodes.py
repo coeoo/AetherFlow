@@ -20,6 +20,7 @@ from app.cve.agent_evidence import normalize_discovery_sources
 from app.cve.agent_evidence import serialize_patch
 from app.cve.agent_evidence import upsert_candidate_artifact
 from app.cve.agent_evidence import upsert_page_node_state
+from app.cve import agent_frontier_skill
 from app.cve.agent_policy import count_consumed_pages
 from app.cve.agent_policy import evaluate_stop_condition
 from app.cve.agent_policy import unexpanded_frontier_items
@@ -65,18 +66,21 @@ _filter_frontier_links = agent_search_tools.filter_frontier_links
 _textual_fix_signal_score = agent_search_tools.textual_fix_signal_score
 _coerce_rank = agent_search_tools.coerce_rank
 
-_HIGH_PRIORITY_UPSTREAM_PATCH_TYPES = {
-    "github_commit_patch",
-    "gitlab_commit_patch",
-    "kernel_commit_patch",
-    "github_pull_patch",
-    "gitlab_merge_request_patch",
-}
-_CODE_FIX_PAGE_ROLES = {
-    "commit_page",
-    "pull_request_page",
-    "merge_request_page",
-}
+_HIGH_PRIORITY_UPSTREAM_PATCH_TYPES = (
+    agent_frontier_skill.HIGH_PRIORITY_UPSTREAM_PATCH_TYPES
+)
+_CODE_FIX_PAGE_ROLES = agent_frontier_skill.CODE_FIX_PAGE_ROLES
+_target_cve_id = agent_frontier_skill.target_cve_id
+_classify_tracker_page_relevance = agent_frontier_skill.classify_tracker_page_relevance
+_should_keep_reference_link_in_frontier = (
+    agent_frontier_skill.should_keep_reference_link_in_frontier
+)
+_filter_candidate_matches_for_page = (
+    agent_frontier_skill.filter_candidate_matches_for_page
+)
+_build_frontier_candidate_records = agent_frontier_skill.build_frontier_candidate_records
+_is_blocked_or_empty_page = agent_frontier_skill.is_blocked_or_empty_page
+
 _STAGE_FALLBACK_TARGET_ROLES_BY_SOURCE = {
     "tracker_page": [
         "commit_page",
@@ -289,147 +293,6 @@ def _append_page_role_history(state: AgentState, *, url: str, role: str, title: 
         return
     page_role_history.append(entry)
     state["page_role_history"] = page_role_history
-
-
-def _target_cve_id(state: AgentState) -> str:
-    return str(state.get("cve_id") or "").strip().upper()
-
-
-def _classify_tracker_page_relevance(
-    snapshot: BrowserPageSnapshot,
-    *,
-    target_cve_id: str,
-) -> str:
-    if snapshot.page_role_hint != "tracker_page" or not target_cve_id:
-        return "unknown"
-    observed_cve_ids = _extract_cve_ids(
-        snapshot.final_url or snapshot.url,
-        snapshot.title,
-        snapshot.accessibility_tree,
-        snapshot.markdown_content,
-    )
-    if not observed_cve_ids:
-        return "unknown"
-    if target_cve_id in observed_cve_ids:
-        return "target"
-    return "off_target"
-
-
-def _should_keep_reference_link_in_frontier(
-    *,
-    source_page_role: str,
-    normalized_url: str,
-    link: PageLink,
-) -> bool:
-    target_role = link.estimated_target_role or classify_page_role(normalized_url)
-    return (
-        source_page_role
-        in {"tracker_page", "mailing_list_page", "bugtracker_page", "repository_page"}
-        and target_role in _CODE_FIX_PAGE_ROLES
-    )
-
-
-def _filter_candidate_matches_for_page(
-    state: AgentState,
-    *,
-    snapshot: BrowserPageSnapshot,
-    candidate_matches: list[dict[str, str]],
-) -> list[dict[str, str]]:
-    if not candidate_matches:
-        return []
-
-    target_cve_id = _target_cve_id(state)
-    tracker_relevance = _classify_tracker_page_relevance(
-        snapshot,
-        target_cve_id=target_cve_id,
-    )
-    filtered_candidates: list[dict[str, str]] = []
-    for candidate in candidate_matches:
-        patch_type = str(candidate.get("patch_type") or "")
-        if snapshot.page_role_hint == "tracker_page":
-            if tracker_relevance == "off_target":
-                continue
-            if patch_type in _HIGH_PRIORITY_UPSTREAM_PATCH_TYPES:
-                # tracker 页应先进入 commit/PR/MR 页面，再从源码托管页下载 patch，
-                # 否则会在证据层绕过 commit_page。
-                continue
-        filtered_candidates.append(candidate)
-    return filtered_candidates
-
-
-def _build_frontier_candidate_records(
-    state: AgentState,
-    *,
-    snapshot: BrowserPageSnapshot,
-    depth: int,
-) -> list[dict[str, object]]:
-    filtered_links = _filter_frontier_links(snapshot.page_role_hint, snapshot.links)
-    max_children_per_node = int(state["budget"].get("max_children_per_node", 5) or 5)
-    target_cve_id = _target_cve_id(state)
-    tracker_relevance = _classify_tracker_page_relevance(
-        snapshot,
-        target_cve_id=target_cve_id,
-    )
-    candidate_records_with_meta: list[tuple[dict[str, object], set[str]]] = []
-    seen_urls: set[str] = set()
-    for link in filtered_links:
-        normalized_link = normalize_frontier_url(link.url)
-        if normalized_link is None or normalized_link in seen_urls:
-            continue
-        matched_cve_ids = _extract_cve_ids(normalized_link, link.text, link.context)
-        if (
-            snapshot.page_role_hint == "tracker_page"
-            and tracker_relevance == "off_target"
-            and target_cve_id
-            and target_cve_id not in matched_cve_ids
-        ):
-            continue
-        if (
-            match_reference_url(normalized_link) is not None
-            and not _should_keep_reference_link_in_frontier(
-                source_page_role=snapshot.page_role_hint,
-                normalized_url=normalized_link,
-                link=link,
-            )
-        ):
-            continue
-        seen_urls.add(normalized_link)
-        candidate_records_with_meta.append(
-            (
-                {
-                    "url": normalized_link,
-                    "anchor_text": link.text,
-                    "link_context": link.context,
-                    "page_role": link.estimated_target_role or classify_page_role(normalized_link),
-                    "score": _score_frontier_candidate(
-                        normalized_url=normalized_link,
-                        link=link,
-                        target_cve_id=target_cve_id,
-                        source_page_role=snapshot.page_role_hint,
-                    ),
-                    "depth": depth,
-                },
-                matched_cve_ids,
-            )
-        )
-    if snapshot.page_role_hint == "tracker_page" and target_cve_id:
-        has_target_tracker_link = any(
-            record.get("page_role") == "tracker_page" and target_cve_id in matched_cve_ids
-            for record, matched_cve_ids in candidate_records_with_meta
-        )
-        if has_target_tracker_link:
-            candidate_records_with_meta = [
-                (record, matched_cve_ids)
-                for record, matched_cve_ids in candidate_records_with_meta
-                if not (
-                    record.get("page_role") == "tracker_page"
-                    and matched_cve_ids
-                    and target_cve_id not in matched_cve_ids
-                )
-            ]
-    candidate_records = [record for record, _ in candidate_records_with_meta]
-    candidate_records.sort(key=lambda item: int(item.get("score", 0) or 0), reverse=True)
-    return candidate_records[:max_children_per_node]
 
 
 def _select_fallback_frontier_urls(
@@ -762,35 +625,6 @@ def _count_page_roles(state: AgentState) -> dict[str, int]:
 
 def _build_budget_usage_summary(state: AgentState) -> dict[str, dict[str, int]]:
     return build_budget_usage_summary(state)
-
-
-def _is_blocked_or_empty_page(snapshot: BrowserPageSnapshot) -> bool:
-    if str(snapshot.final_url or snapshot.url).startswith("chrome-error://"):
-        return True
-    normalized_markdown = " ".join(snapshot.markdown_content.lower().split())
-    normalized_html = " ".join(snapshot.raw_html.lower().split())
-    normalized_title = " ".join(snapshot.title.lower().split())
-    if "unauthorized frame window" in normalized_markdown:
-        return True
-    if "unauthorized frame window" in normalized_html:
-        return True
-    if "requires javascript to be enabled" in normalized_markdown:
-        return True
-    if "requires javascript to be enabled" in normalized_html:
-        return True
-    if "checking connection, please wait" in normalized_markdown:
-        return True
-    if "checking connection, please wait" in normalized_html:
-        return True
-    if "i challenge thee" in normalized_title:
-        return True
-    if "just a moment" in normalized_title:
-        return True
-    if "checking your browser before accessing" in normalized_markdown:
-        return True
-    if "checking your browser before accessing" in normalized_html:
-        return True
-    return False
 
 
 def resolve_seeds_node(state: AgentState) -> AgentState:
