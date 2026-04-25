@@ -30,12 +30,10 @@ from app.cve.agent_state import AgentState
 from app.cve.browser.base import BrowserPageSnapshot
 from app.cve.browser.base import PageLink
 from app.cve.browser.page_role_classifier import classify_page_role
-from app.cve.browser_agent_llm import build_llm_page_view
-from app.cve.browser_agent_llm import build_navigation_context
-from app.cve.browser_agent_llm import call_browser_agent_navigation
 from app.cve.canonical import canonicalize_candidate_url
 from app.cve.chain_tracker import ChainTracker
 from app.cve.decisions import fallback as fallback_decisions
+from app.cve.decisions import navigation as navigation_decisions
 from app.cve.frontier_planner import normalize_frontier_url, plan_frontier, score_frontier_url
 from app.cve.page_analyzer import analyze_page
 from app.cve.patch_downloader import download_patch_candidate
@@ -94,6 +92,9 @@ _filter_frontier_items_by_target_roles = (
 )
 _select_stage_guided_frontier_urls = fallback_decisions.select_stage_guided_frontier_urls
 _build_rule_fallback_decision = fallback_decisions.build_rule_fallback_decision
+build_llm_page_view = navigation_decisions.build_navigation_page_view
+build_navigation_context = navigation_decisions.build_agent_navigation_context
+call_browser_agent_navigation = navigation_decisions.call_browser_agent_navigation
 _normalize_discovery_sources = normalize_discovery_sources
 _build_candidate_record = build_candidate_record
 _merge_evidence = merge_evidence
@@ -668,13 +669,16 @@ def agent_decide_node(state: AgentState) -> AgentState:
 
     if raw_snapshot:
         snapshot = _deserialize_browser_snapshot(raw_snapshot)
-        page_view = build_llm_page_view(
+        page_view = navigation_decisions.build_navigation_page_view(
             snapshot,
             list(current_observation.get("candidates") or []),
             cve_id=str(state.get("cve_id") or ""),
             frontier_candidates=list(current_observation.get("frontier_candidates") or []),
         )
-        navigation_context = build_navigation_context(state, page_view)
+        navigation_context = navigation_decisions.build_agent_navigation_context(
+            state,
+            page_view,
+        )
         max_llm_calls = int(state["budget"].get("max_llm_calls", 0) or 0)
         llm_call_count = len(list(state.get("_llm_decision_log") or []))
         if max_llm_calls > 0 and llm_call_count >= max_llm_calls:

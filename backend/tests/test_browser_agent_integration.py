@@ -82,7 +82,7 @@ class _RecordedLLM:
         self._responses = list(responses)
         self.calls: list[object] = []
 
-    def __call__(self, navigation_context):
+    def __call__(self, navigation_context, **kwargs):
         self.calls.append(navigation_context)
         if not self._responses:
             raise AssertionError("录制的 LLM 响应数量不足。")

@@ -5,6 +5,7 @@ from dataclasses import asdict
 from app.cve.agent_state import build_initial_agent_state
 from app.cve.browser.base import BrowserPageSnapshot
 from app.cve.decisions import fallback
+from app.cve.decisions import navigation
 from app.cve.decisions.fallback import build_rule_fallback_decision
 from app.cve.decisions.fallback import select_fallback_frontier_urls
 
@@ -212,3 +213,87 @@ def test_agent_nodes_keeps_private_fallback_decision_facade() -> None:
         fallback.select_stage_guided_frontier_urls
     )
     assert agent_nodes._build_rule_fallback_decision is fallback.build_rule_fallback_decision
+
+
+def test_navigation_decision_client_builds_context_and_calls_llm(monkeypatch) -> None:
+    snapshot = _make_snapshot(
+        "https://tracker.example.org/CVE-2024-0001",
+        page_role_hint="tracker_page",
+        title="CVE-2024-0001",
+    )
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2024-0001")
+    llm_decision_log: list[dict[str, object]] = []
+    calls: list[tuple[str, object]] = []
+
+    class _FakePageView:
+        url = snapshot.url
+
+    class _FakeNavigationContext:
+        cve_id = state["cve_id"]
+
+    fake_page_view = _FakePageView()
+    fake_navigation_context = _FakeNavigationContext()
+    expected_decision = {
+        "action": "expand_frontier",
+        "reason_summary": "继续探索",
+        "selected_urls": ["https://github.com/acme/project/commit/abcdef1"],
+        "selected_candidate_keys": [],
+        "chain_updates": [],
+        "new_chains": [],
+    }
+
+    def _fake_build_page_view(
+        received_snapshot,
+        received_candidates,
+        *,
+        cve_id: str,
+        frontier_candidates,
+    ):
+        calls.append(("build_page_view", received_snapshot))
+        assert received_snapshot is snapshot
+        assert received_candidates == [{"candidate_url": "https://example.org/fix.patch"}]
+        assert cve_id == "CVE-2024-0001"
+        assert frontier_candidates == [{"url": "https://github.com/acme/project/commit/abcdef1"}]
+        return fake_page_view
+
+    def _fake_build_navigation_context(received_state, page_view):
+        calls.append(("build_context", page_view))
+        assert received_state is state
+        assert page_view is fake_page_view
+        return fake_navigation_context
+
+    def _fake_call_navigation(context, *, llm_decision_log=None):
+        calls.append(("call_llm", context))
+        assert context is fake_navigation_context
+        assert llm_decision_log is llm_decision_log_ref
+        return expected_decision
+
+    llm_decision_log_ref = llm_decision_log
+    monkeypatch.setattr(
+        "app.cve.decisions.navigation.build_llm_page_view",
+        _fake_build_page_view,
+    )
+    monkeypatch.setattr(
+        "app.cve.decisions.navigation.build_navigation_context",
+        _fake_build_navigation_context,
+    )
+    monkeypatch.setattr(
+        "app.cve.decisions.navigation.call_browser_agent_navigation",
+        _fake_call_navigation,
+    )
+
+    navigation_context, decision = navigation.request_navigation_decision(
+        state,
+        snapshot=snapshot,
+        candidates=[{"candidate_url": "https://example.org/fix.patch"}],
+        frontier_candidates=[{"url": "https://github.com/acme/project/commit/abcdef1"}],
+        llm_decision_log=llm_decision_log,
+    )
+
+    assert navigation_context is fake_navigation_context
+    assert decision is expected_decision
+    assert calls == [
+        ("build_page_view", snapshot),
+        ("build_context", fake_page_view),
+        ("call_llm", fake_navigation_context),
+    ]

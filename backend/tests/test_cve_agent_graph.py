@@ -1255,7 +1255,7 @@ def test_agent_decide_node_fallback_limits_cross_domain_expansion(
         {"url": "https://redhat.example.com/c", "depth": 1, "score": 8, "expanded": False},
     ]
 
-    def _raise_timeout(navigation_context):
+    def _raise_timeout(navigation_context, **kwargs):
         raise TimeoutError("llm timeout")
 
     monkeypatch.setattr("app.cve.agent_nodes.call_browser_agent_navigation", _raise_timeout)
@@ -1628,7 +1628,7 @@ def test_agent_decide_node_overrides_needs_human_review_when_expandable_frontier
 
     monkeypatch.setattr(
         "app.cve.agent_nodes.call_browser_agent_navigation",
-        lambda navigation_context: {
+        lambda navigation_context, **kwargs: {
             "action": "needs_human_review",
             "reason_summary": "当前页面没有直接 patch，需要人工看一下。",
             "selected_urls": [],
@@ -2147,7 +2147,7 @@ def test_agent_decide_node_rule_fallback_skips_mailto_and_msgid_noise(
 
     monkeypatch.setattr(
         "app.cve.agent_nodes.call_browser_agent_navigation",
-        lambda navigation_context: {
+        lambda navigation_context, **kwargs: {
             "action": "stop_search",
             "reason_summary": "页面没有直接 patch。",
             "selected_urls": [],
