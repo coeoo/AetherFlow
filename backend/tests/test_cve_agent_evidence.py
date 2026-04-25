@@ -1,14 +1,18 @@
 import uuid
 
 from app.cve import agent_nodes
+from app.cve.agent_evidence import append_decision_history
 from app.cve.agent_evidence import build_candidate_record
 from app.cve.agent_evidence import build_budget_usage_summary
+from app.cve.agent_evidence import build_primary_family_summary
 from app.cve.agent_evidence import count_page_roles
+from app.cve.agent_evidence import ensure_search_node
 from app.cve.agent_evidence import merge_candidate_into_state
 from app.cve.agent_evidence import merge_evidence
 from app.cve.agent_evidence import normalize_discovery_sources
 from app.cve.agent_evidence import serialize_patch
 from app.cve.agent_evidence import upsert_candidate_artifact
+from app.cve.agent_evidence import upsert_page_node_state
 from app.models.cve import CVEPatchArtifact
 
 
@@ -164,18 +168,16 @@ def test_serialize_patch_returns_stable_patch_projection() -> None:
 
 
 def test_agent_nodes_keeps_private_evidence_compatibility_aliases() -> None:
-    assert agent_nodes._merge_evidence(existing=None, incoming={  # noqa: SLF001
-        "candidate_url": "https://example.com/fix.patch",
-        "discovered_from_url": "https://example.com/advisory",
-    }) == merge_evidence(
-        existing=None,
-        incoming={
-            "candidate_url": "https://example.com/fix.patch",
-            "discovered_from_url": "https://example.com/advisory",
-        },
-    )
-    assert agent_nodes._upsert_candidate_artifact is not None  # noqa: SLF001
+    assert agent_nodes._normalize_discovery_sources is normalize_discovery_sources  # noqa: SLF001
+    assert agent_nodes._build_candidate_record is build_candidate_record  # noqa: SLF001
+    assert agent_nodes._merge_evidence is merge_evidence  # noqa: SLF001
+    assert agent_nodes._merge_candidate_into_state is merge_candidate_into_state  # noqa: SLF001
+    assert agent_nodes._upsert_candidate_artifact is upsert_candidate_artifact  # noqa: SLF001
     assert agent_nodes.upsert_candidate_artifact is upsert_candidate_artifact
-    assert agent_nodes._build_budget_usage_summary({"budget": {}}) == build_budget_usage_summary(  # noqa: SLF001
-        {"budget": {}}
-    )
+    assert agent_nodes._upsert_page_node_state is upsert_page_node_state  # noqa: SLF001
+    assert agent_nodes._ensure_search_node is ensure_search_node  # noqa: SLF001
+    assert agent_nodes._append_decision_history is append_decision_history  # noqa: SLF001
+    assert agent_nodes._serialize_patch is serialize_patch  # noqa: SLF001
+    assert agent_nodes._build_primary_family_summary is build_primary_family_summary  # noqa: SLF001
+    assert agent_nodes._count_page_roles is count_page_roles  # noqa: SLF001
+    assert agent_nodes._build_budget_usage_summary is build_budget_usage_summary  # noqa: SLF001

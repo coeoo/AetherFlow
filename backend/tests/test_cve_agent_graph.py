@@ -954,7 +954,7 @@ def test_extract_links_and_candidates_node_derives_commit_patch_candidate_from_b
     monkeypatch.setattr("app.cve.agent_nodes.analyze_page", lambda snapshot: [])
     monkeypatch.setattr("app.cve.agent_nodes.record_search_node", lambda *args, **kwargs: SimpleNamespace(node_id=uuid.uuid4()))
     monkeypatch.setattr("app.cve.agent_nodes.record_search_edge", lambda *args, **kwargs: None)
-    monkeypatch.setattr("app.cve.agent_nodes._upsert_candidate_artifact", lambda *args, **kwargs: SimpleNamespace(evidence_json={"evidence_source_count": 1, "discovery_sources": []}))
+    monkeypatch.setattr("app.cve.agent_nodes.upsert_candidate_artifact", lambda *args, **kwargs: SimpleNamespace(evidence_json={"evidence_source_count": 1, "discovery_sources": []}))
 
     result = extract_links_and_candidates_node(state)
 

@@ -94,6 +94,18 @@ _filter_frontier_items_by_target_roles = (
 )
 _select_stage_guided_frontier_urls = fallback_decisions.select_stage_guided_frontier_urls
 _build_rule_fallback_decision = fallback_decisions.build_rule_fallback_decision
+_normalize_discovery_sources = normalize_discovery_sources
+_build_candidate_record = build_candidate_record
+_merge_evidence = merge_evidence
+_merge_candidate_into_state = merge_candidate_into_state
+_upsert_candidate_artifact = upsert_candidate_artifact
+_upsert_page_node_state = upsert_page_node_state
+_ensure_search_node = ensure_search_node
+_append_decision_history = append_decision_history
+_serialize_patch = serialize_patch
+_build_primary_family_summary = build_primary_family_summary
+_count_page_roles = count_page_roles
+_build_budget_usage_summary = build_budget_usage_summary
 
 
 def _require_session(state: AgentState):
@@ -122,58 +134,6 @@ def _set_phase(run: CVERun, phase: str) -> None:
     run.phase = phase
 
 
-def _normalize_discovery_sources(raw_sources: object) -> list[dict[str, object]]:
-    return normalize_discovery_sources(raw_sources)
-
-
-def _build_candidate_record(
-    *,
-    snapshot_url: str,
-    candidate: dict[str, str],
-    source_kind: str,
-) -> dict[str, object]:
-    return build_candidate_record(
-        snapshot_url=snapshot_url,
-        candidate=candidate,
-        source_kind=source_kind,
-    )
-
-
-def _merge_evidence(
-    *,
-    existing: dict[str, object] | None,
-    incoming: dict[str, object],
-) -> dict[str, object]:
-    return merge_evidence(existing=existing, incoming=incoming)
-
-
-def _merge_candidate_into_state(state: AgentState, candidate_record: dict[str, object]) -> None:
-    merge_candidate_into_state(state, candidate_record)
-
-
-def _upsert_candidate_artifact(
-    session,
-    *,
-    run_id: UUID,
-    candidate_record: dict[str, object],
-    source_node_id: UUID | None,
-):
-    return upsert_candidate_artifact(
-        session,
-        run_id=run_id,
-        candidate_record=candidate_record,
-        source_node_id=source_node_id,
-    )
-
-
-def _upsert_page_node_state(state: AgentState, node: CVESearchNode) -> None:
-    upsert_page_node_state(state, node)
-
-
-def _ensure_search_node(session, *, run_id: UUID, frontier_item: dict[str, object]) -> CVESearchNode:
-    return ensure_search_node(session, run_id=run_id, frontier_item=frontier_item)
-
-
 def _find_frontier_item(
     state: AgentState,
     url: str,
@@ -184,35 +144,6 @@ def _find_frontier_item(
         if str(item.get("url")) == url:
             return item
     return None
-
-
-def _append_decision_history(
-    state: AgentState,
-    *,
-    decision_type: str,
-    reason_summary: str,
-    selected_urls: list[str],
-    selected_candidate_keys: list[str],
-    validated: bool,
-    rejection_reason: str | None,
-) -> None:
-    append_decision_history(
-        state,
-        decision_type=decision_type,
-        reason_summary=reason_summary,
-        selected_urls=selected_urls,
-        selected_candidate_keys=selected_candidate_keys,
-        validated=validated,
-        rejection_reason=rejection_reason,
-    )
-
-
-def _serialize_patch(patch: CVEPatchArtifact) -> dict[str, object]:
-    return serialize_patch(patch)
-
-
-def _build_primary_family_summary(patches: list[CVEPatchArtifact]) -> dict[str, object]:
-    return build_primary_family_summary(patches)
 
 
 def _deserialize_browser_snapshot(raw_snapshot: dict[str, object]) -> BrowserPageSnapshot:
@@ -337,14 +268,6 @@ def _apply_chain_updates(
             break
 
 
-def _count_page_roles(state: AgentState) -> dict[str, int]:
-    return count_page_roles(state)
-
-
-def _build_budget_usage_summary(state: AgentState) -> dict[str, dict[str, int]]:
-    return build_budget_usage_summary(state)
-
-
 def resolve_seeds_node(state: AgentState) -> AgentState:
     session = _require_session(state)
     run = _require_run(session, run_id=state["run_id"])
@@ -378,12 +301,12 @@ def build_initial_frontier_node(state: AgentState) -> AgentState:
         matched_candidate = match_reference_url(normalized_reference)
         if matched_candidate is None:
             continue
-        candidate_record = _build_candidate_record(
+        candidate_record = build_candidate_record(
             snapshot_url=normalized_reference,
             candidate=matched_candidate,
             source_kind="seed",
         )
-        persisted_candidate = _upsert_candidate_artifact(
+        persisted_candidate = upsert_candidate_artifact(
             session,
             run_id=run_id,
             candidate_record=candidate_record,
@@ -491,7 +414,7 @@ def fetch_next_batch_node(state: AgentState) -> AgentState:
         if fetched_count >= batch_limit:
             break
 
-        node = _ensure_search_node(session, run_id=run_id, frontier_item=frontier_item)
+        node = ensure_search_node(session, run_id=run_id, frontier_item=frontier_item)
         try:
             snapshot = bridge.navigate(
                 str(frontier_item["url"]),
@@ -550,7 +473,7 @@ def fetch_next_batch_node(state: AgentState) -> AgentState:
             page_observations[str(frontier_item["url"])] = observation
         frontier_item["expanded"] = True
         frontier_item["source_node_id"] = str(node.node_id)
-        _upsert_page_node_state(state, node)
+        upsert_page_node_state(state, node)
         if str(frontier_item["url"]) not in visited_urls:
             visited_urls.append(str(frontier_item["url"]))
         fetched_count += 1
@@ -666,7 +589,7 @@ def extract_links_and_candidates_node(state: AgentState) -> AgentState:
                         "link_context": str(candidate.get("link_context") or ""),
                     }
                     frontier.append(frontier_item)
-                    _upsert_page_node_state(state, child_node)
+                    upsert_page_node_state(state, child_node)
                 if source_node_uuid is not None and frontier_item.get("source_node_id"):
                     record_search_edge(
                         session,
@@ -686,12 +609,12 @@ def extract_links_and_candidates_node(state: AgentState) -> AgentState:
                     )
 
         for candidate in deduped_candidates:
-            candidate_record = _build_candidate_record(
+            candidate_record = build_candidate_record(
                 snapshot_url=snapshot.final_url or snapshot.url,
                 candidate=candidate,
                 source_kind="page",
             )
-            persisted_candidate = _upsert_candidate_artifact(
+            persisted_candidate = upsert_candidate_artifact(
                 session,
                 run_id=run_id,
                 candidate_record=candidate_record,
@@ -703,7 +626,7 @@ def extract_links_and_candidates_node(state: AgentState) -> AgentState:
             candidate_record["discovery_sources"] = list(
                 persisted_candidate.evidence_json["discovery_sources"]
             )
-            _merge_candidate_into_state(state, candidate_record)
+            merge_candidate_into_state(state, candidate_record)
 
     state["frontier"] = frontier
     state["page_observations"] = page_observations
@@ -888,7 +811,7 @@ def agent_decide_node(state: AgentState) -> AgentState:
     else:
         state["stop_reason"] = None
 
-    _append_decision_history(
+    append_decision_history(
         state,
         decision_type=action,
         reason_summary=reason_summary,
@@ -981,7 +904,7 @@ def download_and_validate_node(state: AgentState) -> AgentState:
                 "evidence_source_count": evidence.get("evidence_source_count"),
             },
         )
-        patches.append(_serialize_patch(patch))
+        patches.append(serialize_patch(patch))
         candidate.download_status = patch.download_status
         candidate.validation_status = "validated" if patch.download_status == "downloaded" else "failed"
         candidate.artifact_id = patch.artifact_id
@@ -1041,14 +964,14 @@ def finalize_run_node(state: AgentState) -> AgentState:
         "patch_found": bool(downloaded_patches),
         "patch_count": len(downloaded_patches),
         "chain_summary": chain_tracker.to_dict_list(),
-        "page_role_counts": _count_page_roles(state),
+        "page_role_counts": count_page_roles(state),
         "pages_visited": count_consumed_pages(state),
         "cross_domain_hops": int(state.get("cross_domain_hops", 0)),
-        "budget_usage": _build_budget_usage_summary(state),
+        "budget_usage": build_budget_usage_summary(state),
     }
     if downloaded_patches:
         summary["primary_patch_url"] = downloaded_patches[0].candidate_url
-        summary.update(_build_primary_family_summary(patches))
+        summary.update(build_primary_family_summary(patches))
         run.status = "succeeded"
         run.stop_reason = str(state.get("stop_reason") or "patches_downloaded")
     else:
