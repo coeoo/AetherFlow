@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 
+from app.config import load_settings
 from app.cve.agent_state import build_initial_agent_state
 from app.cve.browser.base import BrowserPageSnapshot
 from app.cve.decisions import fallback
+from app.cve.decisions import candidate_judge
 from app.cve.decisions import navigation
 from app.cve.decisions.fallback import build_rule_fallback_decision
 from app.cve.decisions.fallback import select_fallback_frontier_urls
@@ -297,3 +300,95 @@ def test_navigation_decision_client_builds_context_and_calls_llm(monkeypatch) ->
         ("build_context", fake_page_view),
         ("call_llm", fake_navigation_context),
     ]
+
+
+def test_candidate_judge_feature_flag_defaults_to_disabled(monkeypatch) -> None:
+    monkeypatch.delenv("AETHERFLOW_CVE_CANDIDATE_JUDGE_ENABLED", raising=False)
+
+    settings = load_settings()
+
+    assert settings.cve_candidate_judge_enabled is False
+
+
+def test_candidate_judge_feature_flag_can_be_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("AETHERFLOW_CVE_CANDIDATE_JUDGE_ENABLED", "true")
+
+    settings = load_settings()
+
+    assert settings.cve_candidate_judge_enabled is True
+
+
+def test_candidate_judge_result_schema_contains_required_fields() -> None:
+    result = candidate_judge.CandidateJudgeResult(
+        candidate_key="commit-key",
+        verdict="accept",
+        confidence=0.91,
+        reason_summary="候选指向上游修复 commit。",
+        rejection_reason="",
+    )
+
+    payload = result.to_dict()
+
+    assert set(payload) == {
+        "candidate_key",
+        "verdict",
+        "confidence",
+        "reason_summary",
+        "rejection_reason",
+    }
+
+
+def test_candidate_judge_client_parses_structured_response(monkeypatch) -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2024-0001")
+    candidate = {
+        "canonical_key": "commit-key",
+        "candidate_url": "https://github.com/acme/project/commit/abcdef1",
+        "patch_type": "github_commit_patch",
+    }
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "candidate_key": "commit-key",
+                                    "verdict": "accept",
+                                    "confidence": 0.87,
+                                    "reason_summary": "候选补丁直接修改受影响代码。",
+                                    "rejection_reason": "",
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+
+    captured_payloads: list[dict[str, object]] = []
+
+    def _fake_post(*args, **kwargs):
+        captured_payloads.append(dict(kwargs.get("json") or {}))
+        return _FakeResponse()
+
+    monkeypatch.setenv("LLM_BASE_URL", "https://llm.example.test/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_DEFAULT_MODEL", "test-model")
+    monkeypatch.setattr("app.cve.decisions.candidate_judge.http_client.post", _fake_post)
+
+    result = candidate_judge.call_candidate_judge(
+        candidate_judge.build_candidate_judge_context(state, candidate),
+    )
+
+    assert result.to_dict() == {
+        "candidate_key": "commit-key",
+        "verdict": "accept",
+        "confidence": 0.87,
+        "reason_summary": "候选补丁直接修改受影响代码。",
+        "rejection_reason": "",
+    }
+    assert captured_payloads[0]["model"] == "test-model"

@@ -75,6 +75,7 @@ class Settings:
     llm_wall_clock_timeout_seconds: int = 120
     llm_retry_attempts: int = 2
     cve_runtime_diagnostic_timeout_seconds: int = 180
+    cve_candidate_judge_enabled: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "artifact_root", _resolve_artifact_root(self.artifact_root))
@@ -113,5 +114,9 @@ def load_settings() -> Settings:
         cve_runtime_diagnostic_timeout_seconds=_load_int_setting(
             "AETHERFLOW_CVE_RUNTIME_DIAGNOSTIC_TIMEOUT_SECONDS",
             180,
+        ),
+        cve_candidate_judge_enabled=_load_bool_setting(
+            "AETHERFLOW_CVE_CANDIDATE_JUDGE_ENABLED",
+            False,
         ),
     )
