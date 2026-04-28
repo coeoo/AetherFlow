@@ -6,6 +6,7 @@ from dataclasses import asdict
 import app.cve.agent_graph as agent_graph_module
 from app.cve.agent_graph import build_cve_patch_graph
 from app.cve.agent_state import build_initial_agent_state
+from app.cve.decisions.candidate_judge import CandidateJudgeResult
 from app.cve.agent_nodes import (
     _build_rule_fallback_decision,
     _build_frontier_candidate_records,
@@ -359,6 +360,148 @@ def test_agent_decide_node_appends_decision_history(seeded_cve_run, db_session) 
         "try_candidate_download",
         "expand_frontier",
     ]
+
+
+def test_agent_decide_node_uses_candidate_judge_when_flag_enabled(monkeypatch) -> None:
+    run_id = uuid.uuid4()
+    monkeypatch.setenv("AETHERFLOW_CVE_CANDIDATE_JUDGE_ENABLED", "true")
+    judged_candidate_keys: list[str] = []
+    recorded_decisions: list[dict[str, object]] = []
+
+    class _FakeSession:
+        def __init__(self) -> None:
+            self.run = SimpleNamespace(
+                run_id=run_id,
+                phase="agent_decide",
+                status="queued",
+                stop_reason=None,
+                summary_json={},
+            )
+
+        def get(self, model, value):
+            if model is CVERun and value == run_id:
+                return self.run
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    def _fake_call_candidate_judge(context):
+        judged_candidate_keys.append(str(context.candidate["canonical_key"]))
+        return CandidateJudgeResult(
+            candidate_key=str(context.candidate["canonical_key"]),
+            verdict="accept",
+            confidence=0.91,
+            reason_summary="可信上游 commit patch。",
+            rejection_reason="",
+        )
+
+    monkeypatch.setattr(
+        "app.cve.agent_nodes.candidate_judge_decisions.call_candidate_judge",
+        _fake_call_candidate_judge,
+    )
+
+    def _fake_record_search_decision(*args, **kwargs):
+        recorded_decisions.append(dict(kwargs))
+
+    monkeypatch.setattr("app.cve.agent_nodes.record_search_decision", _fake_record_search_decision)
+
+    state = build_initial_agent_state(
+        run_id=str(run_id),
+        cve_id="CVE-2024-3094",
+    )
+    state["session"] = _FakeSession()
+    state["direct_candidates"] = [
+        {
+            "candidate_url": "https://github.com/example/repo/commit/abcdef1.patch",
+            "patch_type": "github_commit_patch",
+            "canonical_key": "commit-key",
+        }
+    ]
+
+    result = agent_decide_node(state)
+
+    assert judged_candidate_keys == ["commit-key"]
+    assert result["next_action"] == "try_candidate_download"
+    assert result["selected_candidate_keys"] == ["commit-key"]
+    assert result["decision_history"][-1]["reason_summary"] == "可信上游 commit patch。"
+    assert [decision["decision_type"] for decision in recorded_decisions] == [
+        "rule_fallback",
+        "candidate_judge",
+    ]
+    assert recorded_decisions[-1]["output_payload"]["selected_candidate_keys"] == ["commit-key"]
+
+
+def test_agent_decide_node_candidate_judge_rejects_noise_candidate(monkeypatch) -> None:
+    run_id = uuid.uuid4()
+    monkeypatch.setenv("AETHERFLOW_CVE_CANDIDATE_JUDGE_ENABLED", "true")
+    judged_candidate_keys: list[str] = []
+    recorded_decisions: list[dict[str, object]] = []
+
+    class _FakeSession:
+        def __init__(self) -> None:
+            self.run = SimpleNamespace(
+                run_id=run_id,
+                phase="agent_decide",
+                status="queued",
+                stop_reason=None,
+                summary_json={},
+            )
+
+        def get(self, model, value):
+            if model is CVERun and value == run_id:
+                return self.run
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    def _fake_call_candidate_judge(context):
+        judged_candidate_keys.append(str(context.candidate["canonical_key"]))
+        return CandidateJudgeResult(
+            candidate_key=str(context.candidate["canonical_key"]),
+            verdict="reject",
+            confidence=0.96,
+            reason_summary="这是 CVSS 计算器页面，不是补丁候选。",
+            rejection_reason="cvss_noise",
+        )
+
+    monkeypatch.setattr(
+        "app.cve.agent_nodes.candidate_judge_decisions.call_candidate_judge",
+        _fake_call_candidate_judge,
+    )
+
+    def _fake_record_search_decision(*args, **kwargs):
+        recorded_decisions.append(dict(kwargs))
+
+    monkeypatch.setattr("app.cve.agent_nodes.record_search_decision", _fake_record_search_decision)
+
+    state = build_initial_agent_state(
+        run_id=str(run_id),
+        cve_id="CVE-2024-3094",
+    )
+    state["session"] = _FakeSession()
+    state["direct_candidates"] = [
+        {
+            "candidate_url": "https://nvd.nist.gov/vuln-metrics/cvss/v4-calculator",
+            "patch_type": "patch",
+            "canonical_key": "cvss-noise",
+        }
+    ]
+
+    result = agent_decide_node(state)
+
+    assert judged_candidate_keys == ["cvss-noise"]
+    assert result["next_action"] == "stop_search"
+    assert result["selected_candidate_keys"] == []
+    assert result["stop_reason"] == "candidate_judge_rejected_all"
+    assert result["decision_history"][-1]["reason_summary"] == "这是 CVSS 计算器页面，不是补丁候选。"
+    assert [decision["decision_type"] for decision in recorded_decisions] == [
+        "rule_fallback",
+        "candidate_judge",
+    ]
+    assert recorded_decisions[-1]["output_payload"]["selected_candidate_keys"] == []
+    assert recorded_decisions[-1]["rejection_reason"] == "candidate_judge_rejected_all"
 
 
 def test_agent_decide_node_expands_only_frontier_items_without_expanded_flag(

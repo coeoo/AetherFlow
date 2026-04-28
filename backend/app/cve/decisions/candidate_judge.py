@@ -10,6 +10,7 @@ from app import http_client
 from app.config import load_settings
 
 
+_MAX_PROVIDER_BODY_PREVIEW_CHARS = 300
 _REQUIRED_RESULT_FIELDS = {
     "candidate_key",
     "verdict",
@@ -40,6 +41,18 @@ class CandidateJudgeResult:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class CandidateJudgeSelection:
+    selected_candidate_keys: list[str]
+    results: list[CandidateJudgeResult]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "selected_candidate_keys": list(self.selected_candidate_keys),
+            "results": [result.to_dict() for result in self.results],
+        }
+
+
 def build_candidate_judge_context(
     state: dict[str, object],
     candidate: dict[str, object],
@@ -58,6 +71,53 @@ def build_candidate_judge_context(
             if isinstance(item, dict)
         ],
         current_page_url=str(state.get("current_page_url") or ""),
+    )
+
+
+def select_candidate_keys_with_judge(
+    state: dict[str, object],
+    candidates: list[dict[str, object]],
+) -> CandidateJudgeSelection:
+    selected_candidate_keys: list[str] = []
+    results: list[CandidateJudgeResult] = []
+    for candidate in candidates:
+        canonical_key = str(
+            candidate.get("canonical_key")
+            or candidate.get("canonical_candidate_key")
+            or ""
+        ).strip()
+        if not canonical_key:
+            continue
+        result = call_candidate_judge(build_candidate_judge_context(state, candidate))
+        results.append(result)
+        if result.verdict.strip().lower() != "accept":
+            continue
+        if result.candidate_key.strip() != canonical_key:
+            continue
+        selected_candidate_keys.append(canonical_key)
+    return CandidateJudgeSelection(
+        selected_candidate_keys=selected_candidate_keys,
+        results=results,
+    )
+
+
+def _safe_response_body_preview(response: Any) -> str:
+    text = str(getattr(response, "text", "") or "")
+    text = text.replace("\r", "\\r").replace("\n", "\\n")
+    if len(text) <= _MAX_PROVIDER_BODY_PREVIEW_CHARS:
+        return text
+    return text[:_MAX_PROVIDER_BODY_PREVIEW_CHARS] + "...<truncated>"
+
+
+def _provider_response_context(response: Any) -> str:
+    headers = getattr(response, "headers", {}) or {}
+    content_type = ""
+    if hasattr(headers, "get"):
+        content_type = str(headers.get("content-type", "") or "")
+    return (
+        f"status={getattr(response, 'status_code', 'unknown')}, "
+        f"content_type={content_type or 'unknown'}, "
+        f"body_preview={_safe_response_body_preview(response)!r}"
     )
 
 
@@ -89,9 +149,27 @@ def call_candidate_judge(context: CandidateJudgeContext) -> CandidateJudgeResult
         },
     )
     response.raise_for_status()
-    payload = response.json()
-    content = str(payload["choices"][0]["message"]["content"])
-    result_payload = json.loads(content)
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            "candidate_judge_provider_non_json_response: "
+            f"{_provider_response_context(response)}"
+        ) from exc
+    try:
+        content = str(payload["choices"][0]["message"]["content"])
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError("candidate_judge provider 响应缺少 choices[0].message.content") from exc
+    try:
+        result_payload = json.loads(content)
+    except json.JSONDecodeError as exc:
+        content_preview = content.replace("\r", "\\r").replace("\n", "\\n")
+        if len(content_preview) > _MAX_PROVIDER_BODY_PREVIEW_CHARS:
+            content_preview = content_preview[:_MAX_PROVIDER_BODY_PREVIEW_CHARS] + "...<truncated>"
+        raise ValueError(
+            "candidate_judge message content 不是 JSON object: "
+            f"content_preview={content_preview!r}"
+        ) from exc
     if not isinstance(result_payload, dict):
         raise ValueError("candidate_judge 返回结果不是 JSON object")
     missing_fields = sorted(_REQUIRED_RESULT_FIELDS - set(result_payload))

@@ -32,6 +32,7 @@ from app.cve.browser.base import PageLink
 from app.cve.browser.page_role_classifier import classify_page_role
 from app.cve.canonical import canonicalize_candidate_url
 from app.cve.chain_tracker import ChainTracker
+from app.cve.decisions import candidate_judge as candidate_judge_decisions
 from app.cve.decisions import fallback as fallback_decisions
 from app.cve.decisions import navigation as navigation_decisions
 from app.cve.frontier_planner import normalize_frontier_url, plan_frontier, score_frontier_url
@@ -95,6 +96,7 @@ _build_rule_fallback_decision = fallback_decisions.build_rule_fallback_decision
 build_llm_page_view = navigation_decisions.build_navigation_page_view
 build_navigation_context = navigation_decisions.build_agent_navigation_context
 call_browser_agent_navigation = navigation_decisions.call_browser_agent_navigation
+select_candidate_keys_with_judge = candidate_judge_decisions.select_candidate_keys_with_judge
 _normalize_discovery_sources = normalize_discovery_sources
 _build_candidate_record = build_candidate_record
 _merge_evidence = merge_evidence
@@ -128,6 +130,111 @@ def _require_browser_bridge(state: AgentState):
     if bridge is None:
         raise ValueError("Patch Agent state 缺少 _browser_bridge。")
     return bridge
+
+
+def _apply_candidate_judge_to_download_decision(
+    state: AgentState,
+    *,
+    session,
+    run_id: UUID,
+    node_id: UUID | None,
+    selected_candidate_keys: list[str],
+    reason_summary: str,
+) -> tuple[list[str], str, str | None]:
+    settings = load_settings()
+    if not settings.cve_candidate_judge_enabled:
+        return selected_candidate_keys, reason_summary, None
+
+    direct_candidates = [
+        dict(candidate)
+        for candidate in list(state.get("direct_candidates") or [])
+        if isinstance(candidate, dict)
+    ]
+    if selected_candidate_keys:
+        selected_key_set = {str(key) for key in selected_candidate_keys}
+        direct_candidates = [
+            candidate
+            for candidate in direct_candidates
+            if str(candidate.get("canonical_key")) in selected_key_set
+        ]
+    if not direct_candidates:
+        return selected_candidate_keys, reason_summary, None
+
+    try:
+        selection = select_candidate_keys_with_judge(state, direct_candidates)
+    except Exception:
+        _logger.warning("Candidate Judge 调用失败，保留原候选下载决策", exc_info=True)
+        return selected_candidate_keys, reason_summary, None
+
+    judge_results = selection.results
+    rejection_reason = None
+    if not judge_results:
+        accepted_keys = []
+        updated_reason_summary = "Candidate Judge 未返回可用候选判断。"
+        rejection_reason = "candidate_judge_rejected_all"
+    else:
+        accepted_keys = list(selection.selected_candidate_keys)
+        if accepted_keys:
+            accepted_summaries = [
+                result.reason_summary
+                for result in judge_results
+                if result.candidate_key in accepted_keys and result.reason_summary
+            ]
+            updated_reason_summary = (
+                accepted_summaries[0] if accepted_summaries else "Candidate Judge 接受候选。"
+            )
+        else:
+            rejection_summaries = [
+                result.reason_summary
+                for result in judge_results
+                if result.reason_summary
+            ]
+            updated_reason_summary = (
+                rejection_summaries[0]
+                if rejection_summaries
+                else "Candidate Judge 拒绝全部候选。"
+            )
+            rejection_reason = "candidate_judge_rejected_all"
+
+    record_search_decision(
+        session,
+        run_id=run_id,
+        node_id=node_id,
+        decision_type="candidate_judge",
+        input_payload={
+            "candidate_keys": [
+                str(candidate.get("canonical_key") or "")
+                for candidate in direct_candidates
+            ],
+            "candidates": direct_candidates,
+        },
+        output_payload={
+            "selected_candidate_keys": accepted_keys,
+            "results": [result.to_dict() for result in judge_results],
+        },
+        validated=bool(accepted_keys),
+        model_name=None,
+        rejection_reason=rejection_reason,
+        flush=True,
+    )
+
+    if accepted_keys:
+        accepted_summaries = [
+            result.reason_summary
+            for result in judge_results
+            if result.candidate_key in accepted_keys and result.reason_summary
+        ]
+        return (
+            accepted_keys,
+            updated_reason_summary,
+            None,
+        )
+
+    return (
+        [],
+        updated_reason_summary,
+        "candidate_judge_rejected_all",
+    )
 
 
 def _set_phase(run: CVERun, phase: str) -> None:
@@ -803,13 +910,32 @@ def agent_decide_node(state: AgentState) -> AgentState:
             selected_urls = []
             reason_summary = "仍有候选可校验，覆盖 stop_search 继续下载。"
 
+    candidate_judge_stop_reason: str | None = None
+    if action == "try_candidate_download":
+        selected_candidate_keys, reason_summary, candidate_judge_stop_reason = (
+            _apply_candidate_judge_to_download_decision(
+                state,
+                session=session,
+                run_id=UUID(state["run_id"]),
+                node_id=UUID(state["current_node_id"]) if state.get("current_node_id") else None,
+                selected_candidate_keys=list(selected_candidate_keys),
+                reason_summary=reason_summary,
+            )
+        )
+        if candidate_judge_stop_reason is not None:
+            action = "stop_search"
+            selected_urls = []
+
     state["next_action"] = action
     state["selected_frontier_urls"] = selected_urls if action == "expand_frontier" else []
     state["selected_candidate_keys"] = (
         list(selected_candidate_keys) if action == "try_candidate_download" else []
     )
     if action == "stop_search":
-        state["stop_reason"] = evaluation.reason if evaluation.should_stop else "stop_search"
+        state["stop_reason"] = (
+            candidate_judge_stop_reason
+            or (evaluation.reason if evaluation.should_stop else "stop_search")
+        )
     elif action == "needs_human_review":
         state["stop_reason"] = "needs_human_review"
     else:

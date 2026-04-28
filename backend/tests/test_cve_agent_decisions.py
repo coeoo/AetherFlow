@@ -392,3 +392,90 @@ def test_candidate_judge_client_parses_structured_response(monkeypatch) -> None:
         "rejection_reason": "",
     }
     assert captured_payloads[0]["model"] == "test-model"
+
+
+def test_candidate_judge_client_reports_non_json_provider_response(monkeypatch) -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2024-0001")
+    candidate = {
+        "canonical_key": "commit-key",
+        "candidate_url": "https://github.com/acme/project/commit/abcdef1",
+        "patch_type": "github_commit_patch",
+    }
+
+    class _FakeResponse:
+        status_code = 502
+        headers = {"content-type": "text/html"}
+        text = "<html>bad gateway</html>"
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            raise ValueError("not json")
+
+    def _fake_post(*args, **kwargs):
+        return _FakeResponse()
+
+    monkeypatch.setenv("LLM_BASE_URL", "https://llm.example.test/v1")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_DEFAULT_MODEL", "test-model")
+    monkeypatch.setattr("app.cve.decisions.candidate_judge.http_client.post", _fake_post)
+
+    try:
+        candidate_judge.call_candidate_judge(
+            candidate_judge.build_candidate_judge_context(state, candidate),
+        )
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    assert "candidate_judge_provider_non_json_response" in message
+    assert "status=502" in message
+    assert "content_type=text/html" in message
+    assert "bad gateway" in message
+    assert "test-key" not in message
+
+
+def test_candidate_judge_selection_returns_only_accepted_candidate_keys(monkeypatch) -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2024-3094")
+    candidates = [
+        {
+            "canonical_key": "commit-key",
+            "candidate_url": "https://github.com/example/repo/commit/abcdef1.patch",
+            "patch_type": "github_commit_patch",
+        },
+        {
+            "canonical_key": "cvss-noise",
+            "candidate_url": "https://nvd.nist.gov/vuln-metrics/cvss/v4-calculator",
+            "patch_type": "patch",
+        },
+    ]
+
+    def _fake_call_candidate_judge(context):
+        candidate_key = str(context.candidate["canonical_key"])
+        if candidate_key == "commit-key":
+            return candidate_judge.CandidateJudgeResult(
+                candidate_key=candidate_key,
+                verdict="accept",
+                confidence=0.92,
+                reason_summary="可信上游 commit patch。",
+                rejection_reason="",
+            )
+        return candidate_judge.CandidateJudgeResult(
+            candidate_key=candidate_key,
+            verdict="reject",
+            confidence=0.95,
+            reason_summary="CVSS 计算器不是补丁。",
+            rejection_reason="cvss_noise",
+        )
+
+    monkeypatch.setattr(
+        "app.cve.decisions.candidate_judge.call_candidate_judge",
+        _fake_call_candidate_judge,
+    )
+
+    selection = candidate_judge.select_candidate_keys_with_judge(state, candidates)
+
+    assert selection.selected_candidate_keys == ["commit-key"]
+    assert [result.verdict for result in selection.results] == ["accept", "reject"]
