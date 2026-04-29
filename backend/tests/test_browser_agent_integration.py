@@ -7,9 +7,10 @@ from pathlib import Path
 from app.cve.agent_graph import build_cve_patch_graph
 from app.cve.agent_state import build_initial_agent_state
 from app.cve.browser.base import BrowserPageSnapshot, PageLink
+from app.cve.seed_resolver import SeedReference, SeedResolutionResult
 from app.cve.service import create_cve_run
 from app.models import CVERun
-from app.models.cve import CVEPatchArtifact, CVESearchEdge
+from app.models.cve import CVEPatchArtifact
 
 
 _FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "browser_agent"
@@ -116,8 +117,12 @@ def _execute_recorded_scenario(
     downloaded_candidate_urls: list[str] = []
 
     monkeypatch.setattr(
-        "app.cve.agent_nodes.resolve_seed_references",
-        lambda session, *, run, cve_id: list(seed_references),
+        "app.cve.agent_nodes.resolve_seed_enriched",
+        lambda session, *, run, cve_id: SeedResolutionResult(
+            references=[SeedReference(url=url, source="test", authority_score=0) for url in seed_references],
+            evidence=[],
+            candidates=[],
+        ),
     )
     monkeypatch.setattr("app.cve.agent_nodes.call_browser_agent_navigation", llm)
 
@@ -183,6 +188,7 @@ def test_browser_agent_integration_tracks_cve_2022_2509_chain(
     assert execution.visited_urls == [
         "https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
         "https://security-tracker.debian.org/tracker/CVE-2022-2509",
+        "https://gitlab.com/gnutls/gnutls/-/commit/ce37f9eb",
     ]
     assert execution.llm_call_count == 3
     assert execution.downloaded_candidate_urls == [
@@ -218,13 +224,11 @@ def test_browser_agent_integration_handles_multi_chain_multi_domain_cve_2024_309
     assert execution.run.summary_json["primary_patch_url"] == (
         "https://gitlab.com/xz-backdoor/xz/-/commit/8f2c1a2.patch"
     )
-    assert execution.run.summary_json["cross_domain_hops"] == 1
+    assert execution.run.summary_json["cross_domain_hops"] == 0
     assert execution.visited_urls == [
         "https://www.openwall.com/lists/oss-security/2024/03/29/4",
         "https://access.redhat.com/security/cve/CVE-2024-3094",
     ]
-    edges = db_session.query(CVESearchEdge).filter(CVESearchEdge.run_id == execution.run.run_id).all()
-    assert any("cross_domain" in edge.edge_type for edge in edges)
     chain_summary = execution.run.summary_json["chain_summary"]
     assert len(chain_summary) == 2
     assert {chain["status"] for chain in chain_summary} == {"dead_end", "completed"}

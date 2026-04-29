@@ -46,7 +46,7 @@ from app.cve.search_graph_service import (
     record_search_edge,
     record_search_node,
 )
-from app.cve.seed_resolver import SeedReference, resolve_seed_references
+from app.cve.seed_resolver import SeedReference, resolve_seed_enriched
 from app.models import CVERun
 from app.models.cve import CVECandidateArtifact, CVEPatchArtifact, CVESearchNode
 
@@ -381,9 +381,11 @@ def resolve_seeds_node(state: AgentState) -> AgentState:
     run = _require_run(session, run_id=state["run_id"])
     _set_phase(run, "resolve_seeds")
     session.flush()
-    seed_references = resolve_seed_references(session, run=run, cve_id=state["cve_id"])
-    state["seed_references"] = seed_references
-    if not seed_references:
+    resolution = resolve_seed_enriched(session, run=run, cve_id=state["cve_id"])
+    state["seed_references"] = resolution.references
+    state["patch_evidence"] = resolution.evidence
+    state["patch_candidates"] = resolution.candidates
+    if not resolution.references:
         state["stop_reason"] = "no_seed_references"
     return state
 
@@ -436,6 +438,7 @@ def build_initial_frontier_node(state: AgentState) -> AgentState:
             continue
         seen_candidate_keys.add(canonical_key)
         deduped_candidates.append(candidate)
+
     state["direct_candidates"] = deduped_candidates
 
     tracker = _load_chain_tracker(state)

@@ -94,7 +94,7 @@ def test_resolve_seed_references_records_success_trace(db_session, monkeypatch) 
     db_session.commit()
 
     # 去重 key：urldefrag(url).url，且输出按固定来源顺序分段 + 来源内保序
-    assert references == [
+    assert [ref.url for ref in references] == [
         "https://example.com/official/advisory",
         "https://example.com/shared",
         "https://example.com/program/ref",

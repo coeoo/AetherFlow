@@ -22,7 +22,7 @@ from app.cve.agent_nodes import (
     fetch_next_batch_node,
 )
 from app.cve.browser.base import BrowserPageSnapshot, PageLink
-from app.cve.seed_resolver import SeedReference
+from app.cve.seed_resolver import SeedReference, SeedResolutionResult
 from app.models import CVERun
 from app.models.cve import (
     CVECandidateArtifact,
@@ -118,17 +118,21 @@ def test_patch_agent_graph_records_seed_candidates_frontier_and_decision(
     db_session,
     monkeypatch,
 ) -> None:
-    def _fake_resolve_seed_references(session, *, run, cve_id: str) -> list[SeedReference]:
+    def _fake_resolve_seed_enriched(session, *, run, cve_id: str):
         assert run.run_id == seeded_cve_run.run_id
         assert cve_id == "CVE-2024-3094"
-        return _seed_refs([
-            "https://example.com/fix.patch",
-            "https://security-tracker.debian.org/tracker/CVE-2024-3094",
-        ])
+        return SeedResolutionResult(
+            references=_seed_refs([
+                "https://example.com/fix.patch",
+                "https://security-tracker.debian.org/tracker/CVE-2024-3094",
+            ]),
+            evidence=[],
+            candidates=[],
+        )
 
     monkeypatch.setattr(
-        "app.cve.agent_nodes.resolve_seed_references",
-        _fake_resolve_seed_references,
+        "app.cve.agent_nodes.resolve_seed_enriched",
+        _fake_resolve_seed_enriched,
     )
     monkeypatch.setattr("app.cve.agent_nodes.analyze_page", lambda snapshot: [])
     monkeypatch.setattr(
@@ -2474,6 +2478,198 @@ def test_build_rule_fallback_decision_prefers_pull_request_target_role_for_maili
 
     assert decision["action"] == "expand_frontier"
     assert decision["selected_urls"] == ["https://github.com/acme/project/pull/42"]
+
+
+def test_select_fallback_frontier_urls_skips_redhat_security_navigation_noise() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2022-2509")
+    state["current_page_url"] = "https://access.redhat.com/security/cve/cve-2022-2509"
+    state["browser_snapshots"] = {
+        state["current_page_url"]: asdict(
+            _make_snapshot(
+                state["current_page_url"],
+                page_role_hint="unknown_page",
+                title="cve-details",
+            )
+        )
+    }
+    state["budget"]["max_children_per_node"] = 2
+    state["budget"]["max_cross_domain_expansions"] = 2
+    state["frontier"] = [
+        {
+            "url": "https://access.redhat.com/security/cve/cve-2022-2509",
+            "depth": 1,
+            "score": 220,
+            "expanded": False,
+            "page_role": "unknown_page",
+            "anchor_text": "Skip to navigation",
+            "link_context": "site navigation",
+        },
+        {
+            "url": "https://access.redhat.com/security/vulnerabilities",
+            "depth": 1,
+            "score": 210,
+            "expanded": False,
+            "page_role": "unknown_page",
+            "anchor_text": "Security Bulletins",
+            "link_context": "generic security landing page",
+        },
+        {
+            "url": "https://access.redhat.com/security/security-updates/",
+            "depth": 1,
+            "score": 205,
+            "expanded": False,
+            "page_role": "unknown_page",
+            "anchor_text": "Security Updates",
+            "link_context": "generic security landing page",
+        },
+        {
+            "url": "https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+            "depth": 1,
+            "score": 160,
+            "expanded": False,
+            "page_role": "advisory_page",
+            "anchor_text": "NVD",
+            "link_context": "vendor references",
+        },
+        {
+            "url": "https://github.com/advisories/GHSA-w33j-4mrg-pgc3",
+            "depth": 1,
+            "score": 150,
+            "expanded": False,
+            "page_role": "advisory_page",
+            "anchor_text": "GitHub Advisory",
+            "link_context": "upstream advisory",
+        },
+    ]
+
+    selected_urls = _select_fallback_frontier_urls(state, state["frontier"])
+
+    assert selected_urls == [
+        "https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+        "https://github.com/advisories/GHSA-w33j-4mrg-pgc3",
+    ]
+
+
+def test_select_fallback_frontier_urls_prefers_cross_domain_frontier_over_unknown_page_same_domain_noise() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2022-2509")
+    state["current_page_url"] = "https://access.redhat.com/security/cve/cve-2022-2509"
+    state["browser_snapshots"] = {
+        state["current_page_url"]: asdict(
+            _make_snapshot(
+                state["current_page_url"],
+                page_role_hint="unknown_page",
+                title="cve-details",
+            )
+        )
+    }
+    state["budget"]["max_children_per_node"] = 2
+    state["budget"]["max_cross_domain_expansions"] = 2
+    state["frontier"] = [
+        {
+            "url": "https://access.redhat.com/security/data",
+            "depth": 1,
+            "score": 220,
+            "expanded": False,
+            "page_role": "unknown_page",
+            "anchor_text": "Security Data",
+            "link_context": "site navigation",
+        },
+        {
+            "url": "https://access.redhat.com/security/updates/backporting/",
+            "depth": 1,
+            "score": 210,
+            "expanded": False,
+            "page_role": "unknown_page",
+            "anchor_text": "Backporting Policies",
+            "link_context": "site navigation",
+        },
+        {
+            "url": "https://access.redhat.com/security/updates/classification/",
+            "depth": 1,
+            "score": 205,
+            "expanded": False,
+            "page_role": "unknown_page",
+            "anchor_text": "Severity Ratings",
+            "link_context": "site navigation",
+        },
+        {
+            "url": "https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+            "depth": 1,
+            "score": 160,
+            "expanded": False,
+            "page_role": "advisory_page",
+            "anchor_text": "NVD",
+            "link_context": "vendor references",
+        },
+        {
+            "url": "https://github.com/advisories/GHSA-w33j-4mrg-pgc3",
+            "depth": 1,
+            "score": 150,
+            "expanded": False,
+            "page_role": "advisory_page",
+            "anchor_text": "GitHub Advisory",
+            "link_context": "upstream advisory",
+        },
+    ]
+
+    selected_urls = _select_fallback_frontier_urls(state, state["frontier"])
+
+    assert selected_urls == [
+        "https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+        "https://github.com/advisories/GHSA-w33j-4mrg-pgc3",
+    ]
+
+
+def test_select_fallback_frontier_urls_prefers_advisory_page_over_unknown_page_from_mailing_list() -> None:
+    state = build_initial_agent_state(run_id="run-1", cve_id="CVE-2022-2509")
+    state["current_page_url"] = "https://lists.debian.org/debian-lts-announce/2022/08/msg00002.html"
+    state["browser_snapshots"] = {
+        state["current_page_url"]: asdict(
+            _make_snapshot(
+                state["current_page_url"],
+                page_role_hint="mailing_list_page",
+                title="[SECURITY] [DLA 3070-1] gnutls28 security update",
+            )
+        )
+    }
+    state["budget"]["max_children_per_node"] = 3
+    state["budget"]["max_cross_domain_expansions"] = 3
+    state["frontier"] = [
+        {
+            "url": "https://access.redhat.com/security/cve/CVE-2022-2509",
+            "depth": 1,
+            "score": 220,
+            "expanded": False,
+            "page_role": "unknown_page",
+            "anchor_text": "Red Hat CVE",
+            "link_context": "vendor page",
+        },
+        {
+            "url": "https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+            "depth": 1,
+            "score": 160,
+            "expanded": False,
+            "page_role": "advisory_page",
+            "anchor_text": "NVD",
+            "link_context": "vendor references",
+        },
+        {
+            "url": "https://github.com/advisories/GHSA-w33j-4mrg-pgc3",
+            "depth": 1,
+            "score": 150,
+            "expanded": False,
+            "page_role": "advisory_page",
+            "anchor_text": "GitHub Advisory",
+            "link_context": "upstream advisory",
+        },
+    ]
+
+    selected_urls = _select_fallback_frontier_urls(state, state["frontier"])
+
+    assert selected_urls == [
+        "https://nvd.nist.gov/vuln/detail/CVE-2022-2509",
+        "https://github.com/advisories/GHSA-w33j-4mrg-pgc3",
+    ]
 
 
 def test_build_rule_fallback_decision_prefers_merge_request_target_role_for_bugtracker_chain() -> None:

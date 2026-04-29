@@ -4,7 +4,7 @@ import logging
 
 from app.cve.frontier_planner import plan_frontier
 from app.cve.runtime import execute_cve_run
-from app.cve.seed_resolver import SeedReference, _merge_seed_references
+from app.cve.seed_resolver import SeedReference, SeedResolutionResult, _merge_seed_references
 from app.cve.service import create_cve_run
 from app.models import CVERun
 
@@ -31,8 +31,8 @@ def test_execute_cve_run_fails_with_no_seed_references(db_session, monkeypatch) 
     db_session.commit()
 
     monkeypatch.setattr(
-        "app.cve.agent_nodes.resolve_seed_references",
-        lambda session, *, run, cve_id: [],
+        "app.cve.agent_nodes.resolve_seed_enriched",
+        lambda session, *, run, cve_id: SeedResolutionResult(references=[], evidence=[], candidates=[]),
     )
     monkeypatch.setattr("app.cve.runtime.SyncBrowserBridge", lambda backend: _FakeBridge())
     monkeypatch.setattr("app.cve.runtime.PlaywrightBackend", lambda **kwargs: object())
@@ -52,11 +52,11 @@ def test_execute_cve_run_marks_failure_when_seed_resolution_raises(
     run = create_cve_run(db_session, cve_id="CVE-2024-3094")
     db_session.commit()
 
-    def _raise_seed_error(session, *, run, cve_id: str) -> list[str]:
+    def _raise_seed_error(session, *, run, cve_id: str):
         raise RuntimeError("nvd timeout")
 
     monkeypatch.setattr(
-        "app.cve.agent_nodes.resolve_seed_references",
+        "app.cve.agent_nodes.resolve_seed_enriched",
         _raise_seed_error,
     )
     monkeypatch.setattr("app.cve.runtime.SyncBrowserBridge", lambda backend: _FakeBridge())

@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 from app.cve.agent_policy import build_default_budget
+from app.cve.candidate_generator import PatchCandidate
+from app.cve.patch_evidence import PatchEvidence
 from app.cve.seed_resolver import SeedReference
 
 
@@ -71,6 +73,8 @@ class AgentState(TypedDict, total=False):
     budget: dict[str, int]
     initial_budget: dict[str, int]
     seed_references: list[SeedReference]
+    patch_evidence: list[PatchEvidence]
+    patch_candidates: list[PatchCandidate]
     frontier: list[AgentFrontierItem]
     direct_candidates: list[AgentCandidateRecord]
     page_nodes: list[AgentPageNodeRecord]
@@ -101,6 +105,8 @@ def build_initial_agent_state(*, run_id: str, cve_id: str) -> AgentState:
         "budget": dict(budget),
         "initial_budget": dict(budget),
         "seed_references": [],
+        "patch_evidence": [],
+        "patch_candidates": [],
         "frontier": [],
         "direct_candidates": [],
         "page_nodes": [],
