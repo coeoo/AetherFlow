@@ -17,7 +17,7 @@ def collect_home_summary(settings: Settings) -> dict[str, object]:
             "scene_name": "cve",
             "title": "CVE 补丁检索",
             "description": "输入一个 CVE 编号，快速得到补丁线索、证据和 Diff。",
-            "path": "/cve",
+            "path": "/patch",
             "recent_status": "最近暂无运行",
         },
         {

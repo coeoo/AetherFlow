@@ -654,6 +654,41 @@ def _classify_execution_outcome(report: dict[str, object]) -> str:
     return "failed"
 
 
+_NON_MAINTAINED_COMPONENT_URL_MARKERS = (
+    "wpscan.com/",
+    "plugins.trac.wordpress.org/",
+    "wordpress.org/plugins/",
+    "wordfence.com/",
+    "source=wordfence",
+)
+
+_NO_PUBLIC_PATCH_STOP_REASONS = {
+    "no_patch_candidates",
+    "no_remaining_frontier_or_candidates",
+}
+
+
+def _has_navigation_marker(report: dict[str, object], markers: tuple[str, ...]) -> bool:
+    navigation_path = report.get("navigation_path")
+    if not isinstance(navigation_path, list):
+        return False
+    normalized_entries = [str(entry).lower() for entry in navigation_path]
+    return any(
+        marker in entry
+        for entry in normalized_entries
+        for marker in markers
+    )
+
+
+def _looks_like_non_maintained_component(report: dict[str, object]) -> bool:
+    return _has_navigation_marker(report, _NON_MAINTAINED_COMPONENT_URL_MARKERS)
+
+
+def _looks_like_no_public_patch(report: dict[str, object]) -> bool:
+    stop_reason = str(report.get("stop_reason") or "")
+    return stop_reason in _NO_PUBLIC_PATCH_STOP_REASONS
+
+
 def _classify_failure_category(report: dict[str, object]) -> str | None:
     execution_outcome = _classify_execution_outcome(report)
     verdict = str(report.get("verdict") or "")
@@ -673,6 +708,11 @@ def _classify_failure_category(report: dict[str, object]) -> str | None:
         return "patch_download_failed"
     if stop_reason == "diagnostic_timeout":
         return "diagnostic_timeout"
+    if verdict == "PASS" and not bool(report.get("patch_found")):
+        if _looks_like_non_maintained_component(report):
+            return "non_maintained_component"
+        if _looks_like_no_public_patch(report):
+            return "no_public_patch"
     if int(report.get("llm_failure_count") or 0) > 0:
         return "llm_timeout_rule_fallback"
     if not bool(report.get("patch_found")):

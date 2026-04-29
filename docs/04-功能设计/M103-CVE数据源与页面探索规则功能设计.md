@@ -157,6 +157,22 @@ NVD CVSS calculator 的处理原则是：
 - 即使历史 frontier 中已经存在该链接，规则 fallback 也必须跳过；
 - LLM 如果判断当前页面无补丁线索，系统不应继续消耗预算访问其它 CVSS calculator。
 
+### Acceptance 失败分类语义
+
+Acceptance 报告中的 `failure_category` 用于把系统缺陷和可解释的非行动项拆开，避免后续
+Phase 3 迭代把所有 `status=failed` 都当成同一类问题处理。
+
+当前已明确的无补丁类语义：
+
+- `no_public_patch`：验收判定为 `PASS`、未找到 patch，且停止原因是无补丁候选或无剩余
+  frontier / candidate。代表样本包括只落在 NVD / CVE.org / VulDB 信息页的 no-patch 路径。
+- `non_maintained_component`：验收判定为 `PASS`、未找到 patch，且探索路径指向当前 CVE
+  Patch Agent 不优先维护的组件生态，例如 WordPress 插件、WPScan、WordPress Trac 或
+  Wordfence 来源。该分类表示不应直接扩展 downloader 或主导航链路。
+
+该分类只影响 acceptance 报告和 evaluation-driven iteration 的决策入口，不改变主链运行、
+Candidate Judge、patch 下载策略或用户可见的 patch 证据。
+
 ---
 
 ## 📊 功能清单

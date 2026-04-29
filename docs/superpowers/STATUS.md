@@ -11,11 +11,13 @@
 
 ## 当前活跃事项
 
+- Active architecture ADR: `docs/design/adr-evidence-first-patch-engine.md`
+- Active execution prompt: `docs/design/codex-prompt-phase-a.md`
 - Active spec: `docs/superpowers/specs/2026-04-25-cve-agent-boundary-refactor-design.md`
 - Active plan: `docs/superpowers/plans/2026-04-25-cve-agent-boundary-refactor.md`
-- Active phase: Phase 2 Minimal Candidate Judge Agent
-- Current next checkpoint: 核对 Candidate Judge 已完成步骤、未提交步骤、baseline 结果和当前 git diff。
-- Last recorded baseline: mock candidate baseline PASS，见 active plan 的 Task 2.2 Step 5。
+- Active phase: CVE Evidence-First Phase A pre-implementation
+- Current next checkpoint: 按 active ADR 与阶段 A prompt 执行 seed evidence 基础层改造，保持 `LangGraph` 主链、`agent_nodes.py` 兼容面、`source_type="cve_seed_resolve"`、`run.phase` / `stop_reason` 与当前 acceptance 行为不变。
+- Last recorded baseline: mock candidate baseline PASS，见 active plan 的 Task 2.2 Step 5。Evidence-First ADR 已采纳为当前架构方向，但阶段 A 代码尚未开始，暂无新的实现后 baseline。
 
 ## 当前权威主文档入口
 

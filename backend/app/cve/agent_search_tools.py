@@ -120,6 +120,10 @@ def is_navigation_noise_url(url: str) -> bool:
         "https://www.debian.org/security/",
         "https://www.debian.org/lts/security/",
         "https://www.debian.org/security/faq",
+        "https://access.redhat.com/security",
+        "https://access.redhat.com/security/",
+        "https://access.redhat.com/security/vulnerabilities",
+        "https://access.redhat.com/security/security-updates/",
     }:
         return True
     path = parsed.path or "/"

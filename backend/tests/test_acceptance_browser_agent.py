@@ -455,6 +455,72 @@ def test_failed_run_does_not_hide_behind_acceptance_pass() -> None:
     assert enriched_report["failure_category"] == "patch_download_failed"
 
 
+def test_wordpress_wpscan_no_patch_pass_is_classified_as_non_maintained_component() -> None:
+    report = {
+        "status": "failed",
+        "stop_reason": "stop_search",
+        "patch_found": False,
+        "verdict": "PASS",
+        "error": None,
+        "llm_failure_count": 1,
+        "navigation_path": [
+            "advisory_page: https://nvd.nist.gov/vuln/detail/CVE-2025-13820",
+            "unknown_page: https://wpscan.com/vulnerability/21bc9b41-a967-42dc-9916-bb993b05709c/",
+            "advisory_page: https://github.com/advisories/GHSA-77g2-3gj2-8h4q",
+        ],
+    }
+
+    enriched_report = _classify_acceptance_outcome(report)
+
+    assert enriched_report["execution_outcome"] == "failed"
+    assert enriched_report["acceptance_verdict"] == "PASS"
+    assert enriched_report["failure_category"] == "non_maintained_component"
+
+
+def test_wordpress_trac_no_patch_pass_is_classified_as_non_maintained_component() -> None:
+    report = {
+        "status": "failed",
+        "stop_reason": "stop_search",
+        "patch_found": False,
+        "verdict": "PASS",
+        "error": None,
+        "llm_failure_count": 0,
+        "navigation_path": [
+            "advisory_page: https://nvd.nist.gov/vuln/detail/CVE-2025-14428",
+            "unknown_page: https://plugins.trac.wordpress.org/changeset/3423407/",
+            "advisory_page: https://nvd.nist.gov/vuln-metrics/cvss/v3-calculator?source=Wordfence",
+        ],
+    }
+
+    enriched_report = _classify_acceptance_outcome(report)
+
+    assert enriched_report["execution_outcome"] == "failed"
+    assert enriched_report["acceptance_verdict"] == "PASS"
+    assert enriched_report["failure_category"] == "non_maintained_component"
+
+
+def test_no_patch_candidate_pass_is_classified_as_no_public_patch() -> None:
+    report = {
+        "status": "failed",
+        "stop_reason": "no_patch_candidates",
+        "patch_found": False,
+        "verdict": "PASS",
+        "error": None,
+        "llm_failure_count": 0,
+        "navigation_path": [
+            "advisory_page: https://nvd.nist.gov/vuln/detail/CVE-2026-0544",
+            "unknown_page: https://www.cve.org/CVERecord?id=CVE-2026-0544",
+            "unknown_page: https://vuldb.com/vuln/339331",
+        ],
+    }
+
+    enriched_report = _classify_acceptance_outcome(report)
+
+    assert enriched_report["execution_outcome"] == "failed"
+    assert enriched_report["acceptance_verdict"] == "PASS"
+    assert enriched_report["failure_category"] == "no_public_patch"
+
+
 def test_temporary_acceptance_env_applies_profile_defaults_and_allows_cli_override(
     monkeypatch,
 ) -> None:

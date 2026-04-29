@@ -3,6 +3,7 @@ from __future__ import annotations
 from urllib.parse import urlparse
 
 from app.cve.agent_policy import unexpanded_frontier_items
+from app.cve.frontier_planner import normalize_frontier_url
 from app.cve.agent_search_tools import coerce_rank
 from app.cve.agent_search_tools import should_skip_frontier_link
 from app.cve.agent_search_tools import textual_fix_signal_score
@@ -49,16 +50,30 @@ STAGE_FALLBACK_TARGET_ROLES_BY_SOURCE = {
     ],
 }
 
+FALLBACK_ROLE_PRIORITY = {
+    "commit_page": 0,
+    "pull_request_page": 1,
+    "merge_request_page": 1,
+    "download_page": 2,
+    "tracker_page": 3,
+    "bugtracker_page": 4,
+    "advisory_page": 5,
+    "mailing_list_page": 6,
+    "repository_page": 7,
+    "unknown_page": 8,
+}
+
 
 def select_fallback_frontier_urls(
     state: AgentState,
     frontier_items: list[dict[str, object]],
 ) -> list[str]:
-    current_page_url = str(state.get("current_page_url") or "").strip()
+    raw_current_page_url = str(state.get("current_page_url") or "").strip()
+    current_page_url = normalize_frontier_url(raw_current_page_url) or raw_current_page_url
     current_host = urlparse(current_page_url).hostname or current_page_url
     current_page_role = classify_page_role(current_page_url) if current_page_url else ""
     snapshots = dict(state.get("browser_snapshots") or {})
-    current_snapshot = dict(snapshots.get(current_page_url) or {})
+    current_snapshot = dict(snapshots.get(raw_current_page_url) or snapshots.get(current_page_url) or {})
     if current_snapshot:
         current_page_role = str(current_snapshot.get("page_role_hint") or current_page_role)
     stage_role_order = {
@@ -67,19 +82,30 @@ def select_fallback_frontier_urls(
             STAGE_FALLBACK_TARGET_ROLES_BY_SOURCE.get(current_page_role, [])
         )
     }
-    visited_urls = {str(url) for url in state.get("visited_urls", [])}
+    visited_urls = {
+        normalize_frontier_url(str(url)) or str(url).strip()
+        for url in state.get("visited_urls", [])
+        if str(url).strip()
+    }
     max_children = int(state["budget"].get("max_children_per_node", 1) or 1)
     remaining_cross_domain_budget = int(
         state["budget"].get("max_cross_domain_expansions", 0) or 0
     )
 
     same_domain_urls: list[tuple[int, int, int, str]] = []
+    same_domain_unknown_urls: list[tuple[int, int, int, str]] = []
     cross_domain_urls: list[tuple[int, int, int, str]] = []
     seen_urls: set[str] = set()
 
     for item in frontier_items:
-        url = str(item.get("url") or "").strip()
-        if not url or url in seen_urls or url in visited_urls:
+        raw_url = str(item.get("url") or "").strip()
+        url = normalize_frontier_url(raw_url) or raw_url
+        if (
+            not url
+            or url == current_page_url
+            or url in seen_urls
+            or url in visited_urls
+        ):
             continue
         synthetic_link = PageLink(
             url=url,
@@ -92,17 +118,26 @@ def select_fallback_frontier_urls(
             continue
         seen_urls.add(url)
         item_host = urlparse(url).hostname or url
+        item_role = str(item.get("page_role") or synthetic_link.estimated_target_role or "").strip()
         item_role_rank = coerce_rank(item.get("_target_role_rank"))
+        if item_role_rank == 999 and item_role in FALLBACK_ROLE_PRIORITY:
+            item_role_rank = FALLBACK_ROLE_PRIORITY[item_role]
         item_score = int(item.get("score", 0) or 0)
         item_text_score = textual_fix_signal_score(item)
         if current_host and item_host == current_host:
-            same_domain_urls.append((item_role_rank, -item_score, -item_text_score, url))
+            target_bucket = (
+                same_domain_unknown_urls
+                if current_page_role == "unknown_page" and item_role == "unknown_page"
+                else same_domain_urls
+            )
+            target_bucket.append((item_role_rank, -item_score, -item_text_score, url))
         else:
-            if item_role_rank == 999 and item.get("page_role") in stage_role_order:
-                item_role_rank = stage_role_order[str(item.get("page_role"))]
+            if item_role in stage_role_order:
+                item_role_rank = stage_role_order[item_role]
             cross_domain_urls.append((item_role_rank, -item_score, -item_text_score, url))
 
     same_domain_urls.sort()
+    same_domain_unknown_urls.sort()
     cross_domain_urls.sort()
     if remaining_cross_domain_budget > 0 and cross_domain_urls:
         best_cross_domain_rank = cross_domain_urls[0][0]
@@ -118,6 +153,8 @@ def select_fallback_frontier_urls(
         ]
     else:
         selected_urls = [url for _, _, _, url in same_domain_urls[:max_children]]
+    if not selected_urls and same_domain_unknown_urls:
+        selected_urls = [url for _, _, _, url in same_domain_unknown_urls[:max_children]]
     remaining_slots = max_children - len(selected_urls)
     if remaining_slots > 0 and remaining_cross_domain_budget > 0:
         selected_urls.extend(
@@ -127,6 +164,14 @@ def select_fallback_frontier_urls(
                     : min(remaining_slots, remaining_cross_domain_budget)
                 ]
                 if url not in selected_urls and not selected_urls
+            ]
+        )
+    if remaining_slots > 0 and not selected_urls:
+        selected_urls.extend(
+            [
+                url
+                for _, _, _, url in same_domain_unknown_urls[:remaining_slots]
+                if url not in selected_urls
             ]
         )
     return selected_urls

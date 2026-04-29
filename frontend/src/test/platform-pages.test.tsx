@@ -54,7 +54,7 @@ test("home page renders aggregated summary from home-summary api", async () => {
                 scene_name: "cve",
                 title: "CVE 补丁检索",
                 description: "输入一个 CVE 编号，快速得到补丁线索、证据和 Diff。",
-                path: "/cve",
+                path: "/patch",
                 recent_status: "CVE-2024-3094 · running",
               },
               {

@@ -48,6 +48,13 @@
 
 当前设计包聚焦最复杂、最难复刻的 CVE Browser Agent 主链：
 
+- [adr-evidence-first-patch-engine.md](adr-evidence-first-patch-engine.md)
+  - 覆盖 Browser-Agent-first 向 Evidence-first、Candidate-driven、Agent-fallback 分层引擎的架构决策、阶段边界和非目标。
+- [cve-patch-acquisition-strategy-report.md](cve-patch-acquisition-strategy-report.md)
+  - 覆盖该架构决策的策略分析、数据源比较和演进路线论证；它是 ADR 的背景材料，不是直接执行入口。
+- [codex-prompt-phase-a.md](codex-prompt-phase-a.md)
+  - 覆盖 Evidence-First 阶段 A 的执行提示词；它是实现入口，不替代长期实现设计。
+
 - [cve-agent-orchestration.md](cve-agent-orchestration.md)
   - 覆盖 Worker -> runtime -> LangGraph -> node 的编排链路。
 - [cve-agent-state-and-budget.md](cve-agent-state-and-budget.md)

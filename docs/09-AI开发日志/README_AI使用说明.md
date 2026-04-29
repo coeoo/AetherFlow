@@ -55,8 +55,9 @@
 - `downloaded` / `failed` 是候选下载终态，图节点不应重复下载终态候选。
 - NVD CVSS calculator（`/vuln-metrics/cvss/`）属于导航噪声，不应进入 frontier 或规则 fallback。
 - WordPress、WPScan、Trac 插件等非维护范围组件应优先进入“跳过/非行动项”判断，不应默认扩展下载策略。
-- CVE Agent Boundary Refactor Phase 1 已完成并通过 mock candidate baseline 对比；Phase 2 Task 2.1 已引入 Candidate Judge 接口但默认关闭，尚未接入主链。
-- 下一步是 Phase 2 Task 2.2：在 feature flag 下接入 Candidate Judge；接入前需要重点 review 候选排序/过滤边界，并在 flag on 场景复跑 baseline 对比。
+- CVE Agent Boundary Refactor Phase 1 已完成并通过 mock candidate baseline 对比；Phase 2 Task 2.1 已引入 Candidate Judge 接口，Task 2.2 已在 feature flag 下接入主链。
+- Candidate Judge 仍由 `AETHERFLOW_CVE_CANDIDATE_JUDGE_ENABLED` 控制，默认关闭；flag on 时只影响 `try_candidate_download` 前的候选筛选，provider 异常时降级保留原候选决策。
+- Phase 2 收口验证已覆盖 `CVE-2022-2509` 和 `CVE-2024-3094` 两个代表性 flag on candidate report，均正常写入 `candidate_judge` 决策且无 `patch_quality_degraded` / `high_value_path_regressed`；下一步进入 Phase 3 evaluation-driven iteration，后续改动必须从 baseline failure category 中选择目标。
 - `acceptance_browser_agent --all` 会串行执行真实浏览器场景，即使使用 `llm-timeout-forced` mock mode 也仍会抓取真实页面和下载 patch；外层建议使用 `timeout 180s`，与 `all_under_3_minutes` 验收语义一致。
 - 普通 pytest、轻量脚本和不访问真实浏览器网络链路的验证命令仍使用 `timeout 60s`。
 - `backend/results/` 是验收运行产物，默认不提交。

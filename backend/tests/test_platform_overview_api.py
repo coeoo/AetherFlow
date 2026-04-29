@@ -93,6 +93,8 @@ def test_home_summary_aggregates_recent_jobs_deliveries_and_health(client, db_se
     assert body["code"] == 0
     assert body["data"]["platform_name"] == "AetherFlow"
     assert len(body["data"]["scenes"]) == 2
+    cve_scene = next(scene for scene in body["data"]["scenes"] if scene["scene_name"] == "cve")
+    assert cve_scene["path"] == "/patch"
     assert len(body["data"]["recent_jobs"]) == 2
     assert body["data"]["recent_jobs"][0]["scene_run_id"] is not None
     assert len(body["data"]["recent_deliveries"]) == 1
