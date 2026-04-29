@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for understanding backend layer guidance and structure references during project analysis."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend spec index for understanding frontend layer guidance and structure references during project analysis."}
+{"file": ".trellis/tasks/04-29-analyze-current-project/prd.md", "reason": "Task requirements and analysis scope for the current Trellis project analysis."}
+{"file": ".trellis/tasks/04-29-analyze-current-project/research/project-analysis.md", "reason": "Persisted project architecture, runtime, and hotspot analysis for any follow-up Trellis work on this task."}

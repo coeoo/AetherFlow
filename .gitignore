@@ -1,4 +1,5 @@
 .ace-tool/
 .worktrees/
 .env.local
+.env.local.bak.*
 backend/results/

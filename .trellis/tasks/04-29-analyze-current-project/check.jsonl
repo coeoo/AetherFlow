@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for validating backend-related analysis statements against project guidance."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend spec index for validating frontend-related analysis statements against project guidance."}
+{"file": ".trellis/tasks/04-29-analyze-current-project/prd.md", "reason": "Analysis scope and acceptance criteria for the current Trellis project analysis."}
+{"file": ".trellis/tasks/04-29-analyze-current-project/research/project-analysis.md", "reason": "Persisted project analysis summary for validating later conclusions against the same local facts."}

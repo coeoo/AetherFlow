@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/04-29-rewrite-agents-md/prd.md", "reason": "Task scope and acceptance criteria for rewriting the repo-level AGENTS.md."}
+{"file": ".trellis/workflow.md", "reason": "Authoritative Trellis workflow document that AGENTS.md should reference rather than duplicate."}
+{"file": "docs/design/README.md", "reason": "Defines that AGENTS.md should hold collaboration rules and indexes, not long implementation design."}
+{"file": "docs/03-系统架构/架构设计.md", "reason": "Current architecture truth for runtime roles and stable route-level project framing."}

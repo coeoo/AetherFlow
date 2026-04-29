@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/04-29-rewrite-agents-md/prd.md", "reason": "Task scope and acceptance criteria for validating the AGENTS rewrite."}
+{"file": ".trellis/workflow.md", "reason": "AGENTS must reference but not duplicate the workflow contract."}
+{"file": "docs/design/README.md", "reason": "AGENTS must stay at collaboration-rule and index level, not long-form design."}
+{"file": "docs/03-系统架构/架构设计.md", "reason": "Cross-check current stable runtime and route truths mentioned in AGENTS."}
