@@ -173,14 +173,13 @@
   - `docs/design/*` 和 `docs/04-*` 当前更像结构化导航和实现说明。
   - 结论仍需以实际入口代码为准。
 
-## 7. 需要注意的一个小边界
+## 7. 首页场景 path 已对齐为 `/patch`
 
-- `backend/app/platform/home_summary.py` 的场景配置里，CVE path 是 `"/cve"`。
-- 但前端 `frontend/src/app/router.tsx` 的真实路由是 `"/patch"`。
-- 当前前端 `frontend/src/features/home/presentation.ts::getScenePath()` 对 `scene_name == "cve"` 做了映射，最终仍会跳到 `"/patch"`。
+- `backend/app/platform/home_summary.py` 的场景配置（line 20）已使用 `"path": "/patch"`，与前端 `frontend/src/app/router.tsx` 的真实路由 `/patch` 直接对齐。
+- 前端 `frontend/src/features/home/presentation.ts::getScenePath()` 对 `scene_name == "cve"` 仍保留映射作为兼容兜底，但已不再承担"修正后端口径"的责任。
 
 结论：
-- 这不是立即的运行 bug，但属于“后端 scene path 与前端真实路由不完全一致，靠前端展示层兜底”的边界点。
+- 已不存在 path 不一致问题；`getScenePath()` 的 scene_name 映射只是历史兼容兜底，可作为后续清理项跟踪。
 
 ## 8. 综合判断
 
