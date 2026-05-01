@@ -30,6 +30,7 @@ from app.cve.agent_state import AgentState
 from app.cve.browser.base import BrowserPageSnapshot
 from app.cve.browser.base import PageLink
 from app.cve.browser.page_role_classifier import classify_page_role
+from app.cve.candidate_generator import PatchCandidate, generate_candidates
 from app.cve.canonical import canonicalize_candidate_url
 from app.cve.chain_tracker import ChainTracker
 from app.cve.decisions import candidate_judge as candidate_judge_decisions
@@ -398,8 +399,10 @@ def build_initial_frontier_node(state: AgentState) -> AgentState:
 
     run_id = UUID(state["run_id"])
     seed_references: list[SeedReference] = list(state.get("seed_references", []))
+    patch_evidence_list = list(state.get("patch_evidence") or [])
+
+    # seed_authority_by_url 来自 seed_references 的 normalized URL，用于 frontier 评分
     seed_authority_by_url: dict[str, int] = {}
-    direct_candidates: list[dict[str, object]] = []
     for reference in seed_references:
         normalized_reference = normalize_frontier_url(reference.url)
         if normalized_reference is None:
@@ -408,55 +411,31 @@ def build_initial_frontier_node(state: AgentState) -> AgentState:
             seed_authority_by_url.get(normalized_reference, 0),
             int(reference.authority_score),
         )
-        matched_candidate = match_reference_url(normalized_reference)
-        if matched_candidate is None:
-            continue
-        candidate_record = build_candidate_record(
-            snapshot_url=normalized_reference,
-            candidate=matched_candidate,
-            source_kind="seed",
-        )
-        persisted_candidate = upsert_candidate_artifact(
-            session,
-            run_id=run_id,
-            candidate_record=candidate_record,
-            source_node_id=None,
-        )
-        candidate_record["evidence_source_count"] = int(
-            persisted_candidate.evidence_json["evidence_source_count"]
-        )
-        candidate_record["discovery_sources"] = list(
-            persisted_candidate.evidence_json["discovery_sources"]
-        )
-        direct_candidates.append(candidate_record)
 
-    deduped_candidates: list[dict[str, object]] = []
-    seen_candidate_keys: set[str] = set()
-    for candidate in direct_candidates:
-        canonical_key = str(candidate["canonical_key"])
-        if canonical_key in seen_candidate_keys:
-            continue
-        seen_candidate_keys.add(canonical_key)
-        deduped_candidates.append(candidate)
+    # 完整版：所有直接候选都经 candidate_generator 派生。
+    # 每个 evidence 单独调 generator，让同 canonical_key 的多个 evidence 在
+    # upsert_candidate_artifact 内部合并 evidence_source_count / discovery_sources。
+    direct_candidates: list[dict[str, object]] = []
+    seen_canonical_keys: set[str] = set()
 
-    # 阶段 B：将富化管道的 PatchCandidate 合并到 direct_candidates
-    # bridge: PatchCandidate dataclass → build_candidate_record 要求的 dict[str, str]
-    for pc in state.get("patch_candidates", []):
+    def _persist(pc: PatchCandidate, *, source_kind: str, snapshot_url: str) -> None:
         if not pc.downloadable:
-            continue
-        if pc.canonical_key in seen_candidate_keys:
-            continue
-        bridge_dict = {
+            return
+        bridge_dict: dict[str, str] = {
             "candidate_url": pc.candidate_url,
             "patch_type": pc.patch_type,
         }
         candidate_record = build_candidate_record(
-            snapshot_url=pc.candidate_url,
+            snapshot_url=snapshot_url,
             candidate=bridge_dict,
-            source_kind="seed_enriched",
+            source_kind=source_kind,
         )
+        # PatchCandidate 已计算过 canonical_key（与 build_candidate_record 内部 canonicalize 等价），
+        # 显式覆盖避免大小写或 query 顺序差异留痕。
         candidate_record["canonical_key"] = pc.canonical_key
         candidate_record["canonical_candidate_key"] = pc.canonical_key
+        # 总是 upsert：DB 层按 (run_id, canonical_key) 合并 evidence_source_count / discovery_sources，
+        # 多源发现统一计数。
         persisted = upsert_candidate_artifact(
             session,
             run_id=run_id,
@@ -469,10 +448,32 @@ def build_initial_frontier_node(state: AgentState) -> AgentState:
         candidate_record["discovery_sources"] = list(
             persisted.evidence_json["discovery_sources"]
         )
-        seen_candidate_keys.add(pc.canonical_key)
-        deduped_candidates.append(candidate_record)
+        if pc.canonical_key in seen_canonical_keys:
+            # state["direct_candidates"] 同 canonical_key 记录已存在，仅刷新合并后的 evidence 字段
+            for existing in direct_candidates:
+                if existing.get("canonical_key") == pc.canonical_key:
+                    existing["evidence_source_count"] = candidate_record["evidence_source_count"]
+                    existing["discovery_sources"] = candidate_record["discovery_sources"]
+                    break
+            return
+        seen_canonical_keys.add(pc.canonical_key)
+        direct_candidates.append(candidate_record)
 
-    state["direct_candidates"] = deduped_candidates
+    for evidence in patch_evidence_list:
+        # 完整版仅在 reference_url evidence 上接管 build_initial_frontier 的直接候选生成
+        # （source_kind="seed"），与 baseline seed-derived 路径行为等价；
+        # fix_commit evidence 派生的高置信候选留给 Phase C 显式 fast path 节点
+        # （validate_seed_candidates）消费，避免在 Phase B+ 阶段引入 silent 短路。
+        # 否则 fallback.py:287 的 >=90 阈值会让 fix_commit 多 host candidate 立即下载，
+        # 破坏 ADR "现有 acceptance 场景结果不变" 的硬验收（CVE-2022-2509 fast-path 退化）。
+        if evidence.evidence_type != "reference_url" or not evidence.url:
+            continue
+        source_kind = "seed"
+        snapshot_url_for_record = normalize_frontier_url(evidence.url) or evidence.url
+        for pc in generate_candidates([evidence]):
+            _persist(pc, source_kind=source_kind, snapshot_url=snapshot_url_for_record)
+
+    state["direct_candidates"] = direct_candidates
 
     tracker = _load_chain_tracker(state)
     frontier: list[dict[str, object]] = []

@@ -169,7 +169,7 @@ def test_generates_commit_patch_from_fix_commit_with_gitlab_repo_hint() -> None:
     c = candidates[0]
     assert c.candidate_type == "commit_patch"
     assert c.patch_type == "gitlab_commit_patch"
-    assert c.candidate_url == f"https://gitlab.gnome.org/GNOME/glib/-/commit/{sha}"
+    assert c.candidate_url == f"https://gitlab.gnome.org/GNOME/glib/-/commit/{sha}.patch"
     assert c.patch_url == f"https://gitlab.gnome.org/GNOME/glib/-/commit/{sha}.patch"
     assert c.downloadable is True
 
@@ -191,11 +191,11 @@ def test_generates_commit_patch_from_fix_commit_with_kernel_repo_hint() -> None:
     c = candidates[0]
     assert c.candidate_type == "commit_patch"
     assert c.patch_type == "kernel_commit_patch"
-    assert c.candidate_url == f"https://git.kernel.org/stable/c/{sha}"
-    # matcher 重写后是可下载的 stable patch URL
-    assert c.patch_url is not None
-    assert c.patch_url.startswith("https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/patch/")
-    assert sha in c.patch_url
+    # matcher 重写 stable 短链为可下载的 stable patch URL，candidate_url 与 patch_url 都是该形态
+    assert c.candidate_url is not None
+    assert c.candidate_url.startswith("https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/patch/")
+    assert sha in c.candidate_url
+    assert c.patch_url == c.candidate_url
 
 
 def test_generates_commit_patch_from_fix_commit_with_bitbucket_repo_hint() -> None:
@@ -214,7 +214,7 @@ def test_generates_commit_patch_from_fix_commit_with_bitbucket_repo_hint() -> No
     assert len(candidates) == 1
     c = candidates[0]
     assert c.patch_type == "bitbucket_commit_patch"
-    assert c.candidate_url == f"https://bitbucket.org/acme/project/commits/{sha}"
+    assert c.candidate_url == f"https://bitbucket.org/acme/project/commits/{sha}/raw"
     assert c.patch_url == f"https://bitbucket.org/acme/project/commits/{sha}/raw"
 
 
@@ -234,7 +234,7 @@ def test_generates_commit_patch_from_fix_commit_with_gitee_repo_hint() -> None:
     assert len(candidates) == 1
     c = candidates[0]
     assert c.patch_type == "gitee_commit_patch"
-    assert c.candidate_url == f"https://gitee.com/acme/project/commit/{sha}"
+    assert c.candidate_url == f"https://gitee.com/acme/project/commit/{sha}.patch"
     assert c.patch_url == f"https://gitee.com/acme/project/commit/{sha}.patch"
 
 
@@ -254,7 +254,7 @@ def test_generates_commit_patch_from_fix_commit_with_aosp_repo_hint() -> None:
     assert len(candidates) == 1
     c = candidates[0]
     assert c.patch_type == "aosp_commit_patch"
-    assert c.candidate_url == f"https://android.googlesource.com/platform/system/core/+/{sha}"
+    assert c.candidate_url == f"https://android.googlesource.com/platform/system/core/+/{sha}.patch"
     assert c.patch_url == f"https://android.googlesource.com/platform/system/core/+/{sha}.patch"
 
 
@@ -274,7 +274,7 @@ def test_generates_commit_patch_strips_trailing_slash_and_dot_git() -> None:
     ])
     assert len(candidates) == 1
     assert candidates[0].patch_type == "github_commit_patch"
-    assert candidates[0].candidate_url == f"https://github.com/owner/repo/commit/{sha}"
+    assert candidates[0].candidate_url == f"https://github.com/owner/repo/commit/{sha}.patch"
 
 
 def test_skips_fix_commit_with_bare_owner_repo_hint() -> None:

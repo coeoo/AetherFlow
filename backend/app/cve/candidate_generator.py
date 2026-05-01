@@ -125,16 +125,12 @@ def generate_candidates(
 
         patch_type = match["patch_type"]
         downloadable_url = match["candidate_url"]
-
-        if commit_page_url is not None:
-            # fix_commit 路径：candidate_url 是 commit page URL（用户/审计可点击），
-            # patch_url 是 matcher 推断的可下载 URL（带 .patch 或 stable patch URL）。
-            candidate_url = commit_page_url
-            patch_url = downloadable_url
-        else:
-            # reference_url 路径保持历史语义：两者都用 matcher 输出（与外部已有契约一致）。
-            candidate_url = downloadable_url
-            patch_url = downloadable_url
+        # candidate_url 与 patch_url 统一为 matcher 输出的可下载 URL，
+        # 让 build_initial_frontier_node 写入 CVECandidateArtifact.candidate_url 时
+        # 直接是下游 patch_downloader 可消费的形态（避免 fix_commit 与 reference_url
+        # 两条路径产生不同的 candidate_url 语义）。
+        candidate_url = downloadable_url
+        patch_url = downloadable_url
 
         candidate = PatchCandidate(
             candidate_type=_candidate_type_from_patch_type(patch_type),

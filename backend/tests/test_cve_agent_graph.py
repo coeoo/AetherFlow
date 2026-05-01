@@ -23,6 +23,7 @@ from app.cve.agent_nodes import (
 )
 from app.cve.browser.base import BrowserPageSnapshot, PageLink
 from app.cve.candidate_generator import PatchCandidate
+from app.cve.patch_evidence import PatchEvidence
 from app.cve.seed_resolver import SeedReference, SeedResolutionResult
 from app.models import CVERun
 from app.models.cve import (
@@ -72,6 +73,24 @@ class _FakeBridge:
 def _seed_refs(urls: list[str], *, source: str = "test", authority_score: int = 0) -> list[SeedReference]:
     return [
         SeedReference(url=url, source=source, authority_score=authority_score)
+        for url in urls
+    ]
+
+
+def _evidence_refs(
+    urls: list[str],
+    *,
+    source: str = "test",
+    authority_score: int = 0,
+) -> list[PatchEvidence]:
+    """构造 reference_url 类 PatchEvidence，模拟 resolve_seed_enriched 阶段输出。"""
+    return [
+        PatchEvidence(
+            evidence_type="reference_url",
+            source=source,
+            url=url,
+            authority_score=authority_score,
+        )
         for url in urls
     ]
 
@@ -127,7 +146,7 @@ def test_patch_agent_graph_records_seed_candidates_frontier_and_decision(
                 "https://example.com/fix.patch",
                 "https://security-tracker.debian.org/tracker/CVE-2024-3094",
             ]),
-            evidence=[],
+            evidence=_evidence_refs(["https://example.com/fix.patch"]),
             candidates=[],
         )
 
@@ -218,6 +237,12 @@ def test_build_initial_frontier_node_deduplicates_candidates_with_same_canonical
         "https://github.com/example/repo/commit/abcdef1",
         "https://github.com/example/repo/commit/abcdef1.patch",
     ])
+    # 完整版：candidate 来源是 patch_evidence；同一 commit 的两种 URL 形态会被
+    # canonicalize_candidate_url 归一并去重。
+    state["patch_evidence"] = _evidence_refs([
+        "https://github.com/example/repo/commit/abcdef1",
+        "https://github.com/example/repo/commit/abcdef1.patch",
+    ])
 
     result = build_initial_frontier_node(state)
     db_session.commit()
@@ -252,6 +277,10 @@ def test_build_initial_frontier_node_merges_equivalent_patch_urls_after_normaliz
         "https://example.com/download?patch=1&file=fix.patch",
         "https://example.com/download?file=fix.patch&patch=1",
     ])
+    state["patch_evidence"] = _evidence_refs([
+        "https://example.com/download?patch=1&file=fix.patch",
+        "https://example.com/download?file=fix.patch&patch=1",
+    ])
 
     result = build_initial_frontier_node(state)
     db_session.commit()
@@ -265,92 +294,167 @@ def test_build_initial_frontier_node_merges_equivalent_patch_urls_after_normaliz
     assert len(persisted_candidates) == 1
 
 
-def test_build_initial_frontier_node_integrates_patch_candidates(
+def test_build_initial_frontier_node_generates_direct_candidates_from_reference_url_evidence(
     seeded_cve_run,
     db_session,
 ) -> None:
-    """阶段B：富化管道的 PatchCandidate 合并入 direct_candidates。"""
+    """完整版：build_initial_frontier_node 接管 candidate_generator 输出 reference_url 派生候选。
+
+    fix_commit evidence 派生的候选**不**进入 direct_candidates（Phase B+ scope 缩窄；
+    保留给 Phase C 显式 fast path 节点 validate_seed_candidates 消费），
+    避免 fallback.py:287 的 >=90 阈值在主链上引发 silent 短路。
+    """
     state = build_initial_agent_state(
         run_id=str(seeded_cve_run.run_id),
         cve_id=seeded_cve_run.cve_id,
     )
     state["session"] = db_session
     state["seed_references"] = _seed_refs(["https://example.com/advisory"])
-    state["patch_candidates"] = [
-        PatchCandidate(
-            candidate_type="commit_patch",
-            candidate_url="https://github.com/org/repo/commit/abc123",
-            patch_url="https://github.com/org/repo/commit/abc123.patch",
-            patch_type="github_commit_patch",
-            canonical_key="github.com/org/repo/commit/abc123.patch",
-            evidence_sources=("test.path",),
-            score=80,
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    state["patch_evidence"] = [
+        PatchEvidence(
+            evidence_type="reference_url",
+            source="cve_official",
+            url="https://github.com/org/repo/commit/abc1234",
+            authority_score=100,
             confidence="high",
-            downloadable=True,
         ),
-        PatchCandidate(
-            candidate_type="commit_patch",
-            candidate_url="https://github.com/other/repo/commit/def456",
-            patch_url="https://github.com/other/repo/commit/def456.patch",
-            patch_type="github_commit_patch",
-            canonical_key="github.com/other/repo/commit/def456.patch",
-            evidence_sources=(),
-            score=60,
-            confidence="medium",
-            downloadable=False,  # 非可下载，应跳过
+        PatchEvidence(
+            evidence_type="fix_commit",
+            source="osv",
+            commit_sha=sha,
+            repo_hint="https://github.com/other/repo",
+            authority_score=80,
+            confidence="high",
+            raw_field_path="osv.path",
         ),
     ]
 
     result = build_initial_frontier_node(state)
     db_session.commit()
 
-    # 只有 downloadable=True 的候选应被添加
-    candidate_urls = [c["candidate_url"] for c in result["direct_candidates"]]
-    assert "https://github.com/org/repo/commit/abc123" in candidate_urls
-    assert "https://github.com/other/repo/commit/def456" not in candidate_urls
+    candidate_urls = {c["candidate_url"] for c in result["direct_candidates"]}
+    # reference_url evidence 命中 GitHub commit → matcher 输出 .patch URL，进入 direct_candidates
+    assert "https://github.com/org/repo/commit/abc1234.patch" in candidate_urls
+    # fix_commit evidence 派生的候选**不**进入 direct_candidates（Phase B+ scope 缩窄）
+    assert f"https://github.com/other/repo/commit/{sha}.patch" not in candidate_urls
+    assert len(result["direct_candidates"]) == 1
+    only_record = result["direct_candidates"][0]
+    assert only_record["discovery_sources"][0]["source_kind"] == "seed"
 
 
-def test_build_initial_frontier_node_dedup_across_seed_and_enriched_paths(
+def test_build_initial_frontier_node_does_not_takeover_fix_commit_evidence_in_phase_b_plus(
     seeded_cve_run,
     db_session,
 ) -> None:
-    """阶段B：同一 canonical_key 的 seed 和 enriched 候选只保留一条。"""
+    """Phase B+ 边界：fix_commit evidence 不进入 direct_candidates；留给 Phase C fast path。
+
+    只有 fix_commit evidence、没有 reference_url evidence 时，direct_candidates 应为空，
+    不会触发 fallback.py:287 的 >=90 阈值短路。
+    """
     state = build_initial_agent_state(
         run_id=str(seeded_cve_run.run_id),
         cve_id=seeded_cve_run.cve_id,
     )
     state["session"] = db_session
-    # seed_reference 匹配到 github commit → 生成 canonical_key
-    state["seed_references"] = _seed_refs([
-        "https://github.com/org/repo/commit/abc123",
-    ])
-    # enriched 管道也生成同一个 commit 的候选
-    state["patch_candidates"] = [
-        PatchCandidate(
-            candidate_type="commit_patch",
-            candidate_url="https://github.com/org/repo/commit/abc123",
-            patch_url="https://github.com/org/repo/commit/abc123.patch",
-            patch_type="github_commit_patch",
-            canonical_key="github.com/org/repo/commit/abc123.patch",
-            evidence_sources=("test.path",),
-            score=80,
+    state["seed_references"] = _seed_refs(["https://example.com/advisory"])
+    state["patch_evidence"] = [
+        PatchEvidence(
+            evidence_type="fix_commit",
+            source="osv",
+            commit_sha="0123456789abcdef0123456789abcdef01234567",
+            repo_hint="https://github.com/owner/repo",
+            authority_score=80,
             confidence="high",
-            downloadable=True,
+            raw_field_path="osv.path",
         ),
     ]
 
     result = build_initial_frontier_node(state)
     db_session.commit()
 
-    # 同一 canonical_key 只保留一条
+    assert result["direct_candidates"] == []
+
+
+def test_build_initial_frontier_node_dedup_across_reference_url_evidence_only(
+    seeded_cve_run,
+    db_session,
+) -> None:
+    """完整版：同一 commit 通过两条 reference_url evidence（裸 commit / .patch 形态）只保留一条 direct_candidate。
+
+    - canonicalize_candidate_url 剥 GitHub commit URL 的 .patch 后缀 → canonical_key 相同
+    - 两条 evidence 进入 candidate_generator 单独处理，写到 DB 时按 (run_id, canonical_key)
+      自动 merge evidence_source_count，反映多源发现。
+    """
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["seed_references"] = _seed_refs(["https://github.com/org/repo/commit/abc1234"])
+    state["patch_evidence"] = [
+        PatchEvidence(
+            evidence_type="reference_url",
+            source="cve_official",
+            url="https://github.com/org/repo/commit/abc1234",
+            authority_score=100,
+            confidence="high",
+        ),
+        PatchEvidence(
+            evidence_type="reference_url",
+            source="osv",
+            url="https://github.com/org/repo/commit/abc1234.patch",
+            authority_score=80,
+            confidence="high",
+        ),
+    ]
+
+    result = build_initial_frontier_node(state)
+    db_session.commit()
+
     commit_candidates = [
         c for c in result["direct_candidates"]
-        if "abc123" in str(c["candidate_url"])
+        if "abc1234" in str(c["candidate_url"])
     ]
+    # 两条 reference_url evidence 同一 commit canonical_key 仅保留一条 direct_candidate
     assert len(commit_candidates) == 1
-    # evidence_source_count 应反映两次发现的合并
     persisted = commit_candidates[0]
+    # DB 层合并多源 evidence
     assert persisted["evidence_source_count"] >= 1
+
+
+def test_build_initial_frontier_node_skips_evidence_without_candidate(
+    seeded_cve_run,
+    db_session,
+) -> None:
+    """fixed_version 与不命中 matcher 的 reference_url 不生成 direct_candidate。"""
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["seed_references"] = _seed_refs(["https://example.com/advisory"])
+    state["patch_evidence"] = [
+        PatchEvidence(
+            evidence_type="fixed_version",
+            source="github_advisory",
+            version="2.0.1",
+            authority_score=70,
+            confidence="medium",
+        ),
+        PatchEvidence(
+            evidence_type="reference_url",
+            source="nvd",
+            url="https://example.com/advisory",  # 不命中 match_reference_url
+            authority_score=60,
+            confidence="medium",
+        ),
+    ]
+
+    result = build_initial_frontier_node(state)
+    db_session.commit()
+
+    assert result["direct_candidates"] == []
 
 
 def test_download_and_validate_node_skips_terminal_candidates_and_stops(
@@ -3287,6 +3391,7 @@ def test_download_and_finalize_node_updates_run_summary(
     )
     state["session"] = db_session
     state["seed_references"] = _seed_refs(["https://example.com/fix.patch"])
+    state["patch_evidence"] = _evidence_refs(["https://example.com/fix.patch"])
     build_initial_frontier_node(state)
 
     def _fake_download(session, *, run, candidate):

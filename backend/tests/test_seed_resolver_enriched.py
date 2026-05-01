@@ -23,18 +23,18 @@ def _osv_result_with_fix_commit() -> SeedSourceResult:
         reference_count=1,
         error_kind=None,
         error_message=None,
-        references=["https://github.com/org/repo/commit/abc123"],
+        references=["https://github.com/org/repo/commit/abc12345"],
         request_url="https://api.osv.dev/v1/vulns/CVE-2024-0001",
         structured_references=[
             StructuredReference(
-                url="https://github.com/org/repo/commit/abc123",
+                url="https://github.com/org/repo/commit/abc12345",
                 tags=("patch",),
                 source="osv",
             ),
         ],
         fix_commits=[
             FixCommitEvidence(
-                commit_sha="abc123",
+                commit_sha="abc12345",
                 repo_hint="https://github.com/org/repo",
                 source="osv",
                 field_path="affected[].ranges[].events[].fixed",
@@ -78,7 +78,7 @@ def test_resolve_seed_enriched_returns_resolution_result(
     assert len(result.evidence) >= 1
     fix_commit_evidence = [e for e in result.evidence if e.evidence_type == "fix_commit"]
     assert len(fix_commit_evidence) == 1
-    assert fix_commit_evidence[0].commit_sha == "abc123"
+    assert fix_commit_evidence[0].commit_sha == "abc12345"
     # fix_commit with repo_hint should produce a downloadable candidate
     assert len(result.candidates) >= 1
     commit_candidates = [c for c in result.candidates if c.candidate_type == "commit_patch"]
@@ -210,7 +210,7 @@ def test_resolve_seed_enriched_skip_non_downloadable(
             request_url="https://api.osv.dev/v1/vulns/CVE-2024-0002",
             fix_commits=[
                 FixCommitEvidence(
-                    commit_sha="def567",
+                    commit_sha="def56789",
                     repo_hint=None,
                     source="osv",
                     field_path="affected[].ranges[].events[].fixed",
@@ -227,7 +227,7 @@ def test_resolve_seed_enriched_skip_non_downloadable(
     # → evidence 有 1 条 fix_commit，但 generate_candidates 不产出下载候选
     assert len(result.evidence) == 1
     assert result.evidence[0].evidence_type == "fix_commit"
-    assert result.evidence[0].commit_sha == "def567"
+    assert result.evidence[0].commit_sha == "def56789"
     # 无法构造 patch URL → candidate 列表应为空
     assert len(result.candidates) == 0
 
@@ -251,7 +251,7 @@ def test_resolve_seed_enriched_dedup_evidence_across_sources(
             request_url="https://cveawg.mitre.org/api/cve/CVE-2024-0003",
             fix_commits=[
                 FixCommitEvidence(
-                    commit_sha="abc123",
+                    commit_sha="abc12345",
                     repo_hint="https://github.com/org/repo",
                     source="cve_official",
                     field_path="containers.cna.affected[].versions[].lessThan",
@@ -269,7 +269,7 @@ def test_resolve_seed_enriched_dedup_evidence_across_sources(
             request_url="https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2024-0003",
             fix_commits=[
                 FixCommitEvidence(
-                    commit_sha="abc123",
+                    commit_sha="abc12345",
                     repo_hint="https://github.com/org/repo",
                     source="nvd",
                     field_path="some.other.path",
@@ -290,7 +290,7 @@ def test_resolve_seed_enriched_dedup_evidence_across_sources(
     # 同一 commit SHA → 同一 canonical_key → candidates 中去重
     assert len(result.candidates) == 1
     assert result.candidates[0].canonical_key == canonicalize_candidate_url(
-        "https://github.com/org/repo/commit/abc123"
+        "https://github.com/org/repo/commit/abc12345"
     )
     assert result.candidates[0].downloadable is True
 
