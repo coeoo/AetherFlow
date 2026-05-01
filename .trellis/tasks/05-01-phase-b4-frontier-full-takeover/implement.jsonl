@@ -1,0 +1,12 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/index.md", "reason": "后端 spec 入口；总览所有约束"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "确认模块边界：candidate_generator / candidate_scoring / agent_nodes / reference_matcher 的职责划分"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "长任务节点错误由 runtime 翻译为 stop_reason；不要在 candidate_generator 抛 HTTPException"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "logger 用 _logger = logging.getLogger(__name__)，前缀 [CVE:%s]，错误用 _logger.exception"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "测试规模、backend/results 不入 commit、commit 中文三段式"}
+{"file": "docs/design/adr-evidence-first-patch-engine.md", "reason": "ADR 字面要求 §阶段 B Step 4：build_initial_frontier_node 改为调用 candidate_generator，保留兼容字段"}
+{"file": "docs/superpowers/plans/2026-05-01-cve-evidence-first-phase-b.md", "reason": "Phase B Plan 边界；本任务从 Plan B.4 桥接版升级为 ADR 字面完整版；acceptance 命令模板权威"}
+{"file": "docs/design/cve-agent-frontier-and-noise-filter.md", "reason": "build_initial_frontier_node 现有 seed-derived 写入契约（direct_candidates 字段、source_kind、persisted candidate evidence 回填）"}
+{"file": "docs/design/cve-agent-search-graph-and-evidence.md", "reason": "agent_evidence.build_candidate_record / upsert_candidate_artifact 输入契约（source_kind / canonical_key / evidence_source_count 回填）"}
+{"file": ".trellis/tasks/05-01-phase-b4-frontier-full-takeover/info.md", "reason": "技术决策沉淀：fix_commit 多 host URL 形态映射 + patch_type 命名空间 + distro 降权语义保持 + 等价契约清单 + commit 拆分契约"}
+{"file": ".trellis/tasks/05-01-phase-b4-frontier-full-takeover/prd.md", "reason": "PRD：goal / requirements / acceptance / out of scope / decision log"}

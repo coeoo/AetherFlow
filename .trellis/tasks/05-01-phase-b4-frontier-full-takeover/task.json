@@ -1,0 +1,32 @@
+{
+  "id": "phase-b4-frontier-full-takeover",
+  "name": "phase-b4-frontier-full-takeover",
+  "title": "B.4 frontier 完全接管 candidate_generator",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "coeoo",
+  "assignee": "coeoo",
+  "createdAt": "2026-05-01",
+  "completedAt": "2026-05-01",
+  "branch": "main",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "dc48b7a..bd05f30",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "Phase B+ 4 commits 合入 main：dc48b7a 重构(cve): 统一候选类型优先级来源；f0cfedb 功能(cve): 扩展 fix_commit 多 host 候选生成；9c68419 重构(cve): build_initial_frontier 接管 candidate_generator (reference_url 边界)；bd05f30 文档(cve): 标注 candidate_generator reference_url 归一化边界为 Phase C 前置。mock-mode + 真实样本 acceptance 双层全 PASS。fix_commit evidence 派生主链 takeover 与 normalize-before-match 边界留给 phase-c-seed-fast-path 任务。",
+  "meta": {
+    "acceptance_reports": [
+      "backend/results/candidate-cve-evidence-first-phase-b-mock/",
+      "backend/results/candidate-cve-evidence-first-phase-b-live/"
+    ],
+    "supersedes_plan_task": "docs/superpowers/plans/2026-05-01-cve-evidence-first-phase-b.md::Task B.4 / B.5"
+  }
+}

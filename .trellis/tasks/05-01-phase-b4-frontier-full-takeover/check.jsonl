@@ -1,0 +1,10 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/index.md", "reason": "后端 spec 入口"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "质量门：测试规模 / backend/results 边界 / 敏感配置 / commit 质量"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "API 响应 {code,message,data}；长任务节点错误翻译为 stop_reason"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "logger 名 / 占位符 / 错误日志规范"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "测试 DB 用法 + acceptance 必须显式 --database-url 不依赖 shell 残留"}
+{"file": "docs/design/adr-evidence-first-patch-engine.md", "reason": "ADR §阶段 B 验收标准：等价输出、direct_candidates / decision_history / cve_candidate_artifacts 兼容、acceptance 场景结果不变"}
+{"file": "docs/superpowers/plans/2026-05-01-cve-evidence-first-phase-b.md", "reason": "Plan B.4 强制要求：acceptance baseline 复跑 + compare 摘要写入 commit + high_value_path_regressed=false / patch_quality_degraded=false"}
+{"file": ".trellis/tasks/05-01-phase-b4-frontier-full-takeover/info.md", "reason": "技术决策沉淀（patch_type 命名空间 / distro 降权语义保持 / 等价契约清单）"}
+{"file": ".trellis/tasks/05-01-phase-b4-frontier-full-takeover/prd.md", "reason": "PRD acceptance criteria 是 trellis-check 主要核对来源"}
