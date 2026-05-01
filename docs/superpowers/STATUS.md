@@ -12,12 +12,13 @@
 ## 当前活跃事项
 
 - Active architecture ADR: `docs/design/adr-evidence-first-patch-engine.md`
-- Active execution prompt: `docs/design/codex-prompt-phase-a.md`
-- Active spec: `docs/superpowers/specs/2026-04-25-cve-agent-boundary-refactor-design.md`
-- Active plan: `docs/superpowers/plans/2026-04-25-cve-agent-boundary-refactor.md`
-- Active phase: CVE Evidence-First Phase A pre-implementation
-- Current next checkpoint: 按 active ADR 与阶段 A prompt 执行 seed evidence 基础层改造，保持 `LangGraph` 主链、`agent_nodes.py` 兼容面、`source_type="cve_seed_resolve"`、`run.phase` / `stop_reason` 与当前 acceptance 行为不变。
-- Last recorded baseline: mock candidate baseline PASS，见 active plan 的 Task 2.2 Step 5。Evidence-First ADR 已采纳为当前架构方向，但阶段 A 代码尚未开始，暂无新的实现后 baseline。
+- Active execution prompt: `docs/design/codex-prompt-phase-a.md`（Phase A）；Phase B 待新 prompt 派生
+- Active spec: `docs/superpowers/specs/2026-04-25-cve-agent-boundary-refactor-design.md`（boundary refactor 历史基础，仍有效）
+- Active plan: `docs/superpowers/plans/2026-05-01-cve-evidence-first-phase-b.md`（Evidence-First Phase B execution plan，承载当前 dirty 工作区改动）
+- Superseded plan: `docs/superpowers/plans/2026-04-25-cve-agent-boundary-refactor.md`（Phase 0/1/2 已完成，Phase 3 Task 3.1 首轮迭代完成后被 Evidence-First ADR 接管）
+- Active phase: Evidence-First Phase B in-progress（Phase A 主体已通过 commit `b046bb2` 接入主链；Phase B 已在 dirty worktree 启动 candidate_scoring 抽象、reference_matcher host 扩展、PatchCandidate 合入 frontier）
+- Current next checkpoint: 按新 Phase B plan 收口 dirty 改动 — ① 补 reference_matcher 4 类新 host 的回归测试 ② 修正 AOSP 与 Bugzilla 正则缺陷 ③ 决定 candidate_scoring 与 reference_matcher.CANDIDATE_PRIORITY 的接入路径（避免双源真相）
+- Last recorded baseline: mock candidate baseline PASS（旧 boundary plan Task 2.2 Step 5）。Phase A 接入后未复跑 baseline；Phase B 收口前需要重做 baseline 对比。
 
 ## 当前权威主文档入口
 
