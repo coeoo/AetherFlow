@@ -213,6 +213,8 @@ def _is_distribution_patch_url(candidate_url: str) -> bool:
     return False
 
 
+# 历史快照 — 真相已迁移到 candidate_scoring._PATCH_TYPE_BASE_SCORE / get_type_priority；
+# 这里保留以兼容外部读取 CANDIDATE_PRIORITY 的代码，新增 patch_type 应改 candidate_scoring。
 CANDIDATE_PRIORITY: dict[str, int] = {
     "github_commit_patch": 100,
     "gitlab_commit_patch": 100,
@@ -229,10 +231,18 @@ CANDIDATE_PRIORITY: dict[str, int] = {
     "debdiff": 20,
 }
 
+KNOWN_PATCH_TYPES: frozenset[str] = frozenset(CANDIDATE_PRIORITY)
+
 
 def get_candidate_priority(patch_type: str, candidate_url: str | None = None) -> int:
-    """返回 patch 类型的质量优先级。值越高表示候选质量越好。"""
+    """返回 patch 类型的质量优先级。值越高表示候选质量越好。
+
+    type-only priority 委托至 candidate_scoring.get_type_priority；
+    distro URL 降权外壳保留在本函数（distro URL 是 URL 语义，不是 type 语义）。
+    """
+    from app.cve.candidate_scoring import get_type_priority
+
     if candidate_url and patch_type in {"patch", "diff", "debdiff"}:
         if _is_distribution_patch_url(candidate_url):
             return 20
-    return CANDIDATE_PRIORITY.get(patch_type, 50)
+    return get_type_priority(patch_type)

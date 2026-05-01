@@ -1,4 +1,10 @@
-from app.cve.reference_matcher import get_candidate_priority, match_reference_url, match_reference_urls
+from app.cve.reference_matcher import (
+    CANDIDATE_PRIORITY,
+    KNOWN_PATCH_TYPES,
+    get_candidate_priority,
+    match_reference_url,
+    match_reference_urls,
+)
 
 
 def test_matcher_keeps_direct_patch_url() -> None:
@@ -307,3 +313,40 @@ def test_get_candidate_priority_aosp_commit_lower_than_kernel() -> None:
 
 def test_get_candidate_priority_unknown_type_returns_default() -> None:
     assert get_candidate_priority("some_unknown_type") == 50
+
+
+def test_known_patch_types_is_frozenset_of_candidate_priority_keys() -> None:
+    # KNOWN_PATCH_TYPES 是 reference_matcher 与 candidate_scoring 共享的命名空间真相。
+    assert KNOWN_PATCH_TYPES == frozenset(CANDIDATE_PRIORITY.keys())
+    assert isinstance(KNOWN_PATCH_TYPES, frozenset)
+
+
+def test_get_candidate_priority_delegates_to_candidate_scoring_get_type_priority() -> None:
+    # 委托后 reference_matcher.get_candidate_priority 与 candidate_scoring.get_type_priority 必须一致；
+    # distro URL 降权由 reference_matcher 外壳保留。
+    from app.cve.candidate_scoring import get_type_priority
+
+    for patch_type in CANDIDATE_PRIORITY:
+        assert get_candidate_priority(patch_type) == get_type_priority(patch_type), patch_type
+
+
+def test_get_candidate_priority_aosp_meets_high_quality_threshold() -> None:
+    # 回归 codex 协作时机 1 指出的 AOSP 静默退化点：
+    # 委托后 aosp_commit_patch 必须仍 >=90，否则 fallback.py:287 的 high_quality 阈值失效。
+    assert get_candidate_priority("aosp_commit_patch") >= 90
+
+
+def test_get_candidate_priority_preserves_distro_downgrade_after_delegation() -> None:
+    # distro URL 仍走 reference_matcher 外壳降权到 20
+    distro_priority = get_candidate_priority(
+        "patch",
+        "https://patches.ubuntu.com/g/gnutls28/gnutls28_3.8.12-2ubuntu1.patch",
+    )
+    assert distro_priority == 20
+
+    # 非 distro patch URL 走 type-only priority
+    upstream_priority = get_candidate_priority(
+        "patch",
+        "https://example.com/fix.patch",
+    )
+    assert upstream_priority == 50

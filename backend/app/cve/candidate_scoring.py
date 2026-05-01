@@ -19,6 +19,7 @@ _PATCH_TYPE_BASE_SCORE: dict[str, int] = {
     "kernel_commit_patch": 100,
     "bitbucket_commit_patch": 95,
     "gitee_commit_patch": 90,
+    "aosp_commit_patch": 90,
     "github_pull_patch": 90,
     "gitlab_merge_request_patch": 90,
     "bitbucket_pull_patch": 85,
@@ -100,6 +101,16 @@ class CandidateScore:
 
 
 def _score_patch_type(patch_type: str) -> int:
+    return get_type_priority(patch_type)
+
+
+def get_type_priority(patch_type: str) -> int:
+    """返回 patch 类型的 type-only priority（与 score_candidate.total 不同）。
+
+    这是 fallback.py 高质量阈值 (>=90) 的输入语义：
+    只看 patch_type 维度，不考虑 source / discovery / authority。
+    未知类型返回 50（与历史 reference_matcher.CANDIDATE_PRIORITY 默认值一致）。
+    """
     return _PATCH_TYPE_BASE_SCORE.get(patch_type, 50)
 
 

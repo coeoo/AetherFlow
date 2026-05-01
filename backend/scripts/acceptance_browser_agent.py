@@ -82,10 +82,15 @@ _PATCH_TYPE_PRIORITY = {
     "github_commit_patch": 100,
     "gitlab_commit_patch": 100,
     "kernel_commit_patch": 100,
+    "bitbucket_commit_patch": 95,
     "github_pull_patch": 90,
     "gitlab_merge_request_patch": 90,
+    "gitee_commit_patch": 90,
+    "aosp_commit_patch": 90,
+    "bitbucket_pull_patch": 85,
     "patch": 50,
     "diff": 50,
+    "bugzilla_attachment_patch": 40,
     "debdiff": 20,
 }
 ACCEPTANCE_PROFILES = {
