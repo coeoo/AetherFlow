@@ -439,6 +439,39 @@ def build_initial_frontier_node(state: AgentState) -> AgentState:
         seen_candidate_keys.add(canonical_key)
         deduped_candidates.append(candidate)
 
+    # 阶段 B：将富化管道的 PatchCandidate 合并到 direct_candidates
+    # bridge: PatchCandidate dataclass → build_candidate_record 要求的 dict[str, str]
+    for pc in state.get("patch_candidates", []):
+        if not pc.downloadable:
+            continue
+        if pc.canonical_key in seen_candidate_keys:
+            continue
+        bridge_dict = {
+            "candidate_url": pc.candidate_url,
+            "patch_type": pc.patch_type,
+        }
+        candidate_record = build_candidate_record(
+            snapshot_url=pc.candidate_url,
+            candidate=bridge_dict,
+            source_kind="seed_enriched",
+        )
+        candidate_record["canonical_key"] = pc.canonical_key
+        candidate_record["canonical_candidate_key"] = pc.canonical_key
+        persisted = upsert_candidate_artifact(
+            session,
+            run_id=run_id,
+            candidate_record=candidate_record,
+            source_node_id=None,
+        )
+        candidate_record["evidence_source_count"] = int(
+            persisted.evidence_json["evidence_source_count"]
+        )
+        candidate_record["discovery_sources"] = list(
+            persisted.evidence_json["discovery_sources"]
+        )
+        seen_candidate_keys.add(pc.canonical_key)
+        deduped_candidates.append(candidate_record)
+
     state["direct_candidates"] = deduped_candidates
 
     tracker = _load_chain_tracker(state)

@@ -22,6 +22,7 @@ from app.cve.agent_nodes import (
     fetch_next_batch_node,
 )
 from app.cve.browser.base import BrowserPageSnapshot, PageLink
+from app.cve.candidate_generator import PatchCandidate
 from app.cve.seed_resolver import SeedReference, SeedResolutionResult
 from app.models import CVERun
 from app.models.cve import (
@@ -262,6 +263,94 @@ def test_build_initial_frontier_node_merges_equivalent_patch_urls_after_normaliz
         select(CVECandidateArtifact).where(CVECandidateArtifact.run_id == seeded_cve_run.run_id)
     ).scalars().all()
     assert len(persisted_candidates) == 1
+
+
+def test_build_initial_frontier_node_integrates_patch_candidates(
+    seeded_cve_run,
+    db_session,
+) -> None:
+    """阶段B：富化管道的 PatchCandidate 合并入 direct_candidates。"""
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    state["seed_references"] = _seed_refs(["https://example.com/advisory"])
+    state["patch_candidates"] = [
+        PatchCandidate(
+            candidate_type="commit_patch",
+            candidate_url="https://github.com/org/repo/commit/abc123",
+            patch_url="https://github.com/org/repo/commit/abc123.patch",
+            patch_type="github_commit_patch",
+            canonical_key="github.com/org/repo/commit/abc123.patch",
+            evidence_sources=("test.path",),
+            score=80,
+            confidence="high",
+            downloadable=True,
+        ),
+        PatchCandidate(
+            candidate_type="commit_patch",
+            candidate_url="https://github.com/other/repo/commit/def456",
+            patch_url="https://github.com/other/repo/commit/def456.patch",
+            patch_type="github_commit_patch",
+            canonical_key="github.com/other/repo/commit/def456.patch",
+            evidence_sources=(),
+            score=60,
+            confidence="medium",
+            downloadable=False,  # 非可下载，应跳过
+        ),
+    ]
+
+    result = build_initial_frontier_node(state)
+    db_session.commit()
+
+    # 只有 downloadable=True 的候选应被添加
+    candidate_urls = [c["candidate_url"] for c in result["direct_candidates"]]
+    assert "https://github.com/org/repo/commit/abc123" in candidate_urls
+    assert "https://github.com/other/repo/commit/def456" not in candidate_urls
+
+
+def test_build_initial_frontier_node_dedup_across_seed_and_enriched_paths(
+    seeded_cve_run,
+    db_session,
+) -> None:
+    """阶段B：同一 canonical_key 的 seed 和 enriched 候选只保留一条。"""
+    state = build_initial_agent_state(
+        run_id=str(seeded_cve_run.run_id),
+        cve_id=seeded_cve_run.cve_id,
+    )
+    state["session"] = db_session
+    # seed_reference 匹配到 github commit → 生成 canonical_key
+    state["seed_references"] = _seed_refs([
+        "https://github.com/org/repo/commit/abc123",
+    ])
+    # enriched 管道也生成同一个 commit 的候选
+    state["patch_candidates"] = [
+        PatchCandidate(
+            candidate_type="commit_patch",
+            candidate_url="https://github.com/org/repo/commit/abc123",
+            patch_url="https://github.com/org/repo/commit/abc123.patch",
+            patch_type="github_commit_patch",
+            canonical_key="github.com/org/repo/commit/abc123.patch",
+            evidence_sources=("test.path",),
+            score=80,
+            confidence="high",
+            downloadable=True,
+        ),
+    ]
+
+    result = build_initial_frontier_node(state)
+    db_session.commit()
+
+    # 同一 canonical_key 只保留一条
+    commit_candidates = [
+        c for c in result["direct_candidates"]
+        if "abc123" in str(c["candidate_url"])
+    ]
+    assert len(commit_candidates) == 1
+    # evidence_source_count 应反映两次发现的合并
+    persisted = commit_candidates[0]
+    assert persisted["evidence_source_count"] >= 1
 
 
 def test_download_and_validate_node_skips_terminal_candidates_and_stops(
