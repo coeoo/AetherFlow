@@ -10,7 +10,13 @@ from app.cve.reference_matcher import match_reference_url
 
 logger = logging.getLogger(__name__)
 
-_GITHUB_REPO_RE = re.compile(r"^/([^/]+/[^/]+)")
+_COMMIT_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$", re.IGNORECASE)
+_GITLAB_LIKE_HOSTS: frozenset[str] = frozenset({
+    "gitlab.com",
+    "gitlab.gnome.org",
+    "gitlab.freedesktop.org",
+    "salsa.debian.org",
+})
 
 
 @dataclass(frozen=True)
@@ -21,23 +27,64 @@ class PatchCandidate:
     patch_url: str | None
     patch_type: str
     canonical_key: str
-    evidence_sources: tuple[str, ...]  # evidence 的 raw_field_path 列表
+    evidence_sources: tuple[str, ...]  # evidence raw_field_path 列表
     score: int = 0
     confidence: str = "medium"
     downloadable: bool = False
 
 
-def _build_commit_patch_url(commit_sha: str, repo_hint: str | None) -> str | None:
-    """尝试从 commit SHA 和 repo_hint 构造 patch URL。"""
+def _normalize_repo_hint(repo_hint: str | None) -> str | None:
+    """规范化 repo_hint 为可合成 URL 的 base：
+    - 必须是 http(s) URL；裸 owner/repo 跳过（不全局猜域名）
+    - 剥 trailing slash 与 ``.git`` 后缀
+    - 返回标准化 base URL，None 表示无法合成
+    """
     if not repo_hint:
         return None
-    parsed = urlparse(repo_hint)
-    if parsed.netloc == "github.com":
-        match = _GITHUB_REPO_RE.match(parsed.path)
-        if match:
-            repo_path = match.group(1).rstrip("/")
-            return f"https://github.com/{repo_path}/commit/{commit_sha}.patch"
+    if not repo_hint.startswith(("http://", "https://")):
+        return None
+    base = repo_hint.rstrip("/")
+    if base.endswith(".git"):
+        base = base[:-4]
+    return base or None
+
+
+def _commit_page_url_from_evidence(ev: PatchEvidence) -> str | None:
+    """根据 fix_commit evidence 合成 commit page URL（不带 ``.patch`` 后缀）。
+
+    返回 None 表示无法合成（commit_sha 非法 / repo_hint 缺失或裸 owner/repo / 未知 host）。
+    合成的 URL 交给 :func:`match_reference_url` 推断 patch_type 与可下载 patch URL，
+    避免在本模块维护第二份 host 知识。
+    """
+    if not ev.commit_sha or not _COMMIT_SHA_RE.fullmatch(ev.commit_sha):
+        return None
+    base = _normalize_repo_hint(ev.repo_hint)
+    if base is None:
+        return None
+    netloc = urlparse(base).netloc.lower()
+    sha = ev.commit_sha
+    if netloc == "github.com":
+        return f"{base}/commit/{sha}"
+    if netloc in _GITLAB_LIKE_HOSTS:
+        return f"{base}/-/commit/{sha}"
+    if netloc == "git.kernel.org":
+        # 用 stable 短链；matcher 会重写为可下载的 stable patch URL。
+        return f"https://git.kernel.org/stable/c/{sha}"
+    if netloc == "bitbucket.org":
+        return f"{base}/commits/{sha}"
+    if netloc == "gitee.com":
+        return f"{base}/commit/{sha}"
+    if netloc == "android.googlesource.com":
+        return f"{base}/+/{sha}"
     return None
+
+
+def _candidate_type_from_patch_type(patch_type: str) -> str:
+    if "commit" in patch_type:
+        return "commit_patch"
+    if "pull" in patch_type or "merge_request" in patch_type:
+        return "pr_patch"
+    return "direct_patch"
 
 
 def generate_candidates(
@@ -45,10 +92,13 @@ def generate_candidates(
 ) -> list[PatchCandidate]:
     """从 PatchEvidence 列表生成 PatchCandidate 列表。
 
-    阶段 A 只实现基础转换：
-    - fix_commit evidence -> commit_patch candidate（如果能构造 patch URL）
-    - reference_url evidence + reference_matcher -> 对应类型的 candidate
-    - 其他 evidence -> 暂不生成 candidate（留给阶段 B）
+    支持的 evidence_type：
+    - ``fix_commit`` + 合法 commit_sha + http(s) repo_hint：合成对应 host 的 commit page URL，
+      调 :func:`match_reference_url` 拿到 patch_type 与可下载 patch URL。
+    - ``reference_url`` + ``url``：直接调 :func:`match_reference_url`。
+    - 其他类型（``fixed_version``、``advisory`` 等）暂不生成候选，留待后续阶段。
+
+    去重策略：按 :func:`canonicalize_candidate_url` 的 canonical_key 保留最高 score 候选。
     """
     # 延迟导入以打破 circular import
     from app.cve.canonical import canonicalize_candidate_url  # noqa: C0415
@@ -56,51 +106,49 @@ def generate_candidates(
     candidates_by_key: dict[str, PatchCandidate] = {}
 
     for ev in evidence_list:
-        if ev.evidence_type == "fix_commit" and ev.commit_sha:
-            patch_url = _build_commit_patch_url(ev.commit_sha, ev.repo_hint)
-            if patch_url:
-                candidate_url = patch_url.removesuffix(".patch")
-                candidate = PatchCandidate(
-                    candidate_type="commit_patch",
-                    candidate_url=candidate_url,
-                    patch_url=patch_url,
-                    patch_type="github_commit_patch",
-                    canonical_key=canonicalize_candidate_url(candidate_url),
-                    evidence_sources=(ev.raw_field_path,) if ev.raw_field_path else (),
-                    score=ev.authority_score,
-                    confidence="high",
-                    downloadable=True,
-                )
-                existing = candidates_by_key.get(candidate.canonical_key)
-                if existing is None or existing.score < candidate.score:
-                    candidates_by_key[candidate.canonical_key] = candidate
+        commit_page_url: str | None = None
+        target_url: str | None = None
 
-        elif ev.evidence_type == "reference_url" and ev.url:
-            match = match_reference_url(ev.url)
-            if match is None:
+        if ev.evidence_type == "fix_commit":
+            commit_page_url = _commit_page_url_from_evidence(ev)
+            if commit_page_url is None:
                 continue
-            patch_type = match["patch_type"]
-            candidate_url = match["candidate_url"]
-            if "commit" in patch_type:
-                ctype = "commit_patch"
-            elif "pull" in patch_type or "merge_request" in patch_type:
-                ctype = "pr_patch"
-            else:
-                ctype = "direct_patch"
+            target_url = commit_page_url
+        elif ev.evidence_type == "reference_url" and ev.url:
+            target_url = ev.url
+        else:
+            continue
 
-            candidate = PatchCandidate(
-                candidate_type=ctype,
-                candidate_url=candidate_url,
-                patch_url=candidate_url,
-                patch_type=patch_type,
-                canonical_key=canonicalize_candidate_url(candidate_url),
-                evidence_sources=(ev.raw_field_path,) if ev.raw_field_path else (),
-                score=ev.authority_score,
-                confidence=ev.confidence,
-                downloadable=True,
-            )
-            existing = candidates_by_key.get(candidate.canonical_key)
-            if existing is None or existing.score < candidate.score:
-                candidates_by_key[candidate.canonical_key] = candidate
+        match = match_reference_url(target_url)
+        if match is None:
+            continue
+
+        patch_type = match["patch_type"]
+        downloadable_url = match["candidate_url"]
+
+        if commit_page_url is not None:
+            # fix_commit 路径：candidate_url 是 commit page URL（用户/审计可点击），
+            # patch_url 是 matcher 推断的可下载 URL（带 .patch 或 stable patch URL）。
+            candidate_url = commit_page_url
+            patch_url = downloadable_url
+        else:
+            # reference_url 路径保持历史语义：两者都用 matcher 输出（与外部已有契约一致）。
+            candidate_url = downloadable_url
+            patch_url = downloadable_url
+
+        candidate = PatchCandidate(
+            candidate_type=_candidate_type_from_patch_type(patch_type),
+            candidate_url=candidate_url,
+            patch_url=patch_url,
+            patch_type=patch_type,
+            canonical_key=canonicalize_candidate_url(candidate_url),
+            evidence_sources=(ev.raw_field_path,) if ev.raw_field_path else (),
+            score=ev.authority_score,
+            confidence=ev.confidence,
+            downloadable=True,
+        )
+        existing = candidates_by_key.get(candidate.canonical_key)
+        if existing is None or existing.score < candidate.score:
+            candidates_by_key[candidate.canonical_key] = candidate
 
     return list(candidates_by_key.values())
