@@ -12,13 +12,15 @@
 ## 当前活跃事项
 
 - Active architecture ADR: `docs/design/adr-evidence-first-patch-engine.md`
-- Active execution prompt: `docs/design/codex-prompt-phase-a.md`（Phase A）；Phase B 待新 prompt 派生
+- Active execution prompt: `docs/design/codex-prompt-phase-a.md`（Phase A）；Phase B 由 `docs/superpowers/plans/2026-05-01-cve-evidence-first-phase-b.md` 承担；Phase C brainstorm 已建任务 `.trellis/tasks/05-01-phase-c-seed-fast-path/` 待派生 plan
 - Active spec: `docs/superpowers/specs/2026-04-25-cve-agent-boundary-refactor-design.md`（boundary refactor 历史基础，仍有效）
-- Active plan: `docs/superpowers/plans/2026-05-01-cve-evidence-first-phase-b.md`（Evidence-First Phase B execution plan，承载当前 dirty 工作区改动）
+- Active plan: `docs/superpowers/plans/2026-05-01-cve-evidence-first-phase-b.md`（Evidence-First Phase B execution plan；Plan 内 Task B.1/B.2 已合入主线，Task B.3/B.4/B.5 由 trellis 任务 `phase-b4-frontier-full-takeover` 接管完成）
 - Superseded plan: `docs/superpowers/plans/2026-04-25-cve-agent-boundary-refactor.md`（Phase 0/1/2 已完成，Phase 3 Task 3.1 首轮迭代完成后被 Evidence-First ADR 接管）
-- Active phase: Evidence-First Phase B in-progress（Phase A 主体已通过 commit `b046bb2` 接入主链；Phase B 已在 dirty worktree 启动 candidate_scoring 抽象、reference_matcher host 扩展、PatchCandidate 合入 frontier）
-- Current next checkpoint: 按新 Phase B plan 收口 dirty 改动 — ① 补 reference_matcher 4 类新 host 的回归测试 ② 修正 AOSP 与 Bugzilla 正则缺陷 ③ 决定 candidate_scoring 与 reference_matcher.CANDIDATE_PRIORITY 的接入路径（避免双源真相）
-- Last recorded baseline: mock candidate baseline PASS（旧 boundary plan Task 2.2 Step 5）。Phase A 接入后未复跑 baseline；Phase B 收口前需要重做 baseline 对比。
+- Active phase: **Evidence-First Phase B+ 已完成**（4 commits 合入 main：`dc48b7a` 候选优先级真相收敛 + `f0cfedb` candidate_generator 多 host fix_commit 扩展 + `9c68419` build_initial_frontier 接管 candidate_generator (reference_url 边界) + `bd05f30` 标注归一化边界为 Phase C 前置）；**Phase C 受控短路 brainstorm 已收敛**，等维护者批准启动实施（trellis 任务 `.trellis/tasks/05-01-phase-c-seed-fast-path/` 已建立完整 PRD / Decision Log / 7-commit 拆分计划）
+- Current next checkpoint: 启动 phase-c-seed-fast-path 实施前先补 candidate_generator reference_url 路径 normalize-before-match（phase-b4 留尾边界）+ 扩 acceptance script 加 CVE-2024-38545 scenario，再做 fast path feature flag + validate_seed_candidates 节点 + 图改造 + 详情页解释 + 双向 acceptance baseline
+- Last recorded baseline:
+  - mock-mode (rule-fallback-only profile): `backend/results/candidate-cve-evidence-first-phase-b-mock/acceptance_report.json` — CVE-2022-2509 PASS patches=6；CVE-2024-3094 PASS patches=5；与 baseline-cve-agent-boundary-refactor-mock compare `high_value_path_regressed=false / patch_quality_degraded=false`
+  - 真实样本 (dashscope-stable profile): `backend/results/candidate-cve-evidence-first-phase-b-live/acceptance_report.json` — CVE-2022-2509 PASS dur=81.1s patches=6；CVE-2024-3094 PASS dur=104.5s patches=1；total 185.6s；chain_completion_rate=1.0
 
 ## 当前权威主文档入口
 
