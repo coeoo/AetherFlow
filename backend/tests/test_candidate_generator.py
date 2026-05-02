@@ -64,6 +64,31 @@ def test_generates_candidate_from_reference_url_direct_patch() -> None:
     assert c.downloadable is True
 
 
+def test_generates_candidate_from_reference_url_mozilla_hg_rev() -> None:
+    # Mozilla NSS / Firefox 的 fix 在 hg.mozilla.org（Mercurial），
+    # reference_matcher 应识别 rev URL 并派生 raw-rev patch
+    evidence = [
+        PatchEvidence(
+            evidence_type="reference_url",
+            source="cve_official",
+            url="https://hg.mozilla.org/projects/nss/rev/abc1234567890abcdef1234567890abcdef12345",
+            authority_score=100,
+            confidence="high",
+        ),
+    ]
+    candidates = generate_candidates(evidence)
+    assert len(candidates) == 1
+    c = candidates[0]
+    assert c.candidate_type == "commit_patch"
+    assert c.patch_type == "mozilla_hg_commit_patch"
+    assert (
+        c.patch_url
+        == "https://hg.mozilla.org/projects/nss/raw-rev/abc1234567890abcdef1234567890abcdef12345"
+    )
+    assert c.downloadable is True
+    assert c.score == 100
+
+
 def test_normalizes_reference_url_fragment_before_match() -> None:
     # GitHub commit URL 带 fragment（如 #diff-1）经 normalize_frontier_url
     # 剥除后再 match，candidate_url 不应含 fragment（与 baseline seed-derived 等价）

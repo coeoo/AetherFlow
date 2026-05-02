@@ -226,6 +226,54 @@ def test_matcher_skips_aosp_path_with_double_plus_segments() -> None:
     )
 
 
+def test_matcher_converts_mozilla_hg_nss_rev_to_raw_rev() -> None:
+    # Mozilla NSS（projects/nss）的 rev URL → raw-rev patch
+    commit_id = "abc1234567890abcdef1234567890abcdef12345"
+    candidate = match_reference_url(
+        f"https://hg.mozilla.org/projects/nss/rev/{commit_id}"
+    )
+    assert candidate == {
+        "candidate_url": f"https://hg.mozilla.org/projects/nss/raw-rev/{commit_id}",
+        "patch_type": "mozilla_hg_commit_patch",
+    }
+
+
+def test_matcher_converts_mozilla_hg_central_rev_to_raw_rev() -> None:
+    # Firefox / mozilla-central 单段 repo path 形态
+    commit_id = "abcdef1234567890abcdef1234567890abcdef12"
+    candidate = match_reference_url(
+        f"https://hg.mozilla.org/mozilla-central/rev/{commit_id}"
+    )
+    assert candidate == {
+        "candidate_url": f"https://hg.mozilla.org/mozilla-central/raw-rev/{commit_id}",
+        "patch_type": "mozilla_hg_commit_patch",
+    }
+
+
+def test_matcher_converts_mozilla_hg_releases_esr_to_raw_rev() -> None:
+    # Firefox ESR (releases/mozilla-esr115) 多段 repo path 形态
+    commit_id = "1234567890abcdef1234567890abcdef12345678"
+    candidate = match_reference_url(
+        f"https://hg.mozilla.org/releases/mozilla-esr115/rev/{commit_id}"
+    )
+    assert candidate == {
+        "candidate_url": f"https://hg.mozilla.org/releases/mozilla-esr115/raw-rev/{commit_id}",
+        "patch_type": "mozilla_hg_commit_patch",
+    }
+
+
+def test_matcher_skips_mozilla_hg_file_or_log_path() -> None:
+    # hg.mozilla.org 的非 commit 形态（/file/、/log/、/shortlog/、/tags 等）应该跳过
+    for path in (
+        "/projects/nss/file/abc1234567890abcdef1234567890abcdef12345/lib/ssl/SSL.h",
+        "/mozilla-central/log",
+        "/mozilla-central/shortlog/abc1234567890abcdef1234567890abcdef12345",
+        "/projects/nss/rev/short",  # hash 太短
+    ):
+        url = f"https://hg.mozilla.org{path}"
+        assert match_reference_url(url) is None, f"应跳过: {url}"
+
+
 def test_matcher_converts_redhat_bugzilla_attachment_to_patch_url() -> None:
     candidate = match_reference_url("https://bugzilla.redhat.com/attachment.cgi?id=123456")
 

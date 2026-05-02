@@ -13,6 +13,12 @@ _BITBUCKET_COMMIT_RE = re.compile(r"^/[^/]+/[^/]+/commits?/[0-9a-f]{7,40}$", re.
 _BITBUCKET_PULL_RE = re.compile(r"^/[^/]+/[^/]+/pull-requests/\d+$", re.IGNORECASE)
 _GITEE_COMMIT_RE = re.compile(r"^/[^/]+/[^/]+/commit/[0-9a-f]{7,40}$", re.IGNORECASE)
 _AOSP_GITILES_COMMIT_RE = re.compile(r"^/(.+)/\+/([0-9a-f]{7,40})$", re.IGNORECASE)
+# Mozilla hg (Mercurial) repo path 多段，如 projects/nss / mozilla-central /
+# releases/mozilla-esr115 / comm-central；rev hash 至少 12 字符（hg 短哈希默认 12）
+_HG_MOZILLA_COMMIT_RE = re.compile(
+    r"^/((?:[a-z0-9_.-]+/)+)rev/([0-9a-f]{12,40})$",
+    re.IGNORECASE,
+)
 _BUGZILLA_HOSTS: set[str] = {
     "bugzilla.redhat.com",
     "bugzilla.suse.com",
@@ -157,6 +163,27 @@ def match_reference_url(url: str) -> dict[str, str] | None:
                 "patch_type": "aosp_commit_patch",
             }
 
+    # Mozilla hg.mozilla.org → raw-rev patch (覆盖 NSS / Firefox / Thunderbird /
+    # mozilla-central / comm-central / releases/mozilla-esr* 等 Mercurial 仓库)
+    if parsed.netloc == "hg.mozilla.org":
+        hg_match = _HG_MOZILLA_COMMIT_RE.match(parsed.path)
+        if hg_match is not None:
+            repo_path = hg_match.group(1).rstrip("/")
+            commit_id = hg_match.group(2)
+            return {
+                "candidate_url": urlunparse(
+                    (
+                        parsed.scheme,
+                        parsed.netloc,
+                        f"/{repo_path}/raw-rev/{commit_id}",
+                        "",
+                        "",
+                        "",
+                    )
+                ),
+                "patch_type": "mozilla_hg_commit_patch",
+            }
+
     # Bugzilla attachment → patch
     # 限定 hostname allowlist 与 path 形态，避免任意域名 /attachment.cgi 误匹配。
     if (
@@ -219,6 +246,7 @@ CANDIDATE_PRIORITY: dict[str, int] = {
     "github_commit_patch": 100,
     "gitlab_commit_patch": 100,
     "kernel_commit_patch": 100,
+    "mozilla_hg_commit_patch": 100,
     "bitbucket_commit_patch": 95,
     "gitee_commit_patch": 90,
     "aosp_commit_patch": 90,

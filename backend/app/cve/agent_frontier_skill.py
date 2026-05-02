@@ -14,6 +14,7 @@ HIGH_PRIORITY_UPSTREAM_PATCH_TYPES = {
     "github_commit_patch",
     "gitlab_commit_patch",
     "kernel_commit_patch",
+    "mozilla_hg_commit_patch",
     "bitbucket_commit_patch",
     "gitee_commit_patch",
     "aosp_commit_patch",
