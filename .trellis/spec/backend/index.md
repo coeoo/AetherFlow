@@ -25,6 +25,7 @@
 | [Error Handling](./error-handling.md) | API 响应格式 `{code, message, data}` + HTTPException + 长任务 stop_reason | Filled |
 | [Quality Guidelines](./quality-guidelines.md) | 测试规模 / 运行产物边界 / 敏感配置 / 提交质量 | Filled |
 | [Logging Guidelines](./logging-guidelines.md) | stdlib logging + `[CVE:%s]` 前缀 + `%s` 占位符 | Filled |
+| [CVE Conventions](./cve-conventions.md) | CVE 场景层非显然约定（acceptance 真实网络边界 / canonical_key 与 normalize 关系） | Filled |
 
 ---
 
