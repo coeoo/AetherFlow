@@ -64,6 +64,65 @@ def test_generates_candidate_from_reference_url_direct_patch() -> None:
     assert c.downloadable is True
 
 
+def test_normalizes_reference_url_fragment_before_match() -> None:
+    # GitHub commit URL 带 fragment（如 #diff-1）经 normalize_frontier_url
+    # 剥除后再 match，candidate_url 不应含 fragment（与 baseline seed-derived 等价）
+    evidence = [
+        PatchEvidence(
+            evidence_type="reference_url",
+            source="cve_official",
+            url="https://github.com/owner/repo/commit/abc123def456#diff-1",
+            authority_score=100,
+            confidence="high",
+        ),
+    ]
+    candidates = generate_candidates(evidence)
+    assert len(candidates) == 1
+    c = candidates[0]
+    assert c.patch_type == "github_commit_patch"
+    assert c.patch_url == "https://github.com/owner/repo/commit/abc123def456.patch"
+    assert "#" not in c.candidate_url
+
+
+def test_normalizes_reference_url_whitespace_before_match() -> None:
+    # reference_url 前后多余空白（来自 source 数据清洗不彻底），
+    # normalize_frontier_url 应 strip 后再 match
+    evidence = [
+        PatchEvidence(
+            evidence_type="reference_url",
+            source="nvd",
+            url="  https://github.com/owner/repo/commit/abc123def456  ",
+            authority_score=80,
+            confidence="medium",
+        ),
+    ]
+    candidates = generate_candidates(evidence)
+    assert len(candidates) == 1
+    c = candidates[0]
+    assert c.patch_type == "github_commit_patch"
+    assert c.patch_url == "https://github.com/owner/repo/commit/abc123def456.patch"
+    assert " " not in c.candidate_url
+
+
+def test_normalizes_reference_url_openwall_http_to_https() -> None:
+    # openwall mailing list URL 是 http 形态（来自 NVD reference 历史数据），
+    # normalize_frontier_url 应升级为 https；openwall 本身不是 commit/patch 域，
+    # match_reference_url 仍返回 None；但 normalize 不应丢弃 evidence
+    evidence = [
+        PatchEvidence(
+            evidence_type="reference_url",
+            source="nvd",
+            url="http://www.openwall.com/lists/oss-security/2022/07/01/2",
+            authority_score=60,
+            confidence="medium",
+        ),
+    ]
+    candidates = generate_candidates(evidence)
+    # openwall 不是 commit/patch URL，match 返回 None，无 candidate；
+    # 关键是函数不抛异常、不影响其他 evidence
+    assert candidates == []
+
+
 def test_deduplicates_by_canonical_key_keeping_highest_score() -> None:
     evidence = [
         PatchEvidence(
