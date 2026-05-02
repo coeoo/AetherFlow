@@ -4,3 +4,4 @@
 .env.local.bak.*
 backend/results/
 .claude/
+.playwright-cli/
