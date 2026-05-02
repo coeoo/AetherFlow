@@ -11,12 +11,17 @@ MAX_FRONTIER_PAGES = 10
 FRONTIER_PRIORITY_RULES: tuple[tuple[str, int], ...] = (
     ("security-tracker.debian.org/tracker/cve-", 30),
     ("security-tracker.debian.org/tracker/", 24),
+    # 厂商 advisory（含直接 patch URL 的概率高）：与 tracker 同档优先
+    ("access.redhat.com/errata/rhsa-", 22),
+    ("www.mozilla.org/security/advisories/mfsa", 22),
     ("www.openwall.com/lists/oss-security/", 20),
     ("openwall.com/lists/oss-security/", 20),
+    ("ubuntu.com/security/notices/usn-", 18),
     ("tracker.debian.org/pkg/", 18),
     ("www.debian.org/security/", 18),
     ("lists.debian.org/debian-security-announce/", 16),
     ("lists.debian.org/debian-lts-announce/", 14),
+    ("ubuntu.com/security/cve-", 14),
     ("nvd.nist.gov/vuln/detail/cve-", 10),
     ("access.redhat.com/security/cve/", 8),
     ("github.com/advisories/ghsa-", 7),
