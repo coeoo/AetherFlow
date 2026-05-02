@@ -54,16 +54,6 @@ def classify_page_role(url: str) -> str:
         or is_github_advisory
         or "ghsa-" in path
         or "/vuln/detail/" in path
-        # Red Hat Security Advisory: access.redhat.com/errata/RHSA-XXXX:XXXX
-        or (host == "access.redhat.com" and path.startswith("/errata/"))
-        # Ubuntu Security Notice: ubuntu.com/security/notices/USN-* + ubuntu.com/security/CVE-*
-        or (host.endswith("ubuntu.com") and path.startswith("/security/"))
-        # Mozilla Foundation Security Advisory: www.mozilla.org/security/advisories/mfsa20XX-XX/
-        or (host.endswith("mozilla.org") and "/security/advisories/" in path)
-        # SUSE / openSUSE security advisory pages
-        or (host.endswith("suse.com") and ("/security/cve" in path or "advisory" in path))
-        # GitLab GNOME / freedesktop security pages
-        or (host in ("gitlab.gnome.org", "gitlab.freedesktop.org") and "security" in path)
     ):
         return "advisory_page"
 
